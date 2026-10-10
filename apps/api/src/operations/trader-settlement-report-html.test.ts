@@ -212,13 +212,14 @@ describe("buildTraderSettlementStatementHtml", () => {
     expect(html).toContain("1706");
     expect(html).not.toContain("SER-FEE-1");
     expect(html).not.toContain("Service fee owed by Trader");
-    expect(html).toContain("-25.00");
-    expect(html).toContain("AED 75.00");
+    expect(html).toContain("−25.00");
+    // The invoice prints plain figures without an "AED" prefix.
+    expect(html).toContain('<bdi dir="ltr">75.00</bdi>');
     const summary = html.slice(
       html.indexOf('<section class="summary-section">'),
       html.indexOf('<div class="signatures">'),
     );
-    expect(summary).toContain("AED 35.00");
+    expect(summary).toContain('<bdi dir="ltr">35.00</bdi>');
   });
 
   it("shows a Money Received notice with reference and notes when confirmed", () => {
@@ -287,6 +288,68 @@ describe("buildTraderSettlementStatementHtml", () => {
       "ar",
     );
     expect(otherArabic).toContain("أرسله");
+  });
+
+  it("prints the compact invoice (no Delivery Date, COD Amount or Service Fee) for XYZ Deliver services only", () => {
+    const xyz = { ...sample, companyId: "dd28829b-2b7c-4851-a0be-181b92673e84" };
+    const headerCells = (html: string) =>
+      (html.split("<tbody>")[0]?.split("<thead>")[1]?.match(/<th[ >]/g) ?? []).length;
+    for (const language of ["en", "ar"] as const) {
+      const html = buildTraderSettlementStatementHtml(xyz, language);
+      const labels =
+        language === "en"
+          ? { cod: "COD Amount", date: "Delivery Date", fee: "Service Fee", paid: "Amount Paid Now" }
+          : { cod: null, date: "تاريخ التسليم", fee: null, paid: null };
+      expect(html).not.toContain(labels.date);
+      if (labels.cod !== null) expect(html).not.toContain(labels.cod);
+      if (labels.fee !== null) expect(html).not.toContain(labels.fee);
+      if (labels.paid !== null) expect(html).toContain(labels.paid);
+      // The COD (110.00) and fee (10.00) figures are gone; the paid amount stays.
+      expect(html).not.toContain("110.00");
+      expect(html).toContain("100.00");
+      expect(headerCells(html)).toBe(8);
+    }
+    const other = buildTraderSettlementStatementHtml(
+      { ...sample, companyId: "4d9095cb-3da6-4b8b-9d8e-ff01f8192bdb" },
+      "en",
+    );
+    expect(other).toContain("Delivery Date");
+    expect(other).toContain("COD Amount");
+    expect(other).toContain("Service Fee");
+    expect(other).toContain("110.00");
+    expect(headerCells(other)).toBe(11);
+  });
+
+  it("shows an XYZ Trader fee deduction as a negative Amount Paid Now with matching cell counts", () => {
+    const xyzWithDeduction: TraderSettlementReportData = {
+      ...sample,
+      companyId: "dd28829b-2b7c-4851-a0be-181b92673e84",
+      receivableOffsets: [
+        {
+          amountApplied: "25.00",
+          businessDate: "2026-07-19",
+          customerMobileNumber: null,
+          customerName: null,
+          orderSerialNumber: "SER-FEE-1",
+          orderNumber: "ORD-FEE-1",
+          referenceNumber: "1706",
+          reason: "Service fee owed by Trader",
+          receivableNumber: "RCV-000123",
+          sourceReference: "ORD-FEE-1",
+          sourceType: "service_charge",
+        },
+      ],
+      summary: { ...sample.summary, netPayment: "75.00", traderFeeDeductions: "25.00" },
+    };
+    const html = buildTraderSettlementStatementHtml(xyzWithDeduction, "en");
+    expect(html).toContain("ORD-FEE-1");
+    expect(html).toContain("−25.00");
+    expect(html).toContain("75.00");
+    expect(html).not.toContain("2026-07-19");
+    const body = html.split("<tbody>")[1]?.split("</tbody>")[0] ?? "";
+    const rows = body.split("<tr>").slice(1);
+    expect(rows).toHaveLength(2);
+    for (const row of rows) expect((row.match(/<td[ >]/g) ?? []).length).toBe(8);
   });
 
   it("omits the notices section entirely for a plain, un-reversed, not-yet-received settlement", () => {

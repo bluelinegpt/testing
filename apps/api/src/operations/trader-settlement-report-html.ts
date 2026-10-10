@@ -306,6 +306,11 @@ export function buildTraderSettlementStatementHtml(
   const dir = language === "ar" ? "rtl" : "ltr";
   const header = data.header;
   const isFahdAlMalikiCompany = data.companyId === "2f0703c3-2b3b-45ef-a6ab-de9b3694c0a1";
+  // XYZ Deliver services asked (11 Oct 2026) for a compact Trader Invoice PDF:
+  // no Delivery Date, COD Amount or Service Fee -- only Amount Paid Now, in the
+  // table and in the summary. Every other Company keeps the full invoice.
+  const isCompactInvoiceCompany = data.companyId === "dd28829b-2b7c-4851-a0be-181b92673e84";
+  const showFullColumns = !isCompactInvoiceCompany;
 
   const orderRows = data.orders
     .map(
@@ -314,38 +319,47 @@ export function buildTraderSettlementStatementHtml(
         `<td class="num">${index + 1}</td>` +
         `<td class="mono">${escapeHtml(order.orderNumber)}</td>` +
         `<td class="mono">${order.referenceNumber === null ? "" : escapeHtml(order.referenceNumber)}</td>` +
-        `<td>${dateOnly(order.deliveryDate)}</td>` +
+        (showFullColumns ? `<td>${dateOnly(order.deliveryDate)}</td>` : "") +
         `<td>${escapeHtml(order.customerName)}</td>` +
         `<td>${escapeHtml(order.customerMobileNumber)}</td>` +
         `<td>${escapeHtml(language === "ar" ? (order.emirateNameAr ?? order.emirateName ?? "") : (order.emirateName ?? ""))}</td>` +
         `<td>${escapeHtml(language === "ar" ? (order.areaNameAr ?? order.areaName) : order.areaName)}</td>` +
-        `<td class="num">${tableMoney(order.codAmount)}</td>` +
-        `<td class="num">${tableMoney(order.serviceFee)}</td>` +
+        (showFullColumns
+          ? `<td class="num">${tableMoney(order.codAmount)}</td>` +
+            `<td class="num">${tableMoney(order.serviceFee)}</td>`
+          : "") +
         `<td class="num">${tableMoney(order.amountPaidNow)}</td>` +
         "</tr>",
     )
     .join("");
+  // Money headers take `num` too, so a header and the figures beneath it
+  // resolve to the SAME edge. They previously disagreed: `text-align: end` on
+  // the cells resolves to LEFT under dir="rtl" while the plain headers used
+  // `start`, i.e. right.
+  const headerColumns: readonly { readonly label: string; readonly numeric: boolean }[] = [
+    { label: labels.lineNumber, numeric: false },
+    { label: labels.orderNumber, numeric: false },
+    { label: labels.externalReference, numeric: false },
+    ...(showFullColumns ? [{ label: labels.deliveryDate, numeric: false }] : []),
+    { label: labels.customer, numeric: false },
+    { label: labels.customerMobile, numeric: false },
+    { label: labels.emirate, numeric: false },
+    { label: labels.area, numeric: false },
+    ...(showFullColumns
+      ? [
+          { label: labels.cod, numeric: true },
+          { label: labels.serviceFee, numeric: true },
+        ]
+      : []),
+    { label: labels.amountPaidNow, numeric: true },
+  ];
   const orderTable =
     `<table class="grid"><thead><tr>` +
-    [
-      labels.lineNumber,
-      labels.orderNumber,
-      labels.externalReference,
-      labels.deliveryDate,
-      labels.customer,
-      labels.customerMobile,
-      labels.emirate,
-      labels.area,
-      labels.cod,
-      labels.serviceFee,
-      labels.amountPaidNow,
-    ]
-      // The three money headers take `num` too, so a header and the figures
-      // beneath it resolve to the SAME edge. They previously disagreed:
-      // `text-align: end` on the cells resolves to LEFT under dir="rtl" while
-      // the plain headers used `start`, i.e. right.
-      .map((label, index) =>
-        index >= 8 ? `<th class="num">${escapeHtml(label)}</th>` : `<th>${escapeHtml(label)}</th>`,
+    headerColumns
+      .map((column) =>
+        column.numeric
+          ? `<th class="num">${escapeHtml(column.label)}</th>`
+          : `<th>${escapeHtml(column.label)}</th>`,
       )
       .join("") +
     `</tr></thead><tbody>${orderRows}`;
@@ -357,19 +371,24 @@ export function buildTraderSettlementStatementHtml(
         `<td class="num">${data.orders.length + index + 1}</td>` +
         `<td class="mono">${escapeHtml(line.orderNumber ?? line.sourceReference ?? "")}</td>` +
         `<td class="mono">${escapeHtml(line.referenceNumber ?? "")}</td>` +
-        `<td>${dateOnly(line.businessDate)}</td>` +
+        (showFullColumns ? `<td>${dateOnly(line.businessDate)}</td>` : "") +
         `<td>${escapeHtml(line.customerName ?? "")}</td>` +
         `<td class="mono">${escapeHtml(line.customerMobileNumber ?? "")}</td>` +
         `<td>${escapeHtml(language === "ar" ? (line.emirateNameAr ?? line.emirateName ?? "") : (line.emirateName ?? ""))}</td>` +
-        `<td>${escapeHtml(language === "ar" ? (line.areaNameAr ?? line.areaName ?? "") : (line.areaName ?? ""))}</td><td class="num">${ZERO_CELL}</td>` +
-        `<td class="num negative">${tableMoney(line.amountApplied, true)}</td>` +
-        `<td class="num">${ZERO_CELL}</td>` +
-        // NOTE: exactly ELEVEN cells, matching the header. There was a twelfth
-        // empty <td> here, so every deduction row was one cell wider than the
-        // head and the order rows. The table then laid out TWELVE columns, the
-        // extra one measuring 13px, which squeezed every real column and left
-        // a sliver only these rows occupied -- the misalignment visible on
-        // SET-000011.
+        `<td>${escapeHtml(language === "ar" ? (line.areaNameAr ?? line.areaName ?? "") : (line.areaName ?? ""))}</td>` +
+        // Full invoice: the deduction sits under Service Fee and Amount Paid
+        // Now shows 0.00. Compact invoice has no Service Fee column, so the
+        // deduction shows as a negative Amount Paid Now -- the column then
+        // still adds up to the summary's Amount Paid Now.
+        (showFullColumns
+          ? `<td class="num">${ZERO_CELL}</td>` +
+            `<td class="num negative">${tableMoney(line.amountApplied, true)}</td>` +
+            `<td class="num">${ZERO_CELL}</td>`
+          : `<td class="num negative">${tableMoney(line.amountApplied, true)}</td>`) +
+        // NOTE: the cell count must equal headerColumns.length (eleven full,
+        // eight compact). There was once a twelfth empty <td> here, so every
+        // deduction row was one cell wider than the head and the table laid
+        // out an extra 13px column -- the misalignment visible on SET-000011.
         "</tr>",
     )
     .join("");
@@ -496,11 +515,13 @@ export function buildTraderSettlementStatementHtml(
   const summary =
     `<section class="summary-section">` +
     `<h2 class="section-title">${escapeHtml(labels.numberOfOrders)}: ${totalDetailRows}</h2>` +
-    summaryLine(labels.cod, money(data.summary.totalCod)) +
-    summaryLine(
-      labels.serviceFee,
-      money(new Decimal(data.summary.totalServiceFees).plus(data.summary.traderFeeDeductions).toFixed(2)),
-    ) +
+    (showFullColumns
+      ? summaryLine(labels.cod, money(data.summary.totalCod)) +
+        summaryLine(
+          labels.serviceFee,
+          money(new Decimal(data.summary.totalServiceFees).plus(data.summary.traderFeeDeductions).toFixed(2)),
+        )
+      : "") +
     summaryLine(labels.amountPaidNow, money(data.summary.netPayment)) +
     `</section>`;
 
