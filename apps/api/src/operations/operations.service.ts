@@ -44,6 +44,7 @@ import { traderCommerceOrderScopePairs } from "./trader-commerce-order-scope.js"
 import { mobileComparisonKey, normalizeUaeMobile } from "../shared/uae-mobile.js";
 import { PushOutboxWriter } from "../push/push-outbox-writer.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
+import { driverCashStatusAfterStatusChange } from "./driver-cash-status-rule.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
 import { EmployeeDeliveryEarningService } from "../payroll/employee-delivery-earning.service.js";
@@ -6262,17 +6263,15 @@ export class OperationsService {
         traderPayable === 0;
       const amountCollected =
         status === "hold" ? Number(order.amountCollected) : status === "delivered" ? amountDue : 0;
-      const reconciliationStatus =
-        status === "hold"
-          ? order.driverReconciliationStatus
-          : status === "delivered" &&
-              order.assignedDriverId !== null &&
-              amountDue > 0 &&
-              !deliveredFreeNoValue
-            ? "pending"
-            : status === "closed"
-              ? order.driverReconciliationStatus
-              : "not_applicable";
+      // Zero-collection deliveries now become `pending` too (Option A, 10 Oct 2026).
+      const reconciliationStatus = driverCashStatusAfterStatusChange({
+        assignedDriverId: order.assignedDriverId,
+        currentDriverReconciliationStatus: order.driverReconciliationStatus,
+        customerAmountDue: amountDue,
+        isFreeOrder: order.isFreeOrder,
+        status,
+        traderNetPayable: traderPayable,
+      });
       const returnStatus =
         status === "hold"
           ? order.returnStatus

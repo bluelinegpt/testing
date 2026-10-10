@@ -16,6 +16,7 @@ import { OutsourcedDriverFeeService } from "../payroll/outsourced-driver-fee.ser
 import { deliveryStatusFilterPredicate } from "./delivery-status-filter.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import { resolveOrderCancellationReason } from "./order-cancellation-reason.js";
+import { driverCashStatusAfterStatusChange } from "./driver-cash-status-rule.js";
 import type {
   BulkAssignDriverDto,
   BulkChangeOrderStatusDto,
@@ -547,17 +548,15 @@ export class OrdersWorkflowService {
       order.isFreeOrder === true &&
       amountDue === 0 &&
       noTraderPaymentDue;
-    const reconciliationStatus =
-      status === "hold"
-        ? order.driverReconciliationStatus
-        : status === "delivered" &&
-            order.assignedDriverId !== null &&
-            amountDue > 0 &&
-            !deliveredFreeNoValue
-          ? "pending"
-          : status === "closed"
-            ? order.driverReconciliationStatus
-            : "not_applicable";
+    // Zero-collection deliveries now become `pending` too (Option A, 10 Oct 2026).
+    const reconciliationStatus = driverCashStatusAfterStatusChange({
+      assignedDriverId: order.assignedDriverId,
+      currentDriverReconciliationStatus: order.driverReconciliationStatus,
+      customerAmountDue: amountDue,
+      isFreeOrder: order.isFreeOrder,
+      status,
+      traderNetPayable: traderPayable,
+    });
     const returnStatus =
       status === "hold"
         ? order.returnStatus
