@@ -1,5 +1,6 @@
 import 'package:bluelinegpt_mobile/features/operator_workflow/operator_models.dart';
 import 'package:bluelinegpt_mobile/features/operator_workflow/operator_pages.dart';
+import 'package:bluelinegpt_mobile/features/operator_workflow/operator_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -220,5 +221,21 @@ void main() {
         expect(summary.statusCount('cancelled'), 0);
       },
     );
+  });
+
+  test('an Order without a customer name or serial still lists', () {
+    final order = ApiOperatorRepository.parseOrder({
+      'id': 'o-1',
+      'orderNumber': 'ORD-000078',
+      'deliveryStatus': 'out_for_delivery',
+      'referenceNumber': '15956',
+      'customerName': '',
+      'customerMobileNumber': '554633566',
+      'customerAmountDue': '30.00',
+    });
+    expect(order.reference, '15956');
+    expect(order.customerName, isEmpty);
+    expect(order.serialNumber, isEmpty);
+    expect(order.cod, '30.00');
   });
 }

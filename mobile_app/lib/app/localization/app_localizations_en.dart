@@ -820,7 +820,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get routeDone => 'Done';
 
   @override
-  String get routeNewArea => 'New — replan to place it';
+  String get routeNewArea => 'Added';
 
   @override
   String get routeUnsequenced => 'Not sequenced (no pin)';

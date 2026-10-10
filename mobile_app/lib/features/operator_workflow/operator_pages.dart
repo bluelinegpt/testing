@@ -130,7 +130,9 @@ final class _OperatorOrdersPageState extends ConsumerState<OperatorOrdersPage> {
                   orderNumber: order.orderNumber,
                   externalReference: order.reference,
                   serialNumber: order.serialNumber,
-                  customerName: order.customerName,
+                  customerName: order.customerName.isEmpty
+                      ? null
+                      : order.customerName,
                   mobileNumber: order.customerMobile,
                   area: order.areaName,
                   addressSummary: order.address,
@@ -470,7 +472,9 @@ final class _OperatorOrderDetailsPageState
                 orderNumber: order.orderNumber,
                 externalReference: order.reference,
                 serialNumber: order.serialNumber,
-                customerName: order.customerName,
+                customerName: order.customerName.isEmpty
+                    ? null
+                    : order.customerName,
                 mobileNumber: order.customerMobile,
                 area: order.areaName,
                 addressSummary: order.address,

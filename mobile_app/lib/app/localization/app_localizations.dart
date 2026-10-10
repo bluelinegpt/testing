@@ -1649,7 +1649,7 @@ abstract class AppLocalizations {
   /// No description provided for @routeNewArea.
   ///
   /// In en, this message translates to:
-  /// **'New — replan to place it'**
+  /// **'Added'**
   String get routeNewArea;
 
   /// No description provided for @routeUnsequenced.

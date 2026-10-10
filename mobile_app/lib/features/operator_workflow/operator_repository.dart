@@ -1,5 +1,6 @@
 import 'package:bluelinegpt_mobile/core/network/api_client.dart';
 import 'package:bluelinegpt_mobile/features/operator_workflow/operator_models.dart';
+import 'package:flutter/foundation.dart';
 
 abstract interface class OperatorRepository {
   Future<OperatorDashboardSummary> dashboardSummary();
@@ -120,24 +121,32 @@ final class ApiOperatorRepository implements OperatorRepository {
     );
   }
 
+  /// One Orders-list item, parsed the way the list parses it.
+  @visibleForTesting
+  static OperatorOrder parseOrder(Map<String, dynamic> value) => _order(value);
+
   static OperatorOrder _order(
     Map<String, dynamic> value, {
     bool includeHistory = false,
   }) => OperatorOrder(
     id: _required(value, 'id'),
     orderNumber: _required(value, 'orderNumber'),
-    serialNumber: _required(value, 'serialNumber'),
+    // Only what identifies the Order is required. Display fields fall back
+    // instead of failing: one Order saved without a customer name (common
+    // with Fast Entry) used to make the whole list "Data is currently
+    // unavailable".
+    serialNumber: _optionalText(value, 'serialNumber'),
     psystemSerial: value['psystemSerial'] as String?,
-    orderDate: _required(value, 'orderDate'),
-    traderName: _required(value, 'traderName'),
-    customerName: _required(value, 'customerName'),
-    customerMobile: _required(value, 'customerMobileNumber'),
+    orderDate: _optionalText(value, 'orderDate'),
+    traderName: _optionalText(value, 'traderName'),
+    customerName: _optionalText(value, 'customerName'),
+    customerMobile: _optionalText(value, 'customerMobileNumber'),
     // Existing/legacy Orders can lack a captured address. That must not hide
     // the entire Company order list; detail and editing flows remain server
     // authoritative for correcting the Order record.
     address: _optionalText(value, 'customerAddress'),
-    areaName: _required(value, 'areaName'),
-    cod: _required(value, 'customerAmountDue'),
+    areaName: _optionalText(value, 'areaName'),
+    cod: _optionalText(value, 'customerAmountDue', fallback: '0.00'),
     status: _required(value, 'deliveryStatus'),
     reference: value['referenceNumber'] as String?,
     driverId: value['assignedDriverId'] as String?,
@@ -186,8 +195,8 @@ final class ApiOperatorRepository implements OperatorRepository {
     return result;
   }
 
-  static String _optionalText(Map value, String key) {
+  static String _optionalText(Map value, String key, {String fallback = ''}) {
     final result = value[key];
-    return result is String ? result : '';
+    return result is String && result.isNotEmpty ? result : fallback;
   }
 }

@@ -813,7 +813,7 @@ class AppLocalizationsAr extends AppLocalizations {
   String get routeDone => 'تم';
 
   @override
-  String get routeNewArea => 'جديدة — أعد التخطيط لترتيبها';
+  String get routeNewArea => 'أضيفت';
 
   @override
   String get routeUnsequenced => 'غير مرتبة (بدون موقع)';

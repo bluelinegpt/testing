@@ -85,22 +85,25 @@ final class ApiDriverRepository implements DriverRepository {
     return _order(Map<String, dynamic>.from(response.data! as Map));
   }
 
+  /// Only what identifies the Order is required. A display field that is
+  /// empty (an Order saved without a customer name or address, which Fast
+  /// Entry allows) falls back instead of failing the Driver's whole list.
   static DriverOrder _order(Map<String, dynamic> value) => DriverOrder(
     id: _required(value, 'id'),
     orderNumber: _required(value, 'orderNumber'),
-    serialNumber: _required(value, 'serialNumber'),
+    serialNumber: _text(value, 'serialNumber'),
     psystemSerial: value['psystemSerial'] as String?,
-    orderDate: _required(value, 'orderDate'),
-    areaId: _required(value, 'areaId'),
-    areaName: _required(value, 'areaName'),
-    customerName: _required(value, 'customerName'),
-    customerMobile: _required(value, 'customerMobileNumber'),
-    address: _required(value, 'customerAddress'),
-    expectedCod: _required(value, 'customerAmountDue'),
-    amountCollected: _required(value, 'amountCollected'),
+    orderDate: _text(value, 'orderDate'),
+    areaId: _text(value, 'areaId'),
+    areaName: _text(value, 'areaName'),
+    customerName: _text(value, 'customerName'),
+    customerMobile: _text(value, 'customerMobileNumber'),
+    address: _text(value, 'customerAddress'),
+    expectedCod: _text(value, 'customerAmountDue', fallback: '0.00'),
+    amountCollected: _text(value, 'amountCollected', fallback: '0.00'),
     status: _required(value, 'deliveryStatus'),
     driverReconciliationStatus: value['driverReconciliationStatus'] as String?,
-    traderName: _required(value, 'traderName'),
+    traderName: _text(value, 'traderName'),
     reference: value['referenceNumber'] as String?,
     notes: value['notes'] as String?,
     emirateNameEn: value['emirateNameEn'] as String?,
@@ -113,6 +116,15 @@ final class ApiDriverRepository implements DriverRepository {
         occurredAt: _required(value, 'occurredAt'),
         fromStatus: value['fromStatus'] as String?,
       );
+
+  static String _text(
+    Map<String, dynamic> value,
+    String key, {
+    String fallback = '',
+  }) {
+    final result = value[key];
+    return result is String && result.isNotEmpty ? result : fallback;
+  }
 
   static String _required(Map<String, dynamic> value, String key) {
     final result = value[key];

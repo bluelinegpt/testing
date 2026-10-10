@@ -261,7 +261,9 @@ final class _DriverOrdersPageState extends ConsumerState<DriverOrdersPage> {
                           orderNumber: order.orderNumber,
                           externalReference: order.reference,
                           serialNumber: order.serialNumber,
-                          customerName: order.customerName,
+                          customerName: order.customerName.isEmpty
+                              ? null
+                              : order.customerName,
                           mobileNumber: order.customerMobile,
                           area: order.areaName,
                           addressSummary: order.address,

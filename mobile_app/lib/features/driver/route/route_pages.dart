@@ -229,11 +229,16 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
         ),
   );
 
+  /// [from] and [to] index the Areas still to visit; finished Areas keep
+  /// their place after them.
   Future<void> _moveArea(RouteRun run, int from, int to) {
-    final areas = [...run.areas];
-    final moved = areas.removeAt(from);
-    areas.insert(to > from ? to - 1 : to, moved);
-    return _saveOrder(run, areas);
+    final pending = [for (final area in run.areas) if (!area.isDone) area];
+    final moved = pending.removeAt(from);
+    pending.insert(to > from ? to - 1 : to, moved);
+    return _saveOrder(run, [
+      ...pending,
+      for (final area in run.areas) if (area.isDone) area,
+    ]);
   }
 
   Future<void> _moveOrder(RouteRun run, RouteArea area, int index, int step) {
@@ -324,6 +329,12 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
           text: l10n.routePartialNotice,
         ),
     ];
+    final pendingAreas = run == null
+        ? const <RouteArea>[]
+        : [for (final area in run.areas) if (!area.isDone) area];
+    final doneAreas = run == null
+        ? const <RouteArea>[]
+        : [for (final area in run.areas) if (area.isDone) area];
     if (run != null && run.isStarted) {
       return RefreshIndicator(
         onRefresh: _refresh,
@@ -414,7 +425,7 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
                 ),
               ),
             const SizedBox(height: AppSpacing.sm),
-            if (run.areas.isEmpty)
+            if (pendingAreas.isEmpty)
               AppEmptyState(message: l10n.routeNoStops)
             else ...[
               Text(
@@ -430,7 +441,7 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
                   if (actionsEnabled) _moveArea(run, from, to);
                 },
                 children: [
-                  for (final (index, area) in run.areas.indexed)
+                  for (final (index, area) in pendingAreas.indexed)
                     _AreaTile(
                       key: ValueKey(area.areaId),
                       index: index,
@@ -446,6 +457,21 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
                 ],
               ),
             ],
+            if (doneAreas.isNotEmpty)
+              Card(
+                child: ExpansionTile(
+                  leading: const Icon(Icons.check_circle, color: AppColors.success),
+                  title: Text('${l10n.routeDone} (${doneAreas.length})'),
+                  children: [
+                    for (final area in doneAreas)
+                      ListTile(
+                        dense: true,
+                        title: Text(area.areaName(locale)),
+                        subtitle: Text(area.emirateName(locale)),
+                      ),
+                  ],
+                ),
+              ),
             if (run.deferredOrders.isNotEmpty) ...[
               const SizedBox(height: AppSpacing.md),
               Text(
@@ -457,7 +483,7 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
             ],
             const SizedBox(height: AppSpacing.md),
             FilledButton.icon(
-              onPressed: actionsEnabled && run.areas.isNotEmpty
+              onPressed: actionsEnabled && pendingAreas.isNotEmpty
                   ? () => _startTrip(run)
                   : null,
               icon: const Icon(Icons.play_arrow_rounded),
@@ -626,8 +652,9 @@ final class _CurrentStopCard extends StatelessWidget {
             style: theme.textTheme.titleMedium,
           ),
           const SizedBox(height: AppSpacing.xs),
-          Text(order.customerName ?? order.orderNumber),
-          Text(order.label, style: theme.textTheme.bodySmall),
+          Text(order.label, style: theme.textTheme.titleLarge),
+          if (order.customerName?.trim().isNotEmpty ?? false)
+            Text(order.customerName!.trim()),
           if (address.trim().isNotEmpty) Text(address),
           if (order.amountDue case final amount?)
             Text(
@@ -845,10 +872,13 @@ final class _OrderTile extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     return ListTile(
       dense: true,
-      title: Text(order.customerName ?? order.orderNumber),
+      // The reference number is what the Driver and the trader quote, so it
+      // leads; the customer name follows when there is one.
+      title: Text(order.label),
       subtitle: Text(
         [
-          order.label,
+          if (order.customerName?.trim().isNotEmpty ?? false)
+            order.customerName!.trim(),
           if (area case final place?) place.areaName(locale),
           if (order.noAnswerCount > 0)
             '${l10n.routeNoAnswerCount} ×${order.noAnswerCount}',
