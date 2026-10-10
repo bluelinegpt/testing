@@ -64,7 +64,7 @@ export class AreaConfigurationController {
 
   @ApiOperation({ summary: "List the UAE Emirate master" })
   @RequirePermissions()
-  @RequireAnyPermission("orders.create", "users_roles.manage")
+  @RequireAnyPermission("orders.create", "traders.manage", "users_roles.manage")
   @Get("emirates")
   public emirates(): Promise<readonly Emirate[]> {
     return this.areas.emirates();
@@ -72,7 +72,7 @@ export class AreaConfigurationController {
 
   @ApiOperation({ summary: "List Areas with search, Emirate and status filters" })
   @RequirePermissions()
-  @RequireAnyPermission("orders.create", "users_roles.manage")
+  @RequireAnyPermission("orders.create", "traders.manage", "users_roles.manage")
   @Get("areas")
   public list(@Query() query: AreaListQueryDto): Promise<AreaPage> {
     return this.areas.list(query);
@@ -80,7 +80,7 @@ export class AreaConfigurationController {
 
   @ApiOperation({ summary: "Typeahead search over Areas for the shared selector" })
   @RequirePermissions()
-  @RequireAnyPermission("orders.create", "users_roles.manage")
+  @RequireAnyPermission("orders.create", "traders.manage", "users_roles.manage")
   @Get("areas/search")
   public search(@Query() query: AreaSearchQueryDto): Promise<AreaSearchPage> {
     return this.areas.search(query);
@@ -88,7 +88,7 @@ export class AreaConfigurationController {
 
   @ApiOperation({ summary: "Return one Area" })
   @RequirePermissions()
-  @RequireAnyPermission("orders.create", "users_roles.manage")
+  @RequireAnyPermission("orders.create", "traders.manage", "users_roles.manage")
   @Get("areas/:areaId")
   public get(@Param("areaId", ParseUUIDPipe) areaId: string): Promise<ConfiguredArea> {
     return this.areas.get(areaId);

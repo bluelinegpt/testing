@@ -37,7 +37,10 @@ import {
 @ApiTags("trader-configuration")
 @ApiBearerAuth()
 @RequireIdentityKinds("company_user")
-@RequireAnyPermission("users_roles.manage")
+// Trader master data: administrators, or a Role given traders.manage. The
+// list and detail reads below also admit trader_portal_users.manage so a
+// Role that only creates Trader Portal logins can reach the Trader.
+@RequireAnyPermission("traders.manage", "users_roles.manage")
 @Controller("configuration/traders")
 export class TraderConfigurationController {
   public constructor(
@@ -45,6 +48,7 @@ export class TraderConfigurationController {
   ) {}
 
   @Get()
+  @RequireAnyPermission("traders.manage", "trader_portal_users.manage", "users_roles.manage")
   @ApiOperation({ summary: "List Company Traders with server-side filtering" })
   public list(@Query() query: Record<string, string>): Promise<TraderPage<TraderSummary>> {
     return this.traders.traders(query);
@@ -58,6 +62,7 @@ export class TraderConfigurationController {
     return this.traders.create(input, this.correlationId(request));
   }
 
+  @RequireAnyPermission("traders.manage", "trader_portal_users.manage", "users_roles.manage")
   @Get(":code")
   public detail(@Param("code") code: string): Promise<Record<string, unknown>> {
     return this.traders.trader(code);
@@ -112,8 +117,8 @@ export class TraderConfigurationController {
   // Read-only: widened so the Trader Settlement payment form (which runs on
   // settlements.create, not users_roles.manage) can list a Trader's beneficiary
   // bank accounts to select from. Every write route on this controller keeps
-  // the class-level users_roles.manage-only gate.
-  @RequireAnyPermission("settlements.create", "users_roles.manage")
+  // the class-level traders.manage / users_roles.manage gate.
+  @RequireAnyPermission("settlements.create", "traders.manage", "users_roles.manage")
   @Get(":traderId/bank-accounts")
   public banks(
     @Param("traderId", new ParseUUIDPipe()) traderId: string,

@@ -7,6 +7,7 @@ import { UserAdministrationService } from "./user-administration.service.js";
 import {
   BusinessSystemAccessController,
   LegacyBusinessLinkController,
+  TraderPortalAccessController,
 } from "./user-business-access.controller.js";
 import { UserBusinessAccessService } from "./user-business-access.service.js";
 
@@ -14,6 +15,7 @@ import { UserBusinessAccessService } from "./user-business-access.service.js";
   controllers: [
     UserAdministrationController,
     BusinessSystemAccessController,
+    TraderPortalAccessController,
     LegacyBusinessLinkController,
   ],
   imports: [AuthenticationModule],

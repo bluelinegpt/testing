@@ -14,6 +14,7 @@ import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import type { Request } from "express";
 
 import {
+  RequireAnyPermission,
   RequireIdentityKinds,
   RequirePermissions,
 } from "../authentication/authentication.decorators.js";
@@ -93,6 +94,53 @@ export class BusinessSystemAccessController {
   ) {
     return this.access.link("driver", id, body.accountId, correlation(req), key);
   }
+  @Post("business-access/:linkId/suspend") suspend(
+    @Param("linkId", new ParseUUIDPipe()) id: string,
+    @Body() body: BusinessAccessReasonDto,
+    @Req() req: Request,
+  ) {
+    return this.access.transition(id, "suspended", body.reason, correlation(req));
+  }
+  @Post("business-access/:linkId/restore") restore(
+    @Param("linkId", new ParseUUIDPipe()) id: string,
+    @Req() req: Request,
+  ) {
+    return this.access.transition(id, "active", undefined, correlation(req));
+  }
+  @Post("business-access/:linkId/revoke") revoke(
+    @Param("linkId", new ParseUUIDPipe()) id: string,
+    @Body() body: BusinessAccessReasonDto,
+    @Req() req: Request,
+  ) {
+    return this.access.transition(id, "revoked", body.reason, correlation(req));
+  }
+  @Post("business-access/:linkId/revoke-sessions") sessions(
+    @Param("linkId", new ParseUUIDPipe()) id: string,
+    @Req() req: Request,
+  ) {
+    return this.access.revokeProfileSessions(id, correlation(req));
+  }
+}
+
+/**
+ * Trader Portal logins, for administrators or a Role given
+ * trader_portal_users.manage. Its own class because the staff/driver access
+ * controller requires users_roles.manage for every route. Trader Portal
+ * accounts are trader-kind only and never carry Company roles, so this cannot
+ * be used to create or reach a staff login. Suspend/restore here only accept a
+ * link that belongs to this Trader; revoking access, password resets and the
+ * user account itself stay with users_roles.manage.
+ */
+@ApiTags("business-system-access")
+@ApiBearerAuth()
+@RequireIdentityKinds("company_user")
+@RequireAnyPermission("trader_portal_users.manage", "users_roles.manage")
+@Controller("configuration")
+export class TraderPortalAccessController {
+  public constructor(
+    @Inject(UserBusinessAccessService) private readonly access: UserBusinessAccessService,
+  ) {}
+
   @Get("traders/:id/portal-users") trader(@Param("id", new ParseUUIDPipe()) id: string) {
     return this.access.list("trader", id);
   }
@@ -125,32 +173,26 @@ export class BusinessSystemAccessController {
   ) {
     return this.access.link("trader", id, body.accountId, correlation(req), key);
   }
-
-  @Post("business-access/:linkId/suspend") suspend(
-    @Param("linkId", new ParseUUIDPipe()) id: string,
+  @Post("traders/:id/portal-users/:linkId/suspend") traderSuspend(
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @Param("linkId", new ParseUUIDPipe()) linkId: string,
     @Body() body: BusinessAccessReasonDto,
     @Req() req: Request,
   ) {
-    return this.access.transition(id, "suspended", body.reason, correlation(req));
+    return this.access.transition(linkId, "suspended", body.reason, correlation(req), {
+      entityId: id,
+      profileType: "trader",
+    });
   }
-  @Post("business-access/:linkId/restore") restore(
-    @Param("linkId", new ParseUUIDPipe()) id: string,
+  @Post("traders/:id/portal-users/:linkId/restore") traderRestore(
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @Param("linkId", new ParseUUIDPipe()) linkId: string,
     @Req() req: Request,
   ) {
-    return this.access.transition(id, "active", undefined, correlation(req));
-  }
-  @Post("business-access/:linkId/revoke") revoke(
-    @Param("linkId", new ParseUUIDPipe()) id: string,
-    @Body() body: BusinessAccessReasonDto,
-    @Req() req: Request,
-  ) {
-    return this.access.transition(id, "revoked", body.reason, correlation(req));
-  }
-  @Post("business-access/:linkId/revoke-sessions") sessions(
-    @Param("linkId", new ParseUUIDPipe()) id: string,
-    @Req() req: Request,
-  ) {
-    return this.access.revokeProfileSessions(id, correlation(req));
+    return this.access.transition(linkId, "active", undefined, correlation(req), {
+      entityId: id,
+      profileType: "trader",
+    });
   }
 }
 

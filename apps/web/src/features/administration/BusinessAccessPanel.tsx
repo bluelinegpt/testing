@@ -23,6 +23,7 @@ const idempotencyKey = (operation: string) => `${operation}:${crypto.randomUUID(
 
 export function BusinessAccessPanel({
   api,
+  canManageUsers = true,
   entityId,
   kind,
   onNavigate,
@@ -31,6 +32,13 @@ export function BusinessAccessPanel({
   profileName,
 }: {
   readonly api: ApiClient;
+  /**
+   * Full user administration (users_roles.manage). Without it -- a Role with
+   * only trader_portal_users.manage -- the panel offers creating the Trader
+   * Portal login and suspending or restoring it; opening the user, password
+   * resets, lock/disable and revoking stay with administrators.
+   */
+  readonly canManageUsers?: boolean;
   readonly entityId: string;
   readonly kind: Kind;
   readonly onNavigate: (path: string) => void;
@@ -195,7 +203,14 @@ export function BusinessAccessPanel({
         : undefined;
     if ((name === "suspend" || name === "revoke") && !reason) return;
     try {
-      await api.post(`configuration/business-access/${row.id}/${name}`, reason ? { reason } : {});
+      // A Trader link's suspend/restore goes through the Trader-scoped route,
+      // which a Trader Portal manager may use; everything else stays on the
+      // administrator route.
+      const path =
+        kind === "trader" && (name === "suspend" || name === "restore")
+          ? `${base}/${row.id}/${name}`
+          : `configuration/business-access/${row.id}/${name}`;
+      await api.post(path, reason ? { reason } : {});
       await load();
     } catch (cause) {
       setError(message(cause, t("access.errors.action")));
@@ -352,33 +367,43 @@ export function BusinessAccessPanel({
                   </td>
                   <td>
                     <div className="table-actions">
-                      <button
-                        onClick={() => onNavigate(`/configuration/users/${row.accountId}`)}
-                        type="button"
-                      >
-                        {t("access.openUser")}
-                      </button>
-                      <button onClick={() => void userAction(row, "reset-password")} type="button">
-                        {t("userAdmin.resetPassword")}
-                      </button>
-                      {row.userStatus === "locked" ? (
-                        <button onClick={() => void userAction(row, "unlock")} type="button">
-                          {t("userAdmin.unlock")}
-                        </button>
-                      ) : (
-                        <button onClick={() => void userAction(row, "lock")} type="button">
-                          {t("userAdmin.lock")}
-                        </button>
-                      )}
-                      {row.userStatus === "disabled" ? (
-                        <button onClick={() => void userAction(row, "reactivate")} type="button">
-                          {t("userAdmin.reactivate")}
-                        </button>
-                      ) : (
-                        <button onClick={() => void userAction(row, "disable")} type="button">
-                          {t("userAdmin.disable")}
-                        </button>
-                      )}
+                      {canManageUsers ? (
+                        <>
+                          <button
+                            onClick={() => onNavigate(`/configuration/users/${row.accountId}`)}
+                            type="button"
+                          >
+                            {t("access.openUser")}
+                          </button>
+                          <button
+                            onClick={() => void userAction(row, "reset-password")}
+                            type="button"
+                          >
+                            {t("userAdmin.resetPassword")}
+                          </button>
+                          {row.userStatus === "locked" ? (
+                            <button onClick={() => void userAction(row, "unlock")} type="button">
+                              {t("userAdmin.unlock")}
+                            </button>
+                          ) : (
+                            <button onClick={() => void userAction(row, "lock")} type="button">
+                              {t("userAdmin.lock")}
+                            </button>
+                          )}
+                          {row.userStatus === "disabled" ? (
+                            <button
+                              onClick={() => void userAction(row, "reactivate")}
+                              type="button"
+                            >
+                              {t("userAdmin.reactivate")}
+                            </button>
+                          ) : (
+                            <button onClick={() => void userAction(row, "disable")} type="button">
+                              {t("userAdmin.disable")}
+                            </button>
+                          )}
+                        </>
+                      ) : null}
                       {row.accessStatus !== "revoked" ? (
                         <>
                           {row.accessStatus === "suspended" ? (
@@ -390,16 +415,18 @@ export function BusinessAccessPanel({
                               {t("access.suspend")}
                             </button>
                           ) : null}
-                          {row.accessStatus !== "revoked" ? (
+                          {canManageUsers && row.accessStatus !== "revoked" ? (
                             <button onClick={() => void action(row, "revoke")} type="button">
                               {t("access.revoke")}
                             </button>
                           ) : null}
                         </>
                       ) : null}
-                      <button onClick={() => void action(row, "revoke-sessions")} type="button">
-                        {t("access.revokeSessions")}
-                      </button>
+                      {canManageUsers ? (
+                        <button onClick={() => void action(row, "revoke-sessions")} type="button">
+                          {t("access.revokeSessions")}
+                        </button>
+                      ) : null}
                     </div>
                   </td>
                 </tr>
@@ -439,10 +466,7 @@ export function BusinessAccessPanel({
           {kind === "trader" && profileMobileNumber ? (
             <p>
               <strong>{t("access.loginMobile")}:</strong> <bdi>{profileMobileNumber}</bdi>{" "}
-              <button
-                onClick={() => void copyValue("mobile", profileMobileNumber)}
-                type="button"
-              >
+              <button onClick={() => void copyValue("mobile", profileMobileNumber)} type="button">
                 {copiedField === "mobile" ? t("common.copied") : t("common.copy")}
               </button>
             </p>

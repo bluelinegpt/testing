@@ -12,10 +12,6 @@ describe("AreaConfigurationController inline Order authorization", () => {
   // `users_roles.manage` is the fallback for any endpoint added later
   // without its own decorators, so each existing one is asserted here.
   it.each([
-    "emirates",
-    "list",
-    "search",
-    "get",
     "create",
     "update",
     "setStatus",
@@ -26,6 +22,21 @@ describe("AreaConfigurationController inline Order authorization", () => {
       expect(Reflect.getMetadata(REQUIRED_PERMISSIONS, handler)).toEqual([]);
       expect(Reflect.getMetadata(REQUIRED_ANY_PERMISSIONS, handler)).toEqual([
         "orders.create",
+        "users_roles.manage",
+      ]);
+    },
+  );
+
+  // Reads also admit traders.manage: the Trader form picks a pickup Emirate
+  // and Area. Writes stay with Order creators and administrators.
+  it.each(["emirates", "list", "search", "get"] as const)(
+    "allows Order creators and Trader managers to read %s",
+    (method) => {
+      const handler = AreaConfigurationController.prototype[method];
+      expect(Reflect.getMetadata(REQUIRED_PERMISSIONS, handler)).toEqual([]);
+      expect(Reflect.getMetadata(REQUIRED_ANY_PERMISSIONS, handler)).toEqual([
+        "orders.create",
+        "traders.manage",
         "users_roles.manage",
       ]);
     },

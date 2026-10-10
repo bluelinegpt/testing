@@ -704,6 +704,8 @@ export class UserBusinessAccessService {
     status: "active" | "suspended" | "revoked",
     reason: string | undefined,
     correlationId: string,
+    /** When set, the link must belong to exactly this profile, or it is "not found". */
+    scope?: { readonly entityId: string; readonly profileType: ProfileType },
   ) {
     const { companyId } = this.tenants.current();
     const actorId = this.identities.current().identityId;
@@ -719,7 +721,13 @@ export class UserBusinessAccessService {
           from user_business_links
          where id=${linkId}::uuid and company_id=${companyId}::uuid for update
       `.execute(transaction);
-      const link = current.rows[0];
+      const found = current.rows[0];
+      const link =
+        found === undefined ||
+        (scope !== undefined &&
+          (found.profileType !== scope.profileType || found.entityId !== scope.entityId))
+          ? undefined
+          : found;
       if (link === undefined)
         throw new ApplicationException(
           "user_profile_link_not_found",

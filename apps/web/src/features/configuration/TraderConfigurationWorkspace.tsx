@@ -14,6 +14,8 @@ import { useTranslation } from "react-i18next";
 import type { ApiClient } from "../../api/api-client.js";
 import type { CompanyArea, Emirate, TraderPage, TraderSummary } from "../../api/contracts.js";
 import { BusinessAccessPanel } from "../administration/BusinessAccessPanel.js";
+import { canAccessCompanyPath } from "../../app/company-access.js";
+import { useSessionAccess } from "../../app/SessionAccessContext.js";
 import { normalizeLocale } from "../../localization/locale.js";
 import { normalizeUaeMobile } from "../../domain/uae-mobile.js";
 import { Modal } from "../../components/Modal.js";
@@ -65,6 +67,25 @@ interface PricingRow {
   updatedBy: string | null;
 }
 
+/**
+ * What the signed-in user may do on the Trader screens. Outside the session
+ * provider (tests, stories) everything is allowed, matching the old screen;
+ * the API is the authority either way.
+ */
+function useTraderPermissions() {
+  const permissions = useSessionAccess()?.permissions;
+  const has = (code: string) => permissions === undefined || permissions.includes(code);
+  const admin = has("users_roles.manage");
+  return {
+    canEditTraders: admin || has("traders.manage"),
+    canManagePortalUsers: admin || has("trader_portal_users.manage"),
+    canManageUsers: admin,
+    canSeeStatement:
+      permissions === undefined || canAccessCompanyPath("/trader-settlements", permissions),
+    canSeeWhatsApp: admin || has("whatsapp.trader_settings.manage"),
+  };
+}
+
 export function TraderConfigurationWorkspace({
   api,
   onNavigate,
@@ -73,6 +94,7 @@ export function TraderConfigurationWorkspace({
   onNavigate: (path: string) => void;
 }) {
   const { t } = useTranslation();
+  const { canEditTraders } = useTraderPermissions();
   const [page, setPage] = useState<TraderPage<TraderSummary>>({
     items: [],
     page: 1,
@@ -127,14 +149,16 @@ export function TraderConfigurationWorkspace({
               <RefreshCw size={17} />
               {t("common.refresh")}
             </button>
-            <button
-              className="button button-primary"
-              onClick={() => setCreateOpen(true)}
-              type="button"
-            >
-              <Plus size={17} />
-              {t("traderConfig.create")}
-            </button>
+            {canEditTraders ? (
+              <button
+                className="button button-primary"
+                onClick={() => setCreateOpen(true)}
+                type="button"
+              >
+                <Plus size={17} />
+                {t("traderConfig.create")}
+              </button>
+            ) : null}
           </>
         }
       />
@@ -229,13 +253,15 @@ export function TraderConfigurationWorkspace({
                       >
                         {t("common.view")}
                       </button>
-                      <button
-                        className="link-button"
-                        onClick={() => setStatusTarget(item)}
-                        type="button"
-                      >
-                        {item.status === "active" ? t("common.disable") : t("common.reactivate")}
-                      </button>
+                      {canEditTraders ? (
+                        <button
+                          className="link-button"
+                          onClick={() => setStatusTarget(item)}
+                          type="button"
+                        >
+                          {item.status === "active" ? t("common.disable") : t("common.reactivate")}
+                        </button>
+                      ) : null}
                     </div>
                   </td>
                 </tr>
@@ -305,6 +331,7 @@ export function TraderDetailWorkspace({
   onBack: () => void;
 }) {
   const { t } = useTranslation();
+  const access = useTraderPermissions();
   const [detail, setDetail] = useState<Detail>();
   const [tab, setTab] = useState("overview");
   const [dialog, setDialog] = useState<"bank" | "edit" | "pricing" | "status">();
@@ -340,7 +367,11 @@ export function TraderDetailWorkspace({
     "orders",
     "settlements",
     "audit",
-  ];
+  ].filter(
+    (name) =>
+      (name !== "portalUsers" || access.canManagePortalUsers) &&
+      (name !== "whatsapp" || access.canSeeWhatsApp),
+  );
   return (
     <>
       <PageHeader
@@ -352,28 +383,34 @@ export function TraderDetailWorkspace({
               <ArrowLeft size={17} />
               {t("common.back")}
             </button>
-            <button
-              className="button button-secondary"
-              onClick={() => setDialog("edit")}
-              type="button"
-            >
-              <Pencil size={17} />
-              {t("common.edit")}
-            </button>
-            <button
-              className="button button-primary"
-              onClick={() => setDialog("pricing")}
-              type="button"
-            >
-              <Plus size={17} />
-              {t("traderConfig.addPricing")}
-            </button>
-            <a
-              className="button button-secondary"
-              href={`/trader-settlements?openStatement=true&statementTraderId=${encodeURIComponent(detail.id)}`}
-            >
-              {t("traderSettlements.accountStatement")}
-            </a>
+            {access.canEditTraders ? (
+              <>
+                <button
+                  className="button button-secondary"
+                  onClick={() => setDialog("edit")}
+                  type="button"
+                >
+                  <Pencil size={17} />
+                  {t("common.edit")}
+                </button>
+                <button
+                  className="button button-primary"
+                  onClick={() => setDialog("pricing")}
+                  type="button"
+                >
+                  <Plus size={17} />
+                  {t("traderConfig.addPricing")}
+                </button>
+              </>
+            ) : null}
+            {access.canSeeStatement ? (
+              <a
+                className="button button-secondary"
+                href={`/trader-settlements?openStatement=true&statementTraderId=${encodeURIComponent(detail.id)}`}
+              >
+                {t("traderSettlements.accountStatement")}
+              </a>
+            ) : null}
           </>
         }
       />
@@ -426,6 +463,7 @@ export function TraderDetailWorkspace({
       ) : null}
       {tab === "pricing" ? (
         <PricingSection
+          readOnly={!access.canEditTraders}
           rows={detail.pricing as unknown as readonly PricingRow[]}
           onAdd={() => {
             setPricingEdit(undefined);
@@ -437,19 +475,21 @@ export function TraderDetailWorkspace({
           }}
         />
       ) : null}
-      {tab === "portalUsers" ? (
+      {tab === "portalUsers" && access.canManagePortalUsers ? (
         <BusinessAccessPanel
           api={api}
+          canManageUsers={access.canManageUsers}
           entityId={String(detail.id)}
           kind="trader"
           onNavigate={(path) => globalThis.location.assign(path)}
         />
       ) : null}
-      {tab === "whatsapp" ? (
+      {tab === "whatsapp" && access.canSeeWhatsApp ? (
         <TraderWhatsAppSection api={api} traderId={String(detail.id)} traderName={detail.name} />
       ) : null}
       {tab === "banks" ? (
         <BankSection
+          readOnly={!access.canEditTraders}
           rows={detail.banks}
           onAdd={() => {
             setBankEdit(undefined);
@@ -1174,10 +1214,12 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 function BankSection({
+  readOnly = false,
   rows,
   onAdd,
   onEdit,
 }: {
+  readOnly?: boolean;
   rows: readonly Record<string, unknown>[];
   onAdd: () => void;
   onEdit: (row: Record<string, unknown>) => void;
@@ -1187,10 +1229,12 @@ function BankSection({
     <section className="data-panel">
       <div className="panel-heading">
         <h2>{t("traderConfig.bankAccounts")}</h2>
-        <button className="button button-primary" onClick={onAdd} type="button">
-          <Plus size={17} />
-          {t("traderConfig.addBank")}
-        </button>
+        {readOnly ? null : (
+          <button className="button button-primary" onClick={onAdd} type="button">
+            <Plus size={17} />
+            {t("traderConfig.addBank")}
+          </button>
+        )}
       </div>
       <div className="table-scroll">
         <table>
@@ -1211,9 +1255,11 @@ function BankSection({
                   ),
                 )}
                 <td>
-                  <button className="link-button" onClick={() => onEdit(row)} type="button">
-                    {t("common.edit")}
-                  </button>
+                  {readOnly ? null : (
+                    <button className="link-button" onClick={() => onEdit(row)} type="button">
+                      {t("common.edit")}
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -1228,10 +1274,12 @@ function BankSection({
  * ("All Emirates", "All Areas") rather than blank cells. Each row is editable.
  */
 function PricingSection({
+  readOnly = false,
   rows,
   onAdd,
   onEdit,
 }: {
+  readOnly?: boolean;
   rows: readonly PricingRow[];
   onAdd: () => void;
   onEdit: (row: PricingRow) => void;
@@ -1251,10 +1299,12 @@ function PricingSection({
     <section className="data-panel">
       <div className="panel-heading">
         <h2>{t("traderConfig.pricingHistory")}</h2>
-        <button className="button button-primary" onClick={onAdd} type="button">
-          <Plus size={17} />
-          {t("traderConfig.addPricing")}
-        </button>
+        {readOnly ? null : (
+          <button className="button button-primary" onClick={onAdd} type="button">
+            <Plus size={17} />
+            {t("traderConfig.addPricing")}
+          </button>
+        )}
       </div>
       <div className="table-scroll">
         <table>
@@ -1281,9 +1331,11 @@ function PricingSection({
                 <td>{row.createdBy}</td>
                 <td>{row.reason ?? "-"}</td>
                 <td>
-                  <button onClick={() => onEdit(row)} type="button">
-                    {t("common.edit")}
-                  </button>
+                  {readOnly ? null : (
+                    <button onClick={() => onEdit(row)} type="button">
+                      {t("common.edit")}
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

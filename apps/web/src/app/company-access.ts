@@ -94,7 +94,10 @@ const routePermissions: Readonly<Record<string, readonly string[]>> = {
   // Route planning setup (Area pins, branch). Configuration administrators;
   // the API applies the same permission.
   "/configuration/route-planning": [manage],
-  "/configuration/traders": [manage],
+  // Trader master data and Trader Portal logins have their own permissions so
+  // a Role can add Traders without full user administration. The API applies
+  // the same lists; the detail screen hides what each permission cannot do.
+  "/configuration/traders": [manage, "traders.manage", "trader_portal_users.manage"],
   "/configuration/customers": [manage],
   // Areas are Order master data, not user administration: anyone who may
   // create an Order needs the Area list and the ability to add a missing
