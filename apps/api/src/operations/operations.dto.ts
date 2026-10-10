@@ -172,8 +172,10 @@ export class OrderSelectionDto {
   @IsIn(["active", "all", "hold", "closed", "cancelled", "accountant"])
   public readonly quickView?: "active" | "all" | "cancelled" | "closed" | "hold" | "accountant";
 
+  /** One status, or several comma separated ("new,hold"). */
   @IsOptional()
   @IsString()
+  @MaxLength(400)
   public readonly deliveryStatus?: string;
 
   @IsOptional()

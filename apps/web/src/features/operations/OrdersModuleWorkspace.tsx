@@ -374,13 +374,18 @@ export function OrdersModuleWorkspace({
   const [drivers, setDrivers] = useState<readonly OperationsDriver[]>([]);
   const [traders, setTraders] = useState<readonly OperationsTrader[]>([]);
   const [areas, setAreas] = useState<readonly CompanyArea[]>([]);
-  const [carrierFilterOptions, setCarrierFilterOptions] = useState<readonly { id: string; name: string }[]>([]);
-  const [countryFilterOptions, setCountryFilterOptions] = useState<readonly { id: string; name: string }[]>([]);
+  const [carrierFilterOptions, setCarrierFilterOptions] = useState<
+    readonly { id: string; name: string }[]
+  >([]);
+  const [countryFilterOptions, setCountryFilterOptions] = useState<
+    readonly { id: string; name: string }[]
+  >([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [grouping, setGrouping] = useState<OrderGrouping>("");
-  const persistenceKey = persistenceScope === undefined
-    ? null
-    : ordersListStateStorageKey(persistenceScope.companyId, persistenceScope.userId);
+  const persistenceKey =
+    persistenceScope === undefined
+      ? null
+      : ordersListStateStorageKey(persistenceScope.companyId, persistenceScope.userId);
   const [restoredPersistenceKey, setRestoredPersistenceKey] = useState<string | null>(null);
   const previousPersistenceKey = useRef(persistenceKey);
   const listStateRestored = persistenceKey === null || restoredPersistenceKey === persistenceKey;
@@ -462,7 +467,10 @@ export function OrdersModuleWorkspace({
       setRestoredPersistenceKey(null);
       const cleanSearch = removeOrdersListSearch(location.search);
       if (cleanSearch !== location.search) {
-        navigate({ pathname: location.pathname, search: cleanSearch, hash: location.hash }, { replace: true });
+        navigate(
+          { pathname: location.pathname, search: cleanSearch, hash: location.hash },
+          { replace: true },
+        );
       }
       return;
     }
@@ -480,7 +488,10 @@ export function OrdersModuleWorkspace({
       if (snapshot?.search !== undefined && snapshot.search !== "") {
         const restoredSearch = restoreOrdersListSearch(location.search, snapshot.search);
         if (restoredSearch !== location.search) {
-          navigate({ pathname: location.pathname, search: restoredSearch, hash: location.hash }, { replace: true });
+          navigate(
+            { pathname: location.pathname, search: restoredSearch, hash: location.hash },
+            { replace: true },
+          );
           return;
         }
       }
@@ -491,13 +502,23 @@ export function OrdersModuleWorkspace({
       const restoredSearch = restoreOrdersListSearch(location.search, snapshot.search);
       if (restoredSearch !== location.search) {
         setGrouping(snapshot.grouping.length ? [...snapshot.grouping] : "");
-        navigate({ pathname: location.pathname, search: restoredSearch, hash: location.hash }, { replace: true });
+        navigate(
+          { pathname: location.pathname, search: restoredSearch, hash: location.hash },
+          { replace: true },
+        );
         return;
       }
     }
     setGrouping(snapshot?.grouping.length ? [...snapshot.grouping] : "");
     setRestoredPersistenceKey(persistenceKey);
-  }, [location.hash, location.pathname, location.search, navigate, persistenceKey, restoredPersistenceKey]);
+  }, [
+    location.hash,
+    location.pathname,
+    location.search,
+    navigate,
+    persistenceKey,
+    restoredPersistenceKey,
+  ]);
 
   useEffect(() => {
     if (persistenceKey === null || !listStateRestored) return;
@@ -607,13 +628,16 @@ export function OrdersModuleWorkspace({
   useEffect(() => {
     let active = true;
     void (async () => {
-      const [holdOrders, loadedDrivers, loadedTraders, loadedCarriers, loadedCountries] = await Promise.allSettled([
-        api.get<OperationsOrderPage>("operations/orders?page=1&pageSize=25&quickView=hold"),
-        api.get<readonly OperationsDriver[]>("operations/drivers"),
-        api.get<readonly OperationsTrader[]>("operations/traders"),
-        api.get<SearchPage<{ id: string; name: string }>>("operations/third-party-delivery-companies"),
-        api.get<SearchPage<{ id: string; name: string }>>("operations/destination-countries"),
-      ]);
+      const [holdOrders, loadedDrivers, loadedTraders, loadedCarriers, loadedCountries] =
+        await Promise.allSettled([
+          api.get<OperationsOrderPage>("operations/orders?page=1&pageSize=25&quickView=hold"),
+          api.get<readonly OperationsDriver[]>("operations/drivers"),
+          api.get<readonly OperationsTrader[]>("operations/traders"),
+          api.get<SearchPage<{ id: string; name: string }>>(
+            "operations/third-party-delivery-companies",
+          ),
+          api.get<SearchPage<{ id: string; name: string }>>("operations/destination-countries"),
+        ]);
       if (!active) return;
       if (holdOrders.status === "fulfilled") {
         setHoldCount(holdOrders.value.tabTotalCount ?? holdOrders.value.filteredCount);
@@ -626,10 +650,18 @@ export function OrdersModuleWorkspace({
         setTraders(loadedTraders.value.filter((trader) => trader.status === "active"));
       }
       if (loadedCarriers.status === "fulfilled") {
-        setCarrierFilterOptions(Array.isArray(loadedCarriers.value) ? loadedCarriers.value : loadedCarriers.value.items ?? []);
+        setCarrierFilterOptions(
+          Array.isArray(loadedCarriers.value)
+            ? loadedCarriers.value
+            : (loadedCarriers.value.items ?? []),
+        );
       }
       if (loadedCountries.status === "fulfilled") {
-        setCountryFilterOptions(Array.isArray(loadedCountries.value) ? loadedCountries.value : loadedCountries.value.items ?? []);
+        setCountryFilterOptions(
+          Array.isArray(loadedCountries.value)
+            ? loadedCountries.value
+            : (loadedCountries.value.items ?? []),
+        );
       }
 
       // Load areas for each emirate to build area-emirate mapping
@@ -816,7 +848,10 @@ export function OrdersModuleWorkspace({
   };
   // Orders menu tabs, in the Company's order; null on the standard menu.
   const menuTabs = useMemo(
-    () => (orderMenu === undefined || orderMenu === null ? null : orderMenu.filter((view) => view.isVisible)),
+    () =>
+      orderMenu === undefined || orderMenu === null
+        ? null
+        : orderMenu.filter((view) => view.isVisible),
     [orderMenu],
   );
   const selectedMenuKey = filters.viewKey !== "" ? filters.viewKey : filters.quickView;
@@ -853,7 +888,11 @@ export function OrdersModuleWorkspace({
       if (!active) return;
       const next: Record<string, number> = {};
       results.forEach((result, index) => {
-        if (result.status === "fulfilled" && result.value !== null && typeof result.value === "object") {
+        if (
+          result.status === "fulfilled" &&
+          result.value !== null &&
+          typeof result.value === "object"
+        ) {
           const count = result.value.tabTotalCount ?? result.value.filteredCount;
           if (typeof count === "number") next[counted[index]!.key] = count;
         }
@@ -1008,10 +1047,7 @@ export function OrdersModuleWorkspace({
         code: emirate.code.toUpperCase(),
         name: localizeName(locale, { ar: emirate.nameAr, en: emirate.nameEn }),
       };
-      emirateCodeToName.set(
-        emirate.code.toUpperCase(),
-        mapping.name,
-      );
+      emirateCodeToName.set(emirate.code.toUpperCase(), mapping.name);
       map.set(emirate.id, mapping);
     }
 
@@ -1061,7 +1097,9 @@ export function OrdersModuleWorkspace({
     setCollapsedGroups(new Set());
   };
 
-  const toggleGroupingDimension = (dimension: "area" | "emirate" | "trader" | "driver" | "status") => {
+  const toggleGroupingDimension = (
+    dimension: "area" | "emirate" | "trader" | "driver" | "status",
+  ) => {
     const current = Array.isArray(grouping) ? grouping : [];
     const updated = current.includes(dimension)
       ? current.filter((d) => d !== dimension)
@@ -1197,7 +1235,9 @@ export function OrdersModuleWorkspace({
             {order.orderNumber}
           </button>
           {order.serialNumber === null ? null : (
-            <span className="cell-secondary">{t("operations.serialNumber")}: {order.serialNumber}</span>
+            <span className="cell-secondary">
+              {t("operations.serialNumber")}: {order.serialNumber}
+            </span>
           )}
           <span className="cell-secondary">{formatDate(order.orderDate, locale)}</span>
         </td>
@@ -1335,23 +1375,23 @@ export function OrdersModuleWorkspace({
                 );
               })
             : (
-            ["active", "hold", "all", "closed", "cancelled", "delivery", "accountant"] as const
-          ).map((view) => (
-            <button
-              aria-selected={filters.quickView === view}
-              className={filters.quickView === view ? "active" : undefined}
-              key={view}
-              onClick={() => selectQuickView(view)}
-              role="tab"
-              type="button"
-            >
-              {t(`operations.quickView.${view}`)}
-              {view === "hold" ? <span className="tab-count">{holdCount}</span> : null}
-              {view === "accountant" && filters.quickView === "accountant" ? (
-                <span className="tab-count">{tabTotalCount}</span>
-              ) : null}
-            </button>
-          ))}
+                ["active", "hold", "all", "closed", "cancelled", "delivery", "accountant"] as const
+              ).map((view) => (
+                <button
+                  aria-selected={filters.quickView === view}
+                  className={filters.quickView === view ? "active" : undefined}
+                  key={view}
+                  onClick={() => selectQuickView(view)}
+                  role="tab"
+                  type="button"
+                >
+                  {t(`operations.quickView.${view}`)}
+                  {view === "hold" ? <span className="tab-count">{holdCount}</span> : null}
+                  {view === "accountant" && filters.quickView === "accountant" ? (
+                    <span className="tab-count">{tabTotalCount}</span>
+                  ) : null}
+                </button>
+              ))}
         </div>
         {false ? (
           <section className="card" aria-label={t("operations.quickView.accountant")}>
@@ -1596,19 +1636,13 @@ export function OrdersModuleWorkspace({
                 />
               )}
             </label>
-            <FilterSelect
+            <DeliveryStatusMultiSelect
               label={t("operations.deliveryStatus")}
               onChange={(value) => updateFilters({ deliveryStatus: value })}
               value={filters.deliveryStatus}
-            >
-              {deliveryStatuses.map((status) => (
-                <option key={status} value={status}>
-                  {t(`statuses.${status}`)}
-                </option>
-              ))}
-            </FilterSelect>
+            />
             {filters.quickView === "cancelled" ||
-            filters.deliveryStatus === "cancelled" ||
+            selectedDeliveryStatuses(filters.deliveryStatus).includes("cancelled") ||
             filters.cancellationReason !== "" ? (
               <FilterSelect
                 label={t("operations.cancellationType")}
@@ -1648,9 +1682,15 @@ export function OrdersModuleWorkspace({
               value={filters.internationalCarrierStatus}
             >
               <option value="">{t("operations.allInternationalCarrierStages")}</option>
-              <option value="ready_for_carrier">{t("operations.internationalCarrierStatuses.ready_for_carrier")}</option>
-              <option value="handed_to_carrier">{t("operations.internationalCarrierStatuses.handed_to_carrier")}</option>
-              <option value="in_transit">{t("operations.internationalCarrierStatuses.in_transit")}</option>
+              <option value="ready_for_carrier">
+                {t("operations.internationalCarrierStatuses.ready_for_carrier")}
+              </option>
+              <option value="handed_to_carrier">
+                {t("operations.internationalCarrierStatuses.handed_to_carrier")}
+              </option>
+              <option value="in_transit">
+                {t("operations.internationalCarrierStatuses.in_transit")}
+              </option>
             </FilterSelect>
             <label className="filter-select filter-combobox-field international-country-filter">
               <span className="sr-only">Third-party shipping company</span>
@@ -1658,12 +1698,21 @@ export function OrdersModuleWorkspace({
                 emptyText="No carriers found"
                 label="Carrier"
                 onChange={(value) => {
-                  const option = (carrierFilterOptions ?? []).find((candidate) => candidate.id === value);
+                  const option = (carrierFilterOptions ?? []).find(
+                    (candidate) => candidate.id === value,
+                  );
                   updateFilters({ thirdPartyDeliveryCompanyName: option?.name ?? "" });
                 }}
-                options={(carrierFilterOptions ?? []).map((carrier) => ({ id: carrier.id, label: carrier.name }))}
+                options={(carrierFilterOptions ?? []).map((carrier) => ({
+                  id: carrier.id,
+                  label: carrier.name,
+                }))}
                 placeholder="Carrier"
-                value={(carrierFilterOptions ?? []).find((carrier) => carrier.name === filters.thirdPartyDeliveryCompanyName)?.id ?? ""}
+                value={
+                  (carrierFilterOptions ?? []).find(
+                    (carrier) => carrier.name === filters.thirdPartyDeliveryCompanyName,
+                  )?.id ?? ""
+                }
               />
             </label>
             <label className="filter-select filter-combobox-field international-country-filter">
@@ -1672,12 +1721,21 @@ export function OrdersModuleWorkspace({
                 emptyText="No countries found"
                 label="Country"
                 onChange={(value) => {
-                  const option = (countryFilterOptions ?? []).find((candidate) => candidate.id === value);
+                  const option = (countryFilterOptions ?? []).find(
+                    (candidate) => candidate.id === value,
+                  );
                   updateFilters({ destinationCountryName: option?.name ?? "" });
                 }}
-                options={(countryFilterOptions ?? []).map((country) => ({ id: country.id, label: country.name }))}
+                options={(countryFilterOptions ?? []).map((country) => ({
+                  id: country.id,
+                  label: country.name,
+                }))}
                 placeholder="Country"
-                value={(countryFilterOptions ?? []).find((country) => country.name === filters.destinationCountryName)?.id ?? ""}
+                value={
+                  (countryFilterOptions ?? []).find(
+                    (country) => country.name === filters.destinationCountryName,
+                  )?.id ?? ""
+                }
               />
             </label>
             <div className="filter-grouping-multi-select" id="grouping-popover-anchor">
@@ -1705,11 +1763,11 @@ export function OrdersModuleWorkspace({
                               ? t("operations.groupByArea", { defaultValue: "Area" })
                               : d === "emirate"
                                 ? t("operations.groupByEmirate", { defaultValue: "Emirate" })
-                              : d === "trader"
-                                ? t("operations.groupByTrader", { defaultValue: "Trader" })
-                                : d === "driver"
-                                  ? t("operations.groupByDriver")
-                                  : t("operations.groupByStatus"),
+                                : d === "trader"
+                                  ? t("operations.groupByTrader", { defaultValue: "Trader" })
+                                  : d === "driver"
+                                    ? t("operations.groupByDriver")
+                                    : t("operations.groupByStatus"),
                           )
                           .join(", ")}
                       </span>
@@ -1857,7 +1915,8 @@ export function OrdersModuleWorkspace({
                   <button
                     onClick={() =>
                       onNavigate(
-                        selectedTraderReceivableId !== undefined && selectedTraderReceivableId !== null
+                        selectedTraderReceivableId !== undefined &&
+                          selectedTraderReceivableId !== null
                           ? `/trader-receivables?collectReceivableId=${encodeURIComponent(selectedTraderReceivableId)}&returnTo=%2Forders`
                           : `/trader-receivables?collectTraderId=${encodeURIComponent(String(traderReceivableTraderId))}&returnTo=%2Forders`,
                       )
@@ -1916,7 +1975,8 @@ export function OrdersModuleWorkspace({
                     {t("operations.changeStatus")}
                   </button>
                 ) : null}
-                {canUpdateStatus && bulkSelectedOrders.some((order) => order.orderType === "gcc_international") ? (
+                {canUpdateStatus &&
+                bulkSelectedOrders.some((order) => order.orderType === "gcc_international") ? (
                   <button onClick={() => setBulkAction("carrier")} type="button">
                     {t("operations.internationalCarrierBulkAction")}
                   </button>
@@ -3321,10 +3381,14 @@ export function OrderDetailsWorkspace({
   const financialStatus = (() => {
     const amountToCollect = Number(detail.customerAmountDue ?? 0);
     const amountDueToTrader = Number(detail.traderNetPayable ?? 0);
-    const isFree = detail.isFreeOrder === true ||
-      (amountToCollect === 0 && amountDueToTrader === 0 &&
-        Number(detail.codAmount ?? 0) === 0 && Number(detail.serviceFee ?? 0) === 0 &&
-        Number(detail.totalDeductions ?? 0) === 0 && Number(detail.vatAmount ?? 0) === 0);
+    const isFree =
+      detail.isFreeOrder === true ||
+      (amountToCollect === 0 &&
+        amountDueToTrader === 0 &&
+        Number(detail.codAmount ?? 0) === 0 &&
+        Number(detail.serviceFee ?? 0) === 0 &&
+        Number(detail.totalDeductions ?? 0) === 0 &&
+        Number(detail.vatAmount ?? 0) === 0);
     if (detail.traderReceivableStatus === "collected") return "collected" as const;
     if (isFree) return "free" as const;
     if (amountToCollect > 0 && amountDueToTrader > 0) return "both" as const;
@@ -3345,21 +3409,24 @@ export function OrderDetailsWorkspace({
     !isOfficeStatusUser && permissions.includes("orders.driver_self_service");
   const canHold =
     isOfficeStatusUser || (isDriverSelfServiceUser && detail.deliveryStatus === "out_for_delivery");
-  const nextCarrierStatus = detail.orderType === "gcc_international" && detail.deliveryStatus !== "delivered"
-    ? detail.internationalCarrierStatus === "ready_for_carrier"
-      ? "handed_to_carrier"
-      : detail.internationalCarrierStatus === "handed_to_carrier"
-        ? "in_transit"
-        : detail.internationalCarrierStatus === "in_transit"
-          ? "delivered"
-          : undefined
-    : undefined;
+  const nextCarrierStatus =
+    detail.orderType === "gcc_international" && detail.deliveryStatus !== "delivered"
+      ? detail.internationalCarrierStatus === "ready_for_carrier"
+        ? "handed_to_carrier"
+        : detail.internationalCarrierStatus === "handed_to_carrier"
+          ? "in_transit"
+          : detail.internationalCarrierStatus === "in_transit"
+            ? "delivered"
+            : undefined
+      : undefined;
   const updateCarrierStatus = async () => {
     if (nextCarrierStatus === undefined) return;
     setStatusBusy(true);
     setError(undefined);
     try {
-      await api.patch(`operations/orders/${detail.id}/carrier-status`, { status: nextCarrierStatus });
+      await api.patch(`operations/orders/${detail.id}/carrier-status`, {
+        status: nextCarrierStatus,
+      });
       await load();
     } catch (requestError) {
       setError(message(requestError, t("operations.internationalCarrierStatusUpdateFailed")));
@@ -3401,8 +3468,15 @@ export function OrderDetailsWorkspace({
             </span>
           ) : null}
           {nextCarrierStatus !== undefined && isOfficeStatusUser ? (
-            <button className="button button-secondary" disabled={statusBusy} onClick={() => void updateCarrierStatus()} type="button">
-              {statusBusy ? t("common.working") : t(`operations.internationalCarrierActions.${nextCarrierStatus}`)}
+            <button
+              className="button button-secondary"
+              disabled={statusBusy}
+              onClick={() => void updateCarrierStatus()}
+              type="button"
+            >
+              {statusBusy
+                ? t("common.working")
+                : t(`operations.internationalCarrierActions.${nextCarrierStatus}`)}
             </button>
           ) : null}
           {detail.orderType === "gcc_international" &&
@@ -3411,7 +3485,11 @@ export function OrderDetailsWorkspace({
           canSettle ? (
             <button
               className="button button-secondary"
-              onClick={() => onNavigate?.(`/trader-settlements?openDialog=new_settlement&orderId=${encodeURIComponent(detail.id)}`)}
+              onClick={() =>
+                onNavigate?.(
+                  `/trader-settlements?openDialog=new_settlement&orderId=${encodeURIComponent(detail.id)}`,
+                )
+              }
               type="button"
             >
               {t("operations.actions.moneyOut")}
@@ -3427,7 +3505,10 @@ export function OrderDetailsWorkspace({
               {t("operations.actions.hold")}
             </button>
           ) : null}
-          {!isDriverSelfServiceUser && (canEditOrder(detail.deliveryStatus) || detail.deliveryStatus === "closed" || detail.deliveryStatus === "delivered") ? (
+          {!isDriverSelfServiceUser &&
+          (canEditOrder(detail.deliveryStatus) ||
+            detail.deliveryStatus === "closed" ||
+            detail.deliveryStatus === "delivered") ? (
             <button
               className="button button-secondary"
               onClick={() => setEditOpen(true)}
@@ -3437,8 +3518,7 @@ export function OrderDetailsWorkspace({
               {t("operations.editOrder")}
             </button>
           ) : null}
-          {detail.deliveryStatus === "delivered" &&
-          permissions.includes("users_roles.manage") ? (
+          {detail.deliveryStatus === "delivered" && permissions.includes("users_roles.manage") ? (
             <button
               className="button button-secondary"
               onClick={() => setReopenDeliveryOpen(true)}
@@ -3493,7 +3573,10 @@ export function OrderDetailsWorkspace({
         <span>{t("operations.currentOrderStatus")}</span>
         <DeliveryStatusBadge large order={detail} />
       </div>
-      <section className={`order-financial-banner order-financial-banner-${financialStatus}`} role="status">
+      <section
+        className={`order-financial-banner order-financial-banner-${financialStatus}`}
+        role="status"
+      >
         <strong>{t(`operations.financialBanner.${financialStatus}.title`)}</strong>
         <span>{t(`operations.financialBanner.${financialStatus}.description`)}</span>
         <small>
@@ -3517,12 +3600,20 @@ export function OrderDetailsWorkspace({
             ...(detail.orderType === "gcc_international"
               ? [
                   [t("operations.orderType"), t("operations.internationalOrderType")] as const,
-                  [t("operations.destinationCountry"), detail.destinationCountryName ?? t("operations.notProvided")] as const,
-                  [t("operations.carrier"), detail.thirdPartyDeliveryCompanyName ?? t("operations.notProvided")] as const,
+                  [
+                    t("operations.destinationCountry"),
+                    detail.destinationCountryName ?? t("operations.notProvided"),
+                  ] as const,
+                  [
+                    t("operations.carrier"),
+                    detail.thirdPartyDeliveryCompanyName ?? t("operations.notProvided"),
+                  ] as const,
                   [
                     t("operations.internationalCarrierStage"),
                     detail.internationalCarrierStatus
-                      ? t(`operations.internationalCarrierStatuses.${detail.internationalCarrierStatus}`)
+                      ? t(
+                          `operations.internationalCarrierStatuses.${detail.internationalCarrierStatus}`,
+                        )
                       : t("operations.notProvided"),
                   ] as const,
                 ]
@@ -3640,8 +3731,7 @@ export function OrderDetailsWorkspace({
                the Receivable, and a Receivable cleared by settlement netting
                appears on no other screen either. The number links straight to
                it rather than only naming it. */
-            ...(detail.traderReceivableNumber == null ||
-            detail.traderReceivableNumber.trim() === ""
+            ...(detail.traderReceivableNumber == null || detail.traderReceivableNumber.trim() === ""
               ? []
               : [
                   [
@@ -3665,7 +3755,9 @@ export function OrderDetailsWorkspace({
                         : ` — ${t(
                             `traderReceivables.status${
                               detail.traderReceivableStatus.charAt(0).toUpperCase() +
-                              detail.traderReceivableStatus.slice(1).replace(/_(.)/g, (_, c: string) => c.toUpperCase())
+                              detail.traderReceivableStatus
+                                .slice(1)
+                                .replace(/_(.)/g, (_, c: string) => c.toUpperCase())
                             }`,
                             { defaultValue: detail.traderReceivableStatus },
                           )}`}
@@ -3887,15 +3979,39 @@ export function OrderDetailsWorkspace({
           <section className="order-detail-section">
             <h2>{t("operations.traderCollectionDetail")}</h2>
             <dl>
-              <div><dt>{t("operations.collectionNumber")}</dt><dd>{traderCollectionSummary.collectionNumber}</dd></div>
-              <div><dt>{t("operations.trader")}</dt><dd>{traderCollectionSummary.traderName}</dd></div>
-              <div><dt>{t("operations.paymentDate")}</dt><dd>{traderCollectionSummary.paymentDate}</dd></div>
-              <div><dt>{t("operations.amountCollected")}</dt><dd>{money(traderCollectionSummary.amountReceivedNow, locale)}</dd></div>
+              <div>
+                <dt>{t("operations.collectionNumber")}</dt>
+                <dd>{traderCollectionSummary.collectionNumber}</dd>
+              </div>
+              <div>
+                <dt>{t("operations.trader")}</dt>
+                <dd>{traderCollectionSummary.traderName}</dd>
+              </div>
+              <div>
+                <dt>{t("operations.paymentDate")}</dt>
+                <dd>{traderCollectionSummary.paymentDate}</dd>
+              </div>
+              <div>
+                <dt>{t("operations.amountCollected")}</dt>
+                <dd>{money(traderCollectionSummary.amountReceivedNow, locale)}</dd>
+              </div>
             </dl>
             <div className="modal-actions">
-              <button onClick={() => void openConfirmedTraderCollectionPdf("preview")} type="button">{t("operations.previewReport")}</button>
-              <button onClick={() => void openConfirmedTraderCollectionPdf("print")} type="button">{t("common.print")}</button>
-              <button onClick={() => void openConfirmedTraderCollectionPdf("download")} type="button">{t("operations.downloadPdf")}</button>
+              <button
+                onClick={() => void openConfirmedTraderCollectionPdf("preview")}
+                type="button"
+              >
+                {t("operations.previewReport")}
+              </button>
+              <button onClick={() => void openConfirmedTraderCollectionPdf("print")} type="button">
+                {t("common.print")}
+              </button>
+              <button
+                onClick={() => void openConfirmedTraderCollectionPdf("download")}
+                type="button"
+              >
+                {t("operations.downloadPdf")}
+              </button>
             </div>
           </section>
         )}
@@ -4203,21 +4319,33 @@ function BulkCarrierStatusDialog({
   selection: SelectionPayload;
 }) {
   const { t } = useTranslation();
-  const [targetStatus, setTargetStatus] = useState<"handed_to_carrier" | "in_transit">("handed_to_carrier");
+  const [targetStatus, setTargetStatus] = useState<"handed_to_carrier" | "in_transit">(
+    "handed_to_carrier",
+  );
   const [partial, setPartial] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
   const previous = targetStatus === "handed_to_carrier" ? "ready_for_carrier" : "handed_to_carrier";
-  const eligible = orders.filter((order) => order.orderType === "gcc_international" && order.internationalCarrierStatus === previous);
+  const eligible = orders.filter(
+    (order) =>
+      order.orderType === "gcc_international" && order.internationalCarrierStatus === previous,
+  );
   const ineligible = orders.filter((order) => !eligible.includes(order));
-  const reason = (order: OperationsOrder) => order.orderType !== "gcc_international"
-    ? t("operations.internationalCarrierDomesticIneligible")
-    : t("operations.internationalCarrierPreviousStageRequired", { stage: t(`operations.internationalCarrierStatuses.${previous}`) });
+  const reason = (order: OperationsOrder) =>
+    order.orderType !== "gcc_international"
+      ? t("operations.internationalCarrierDomesticIneligible")
+      : t("operations.internationalCarrierPreviousStageRequired", {
+          stage: t(`operations.internationalCarrierStatuses.${previous}`),
+        });
   const submit = async () => {
     setSaving(true);
     setError(undefined);
     try {
-      await api.post("operations/orders/bulk-carrier-status", { ...selection, allowPartial: partial, targetStatus });
+      await api.post("operations/orders/bulk-carrier-status", {
+        ...selection,
+        allowPartial: partial,
+        targetStatus,
+      });
       await onComplete();
     } catch (requestError) {
       setError(message(requestError, t("operations.internationalCarrierStatusUpdateFailed")));
@@ -4225,14 +4353,66 @@ function BulkCarrierStatusDialog({
       setSaving(false);
     }
   };
-  return <Modal closeLabel={t("common.close")} onRequestClose={onClose} title={t("operations.internationalCarrierBulkAction")} titleId="bulk-carrier-status-title">
-    <label className="field"><span>{t("operations.internationalCarrierTargetStage")}</span><select value={targetStatus} onChange={(event) => setTargetStatus(event.target.value as typeof targetStatus)}><option value="handed_to_carrier">{t("operations.internationalCarrierActions.handed_to_carrier")}</option><option value="in_transit">{t("operations.internationalCarrierActions.in_transit")}</option></select></label>
-    <p>{t("operations.internationalCarrierBulkSummary", { eligible: eligible.length, ineligible: ineligible.length })}</p>
-    {ineligible.length > 0 ? <ul>{ineligible.map((order) => <li key={order.id}>{order.orderNumber}: {reason(order)}</li>)}</ul> : null}
-    <label className="checkbox-field"><input checked={partial} onChange={(event) => setPartial(event.target.checked)} type="checkbox" /><span>{t("operations.processEligibleOnly")}</span></label>
-    {error ? <div className="alert alert-error">{error}</div> : null}
-    <div className="modal-actions"><button className="button button-secondary" onClick={onClose} type="button">{t("common.cancel")}</button><button className="button button-primary" disabled={saving || (ineligible.length > 0 && !partial) || eligible.length === 0} onClick={() => void submit()} type="button">{saving ? t("common.working") : t("common.confirm")}</button></div>
-  </Modal>;
+  return (
+    <Modal
+      closeLabel={t("common.close")}
+      onRequestClose={onClose}
+      title={t("operations.internationalCarrierBulkAction")}
+      titleId="bulk-carrier-status-title"
+    >
+      <label className="field">
+        <span>{t("operations.internationalCarrierTargetStage")}</span>
+        <select
+          value={targetStatus}
+          onChange={(event) => setTargetStatus(event.target.value as typeof targetStatus)}
+        >
+          <option value="handed_to_carrier">
+            {t("operations.internationalCarrierActions.handed_to_carrier")}
+          </option>
+          <option value="in_transit">
+            {t("operations.internationalCarrierActions.in_transit")}
+          </option>
+        </select>
+      </label>
+      <p>
+        {t("operations.internationalCarrierBulkSummary", {
+          eligible: eligible.length,
+          ineligible: ineligible.length,
+        })}
+      </p>
+      {ineligible.length > 0 ? (
+        <ul>
+          {ineligible.map((order) => (
+            <li key={order.id}>
+              {order.orderNumber}: {reason(order)}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <label className="checkbox-field">
+        <input
+          checked={partial}
+          onChange={(event) => setPartial(event.target.checked)}
+          type="checkbox"
+        />
+        <span>{t("operations.processEligibleOnly")}</span>
+      </label>
+      {error ? <div className="alert alert-error">{error}</div> : null}
+      <div className="modal-actions">
+        <button className="button button-secondary" onClick={onClose} type="button">
+          {t("common.cancel")}
+        </button>
+        <button
+          className="button button-primary"
+          disabled={saving || (ineligible.length > 0 && !partial) || eligible.length === 0}
+          onClick={() => void submit()}
+          type="button"
+        >
+          {saving ? t("common.working") : t("common.confirm")}
+        </button>
+      </div>
+    </Modal>
+  );
 }
 
 function BulkStatusDialog({
@@ -4460,7 +4640,13 @@ function DriverShipmentManifestDialog({
             </div>
             <div>
               <dt>{t("operations.manifestTotalAmountToCollect")}</dt>
-              <dd>{formatCurrency(preview.summary.totalCustomerAmountToCollect ?? preview.summary.totalCod ?? "0", "AED", locale)}</dd>
+              <dd>
+                {formatCurrency(
+                  preview.summary.totalCustomerAmountToCollect ?? preview.summary.totalCod ?? "0",
+                  "AED",
+                  locale,
+                )}
+              </dd>
             </div>
           </dl>
           {error === undefined ? null : <div className="alert alert-error">{error}</div>}
@@ -4700,6 +4886,123 @@ function HoldReactivationDialog({
   );
 }
 
+/** The Delivery status filter value is one status or several, comma separated. */
+function selectedDeliveryStatuses(value: string): string[] {
+  return value
+    .split(",")
+    .map((status) => status.trim())
+    .filter((status) => status !== "");
+}
+
+/**
+ * Delivery status filter: tick one status or several, the same way Grouping
+ * works. The value stays a single string ("new,hold") so the URL, saved list
+ * state, bulk selection and the manifest all carry it unchanged; the API reads
+ * the comma list. Nothing ticked means every status.
+ */
+function DeliveryStatusMultiSelect({
+  label,
+  onChange,
+  value,
+}: {
+  label: string;
+  onChange: (value: string) => void;
+  value: string;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLDivElement>(null);
+  const selected = new Set(selectedDeliveryStatuses(value));
+  const chosen = deliveryStatuses.filter((status) => selected.has(status));
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const closeOutside = (event: MouseEvent) => {
+      if (anchor.current !== null && !anchor.current.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("click", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("click", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  const toggle = (status: string) => {
+    onChange(
+      deliveryStatuses
+        .filter((candidate) =>
+          candidate === status ? !selected.has(candidate) : selected.has(candidate),
+        )
+        .join(","),
+    );
+  };
+
+  return (
+    <div className="filter-grouping-multi-select" ref={anchor}>
+      <button
+        aria-expanded={open}
+        aria-haspopup="true"
+        aria-label={label}
+        className="grouping-button"
+        onClick={() => setOpen((current) => !current)}
+        type="button"
+      >
+        <span className="grouping-label">
+          {chosen.length === 0 ? (
+            t("operations.allLabel", { label })
+          ) : (
+            <>
+              {label}:{" "}
+              <span className="grouping-values">
+                {chosen.map((status) => t(`statuses.${status}`)).join(", ")}
+              </span>
+            </>
+          )}
+        </span>
+        <ChevronDown aria-hidden="true" size={16} style={{ marginLeft: "6px" }} />
+      </button>
+      {open ? (
+        <div
+          className="grouping-popover"
+          role="group"
+          aria-label={label}
+          style={{ display: "block" }}
+        >
+          {deliveryStatuses.map((status) => (
+            <label className="grouping-checkbox" key={status}>
+              <input
+                checked={selected.has(status)}
+                onChange={() => toggle(status)}
+                type="checkbox"
+              />
+              {t(`statuses.${status}`)}
+            </label>
+          ))}
+          {chosen.length > 0 ? (
+            <>
+              <div className="grouping-divider" />
+              <button
+                className="grouping-clear-button"
+                onClick={() => {
+                  onChange("");
+                  setOpen(false);
+                }}
+                type="button"
+              >
+                {t("operations.allLabel", { label })}
+              </button>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function FilterSelect({
   children,
   label,
@@ -4821,10 +5124,7 @@ function CancellationTypeSelect({
   return (
     <label className="field">
       <span>{t("operations.cancellationType")}</span>
-      <select
-        onChange={(event) => onChange(event.target.value as CancellationType)}
-        value={value}
-      >
+      <select onChange={(event) => onChange(event.target.value as CancellationType)} value={value}>
         {cancellationTypes.map((type) => (
           <option key={type} value={type}>
             {t(`operations.cancellationTypes.${type}`)}
@@ -4992,7 +5292,7 @@ function FinancialStatusCell({
           {...(order.orderType === "gcc_international" && order.deliveryStatus !== "delivered"
             ? { internationalCarrierStatus: order.internationalCarrierStatus }
             : {})}
-          />
+        />
       )}
       <span>
         <span className="financial-status-label">{t("operations.driverCashShortLabel")}: </span>
@@ -5008,9 +5308,7 @@ function FinancialStatusCell({
       )}
       {order.traderReceivableStatus === "collected" ? (
         <span data-trader-receivable-status="collected">
-          <span className="financial-status-label">
-            {t("operations.moneyCollectedLabel")}: {" "}
-          </span>
+          <span className="financial-status-label">{t("operations.moneyCollectedLabel")}: </span>
           {t("operations.moneyCollectedFromTrader")}
         </span>
       ) : null}
@@ -5545,7 +5843,10 @@ function OrderRowActions({
             >
               {t("operations.viewDetails")}
             </button>
-            {!isDriverSelfServiceUser && (canEditOrder(order.deliveryStatus) || order.deliveryStatus === "closed" || order.deliveryStatus === "delivered") ? (
+            {!isDriverSelfServiceUser &&
+            (canEditOrder(order.deliveryStatus) ||
+              order.deliveryStatus === "closed" ||
+              order.deliveryStatus === "delivered") ? (
               <button
                 className="button button-secondary"
                 onClick={() => {
@@ -5840,8 +6141,7 @@ function groupVisibleOrders(
             name: emirateName,
           };
         } else if (areaEmirateMap) {
-          emirateInfo =
-            areaEmirateMap.get(localizedAreaName) ?? areaEmirateMap.get(order.areaName);
+          emirateInfo = areaEmirateMap.get(localizedAreaName) ?? areaEmirateMap.get(order.areaName);
         }
 
         // If we found emirate info, use the full format; otherwise just show area

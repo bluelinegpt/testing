@@ -13,6 +13,7 @@ import { TenantContextAccessor } from "../tenancy/tenant-context.js";
 import { PushOutboxWriter } from "../push/push-outbox-writer.service.js";
 import { EmployeeDeliveryEarningService } from "../payroll/employee-delivery-earning.service.js";
 import { OutsourcedDriverFeeService } from "../payroll/outsourced-driver-fee.service.js";
+import { deliveryStatusFilterPredicate } from "./delivery-status-filter.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import { resolveOrderCancellationReason } from "./order-cancellation-reason.js";
 import type {
@@ -776,7 +777,7 @@ export class OrdersWorkflowService {
           or o.customer_name ilike '%' || ${search} || '%'
           or o.customer_mobile_number ilike '%' || ${search} || '%'
           or t.name_en ilike '%' || ${search} || '%')
-        and (${input.deliveryStatus ?? null}::text is null or o.delivery_status = ${input.deliveryStatus ?? null})
+        and ${deliveryStatusFilterPredicate(input.deliveryStatus)}
         and ${workflowStepPredicate}
         and (${input.orderType ?? null}::text is null or o.order_type=${input.orderType ?? null})
         and (${excludeInternational} = false or o.order_type <> 'gcc_international')

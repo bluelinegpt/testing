@@ -33,6 +33,7 @@ import {
   type ActiveViewDefinition,
   validateOrderViews,
 } from "../company-configuration/order-views.js";
+import { deliveryStatusFilterPredicate } from "./delivery-status-filter.js";
 import { activeStatusPredicate, customOrderViewPredicate } from "./order-view-predicate.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
@@ -1079,7 +1080,7 @@ export class OperationsService {
     const referenceTerm = referenceNumber === null ? null : normalizeReferenceTerm(referenceNumber);
     const serialNumber = this.optionalFilter(filters.serialNumber);
     const serialTerm = serialNumber === null ? null : this.normalizeOrderIdentifier(serialNumber);
-    const deliveryStatus = this.optionalFilter(filters.deliveryStatus);
+    const deliveryStatusPredicate = deliveryStatusFilterPredicate(filters.deliveryStatus);
     const cancellationReason = this.cancellationReasonFilter(filters.cancellationReason);
     const internationalCarrierStatus = this.optionalFilter(filters.internationalCarrierStatus);
     const orderType = this.optionalFilter(filters.orderType);
@@ -1289,7 +1290,7 @@ export class OperationsService {
       and (${serialTerm}::text is null
            or o.serial_number_normalized = ${serialTerm}::text)
       and ${unifiedOrderSearchPredicate(search)}
-      and (${deliveryStatus}::text is null or o.delivery_status = ${deliveryStatus})
+      and ${deliveryStatusPredicate}
       and (${cancellationReason}::text is null or o.cancellation_reason_code = ${cancellationReason})
       and (${internationalCarrierStatus}::text is null or o.international_carrier_status = ${internationalCarrierStatus})
       and ${workflowStepPredicate}
@@ -1758,7 +1759,7 @@ export class OperationsService {
     const referenceTerm = referenceNumber === null ? null : normalizeReferenceTerm(referenceNumber);
     const serialNumber = this.optionalFilter(filters.serialNumber);
     const serialTerm = serialNumber === null ? null : this.normalizeOrderIdentifier(serialNumber);
-    const deliveryStatus = this.optionalFilter(filters.deliveryStatus);
+    const deliveryStatusPredicate = deliveryStatusFilterPredicate(filters.deliveryStatus);
     const cancellationReason = this.cancellationReasonFilter(filters.cancellationReason);
     const cashStatus = this.optionalFilter(filters.cashStatus);
     const settlementStatus = this.optionalFilter(filters.settlementStatus);
@@ -1876,7 +1877,7 @@ export class OperationsService {
         and (${serialTerm}::text is null
              or o.serial_number_normalized = ${serialTerm}::text)
         and ${unifiedOrderSearchPredicate(search)}
-        and (${deliveryStatus}::text is null or o.delivery_status = ${deliveryStatus})
+        and ${deliveryStatusPredicate}
         and (${cancellationReason}::text is null or o.cancellation_reason_code = ${cancellationReason})
         and ${exportWorkflowStepPredicate}
         and (${cashStatus}::text is null or o.driver_reconciliation_status = ${cashStatus})

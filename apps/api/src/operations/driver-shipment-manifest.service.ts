@@ -10,6 +10,7 @@ import { ApplicationException } from "../presentation/errors/application.excepti
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
 
+import { deliveryStatusFilterPredicate } from "./delivery-status-filter.js";
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
 import type { ReportLanguage } from "./driver-collection-report-html.js";
 import {
@@ -191,8 +192,7 @@ export class DriverShipmentManifestService {
            or (${input.quickView ?? "active"} = 'hold' and o.delivery_status = 'hold')
            or (${input.quickView ?? "active"} = 'closed' and o.delivery_status = 'closed')
            or (${input.quickView ?? "active"} = 'cancelled' and o.delivery_status = 'cancelled'))
-         and (${input.deliveryStatus?.trim() || null}::text is null
-           or o.delivery_status = ${input.deliveryStatus?.trim() || null})
+         and ${deliveryStatusFilterPredicate(input.deliveryStatus)}
          and (${input.orderType ?? null}::text is null or o.order_type=${input.orderType ?? null})
          and (${input.cashStatus?.trim() || null}::text is null
            or o.driver_reconciliation_status = ${input.cashStatus?.trim() || null})
