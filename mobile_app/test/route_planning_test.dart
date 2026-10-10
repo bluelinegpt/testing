@@ -14,7 +14,11 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'support/driver_offline_fakes.dart';
 
-Map<String, dynamic> _runJson({int revision = 1, String resultSource = 'provider', List<String> deferred = const []}) => {
+Map<String, dynamic> _runJson({
+  int revision = 1,
+  String resultSource = 'provider',
+  List<String> deferred = const [],
+}) => {
   'id': 'run-1',
   'referenceNumber': 'RUN-000001',
   'businessDate': '2026-10-10',
@@ -43,7 +47,12 @@ Map<String, dynamic> _runJson({int revision = 1, String resultSource = 'provider
       'latitude': 25.392,
       'longitude': 55.453,
       'orders': [
-        {'id': 'order-1', 'orderNumber': 'ORD-000001', 'customerName': 'Customer A', 'deliveryStatus': 'assigned_to_driver'},
+        {
+          'id': 'order-1',
+          'orderNumber': 'ORD-000001',
+          'customerName': 'Customer A',
+          'deliveryStatus': 'assigned_to_driver',
+        },
       ],
     },
     {
@@ -59,7 +68,8 @@ Map<String, dynamic> _runJson({int revision = 1, String resultSource = 'provider
     },
   ],
   'deferredOrders': [
-    for (final id in deferred) {'id': id, 'orderNumber': 'ORD-$id', 'customerName': 'Deferred $id'},
+    for (final id in deferred)
+      {'id': id, 'orderNumber': 'ORD-$id', 'customerName': 'Deferred $id'},
   ],
 };
 
@@ -83,19 +93,33 @@ final class _FakeRoutes implements DriverRouteRepository {
   }
 
   @override
-  Future<RouteState> replan(String idempotencyKey, int expectedRevision, {String? startAreaId}) async {
+  Future<RouteState> replan(
+    String idempotencyKey,
+    int expectedRevision, {
+    String? startAreaId,
+  }) async {
     calls.add('replan:$expectedRevision');
     return state;
   }
 
   @override
-  Future<RouteState> reverse(String idempotencyKey, int expectedRevision) async {
+  Future<RouteState> reverse(
+    String idempotencyKey,
+    int expectedRevision,
+  ) async {
     calls.add('reverse:$expectedRevision');
-    return state = RouteState.fromJson({'enabled': true, 'run': _runJson(revision: expectedRevision + 1)});
+    return state = RouteState.fromJson({
+      'enabled': true,
+      'run': _runJson(revision: expectedRevision + 1),
+    });
   }
 
   @override
-  Future<RouteState> defer(String idempotencyKey, String orderId, int expectedRevision) async {
+  Future<RouteState> defer(
+    String idempotencyKey,
+    String orderId,
+    int expectedRevision,
+  ) async {
     calls.add('defer:$orderId:$expectedRevision');
     return state = RouteState.fromJson({
       'enabled': true,
@@ -104,7 +128,11 @@ final class _FakeRoutes implements DriverRouteRepository {
   }
 }
 
-Widget _wrap(Widget child, DriverRouteRepository routes, {Locale locale = const Locale('en')}) => ProviderScope(
+Widget _wrap(
+  Widget child,
+  DriverRouteRepository routes, {
+  Locale locale = const Locale('en'),
+}) => ProviderScope(
   overrides: [driverRouteRepositoryProvider.overrideWithValue(routes)],
   child: MaterialApp(
     locale: locale,
@@ -135,7 +163,12 @@ void main() {
           ..._runJson(),
           'distanceMeters': 'not-a-number',
           'areas': [
-            {'areaId': 'x', 'orderCount': '3', 'latitude': '25.1', 'orders': 'oops'},
+            {
+              'areaId': 'x',
+              'orderCount': '3',
+              'latitude': '25.1',
+              'orders': 'oops',
+            },
             'garbage',
           ],
         },
@@ -149,8 +182,13 @@ void main() {
     });
 
     test('round-trips through JSON for the offline copy', () {
-      final state = RouteState.fromJson({'enabled': true, 'run': _runJson(deferred: ['o9'])});
-      final again = RouteState.fromJson(jsonDecode(jsonEncode(state.toJson())) as Map<String, dynamic>);
+      final state = RouteState.fromJson({
+        'enabled': true,
+        'run': _runJson(deferred: ['o9']),
+      });
+      final again = RouteState.fromJson(
+        jsonDecode(jsonEncode(state.toJson())) as Map<String, dynamic>,
+      );
       expect(again.run!.areas.map((a) => a.areaId), ['area-ajm', 'area-shj']);
       expect(again.run!.deferredOrders.single.id, 'o9');
       expect(again.run!.nextArea!.areaNameEn, 'Al Nuaimiya');
@@ -158,29 +196,40 @@ void main() {
   });
 
   group('offline copy', () {
-    test('serves the saved route when the network is down, the same day only', () async {
-      final storage = MemorySensitiveStorage();
-      final online = _FakeRoutes(RouteState.fromJson({'enabled': true, 'run': _runJson()}));
-      var now = DateTime(2026, 10, 10, 9);
-      await CachedDriverRouteRepository(inner: online, storage: storage, clock: () => now).current();
+    test(
+      'serves the saved route when the network is down, the same day only',
+      () async {
+        final storage = MemorySensitiveStorage();
+        final online = _FakeRoutes(
+          RouteState.fromJson({'enabled': true, 'run': _runJson()}),
+        );
+        var now = DateTime(2026, 10, 10, 9);
+        await CachedDriverRouteRepository(
+          inner: online,
+          storage: storage,
+          clock: () => now,
+        ).current();
 
-      final offline = CachedDriverRouteRepository(
-        inner: _Failing(const ApiFailure(ApiFailureKind.network)),
-        storage: storage,
-        clock: () => now,
-      );
-      final cached = await offline.current();
-      expect(cached.offline, isTrue);
-      expect(cached.run!.referenceNumber, 'RUN-000001');
+        final offline = CachedDriverRouteRepository(
+          inner: _Failing(const ApiFailure(ApiFailureKind.network)),
+          storage: storage,
+          clock: () => now,
+        );
+        final cached = await offline.current();
+        expect(cached.offline, isTrue);
+        expect(cached.run!.referenceNumber, 'RUN-000001');
 
-      now = DateTime(2026, 10, 11, 9);
-      await expectLater(offline.current(), throwsA(isA<ApiFailure>()));
-    });
+        now = DateTime(2026, 10, 11, 9);
+        await expectLater(offline.current(), throwsA(isA<ApiFailure>()));
+      },
+    );
 
     test('never serves a saved route for a refused request', () async {
       final storage = MemorySensitiveStorage();
       await CachedDriverRouteRepository(
-        inner: _FakeRoutes(RouteState.fromJson({'enabled': true, 'run': _runJson()})),
+        inner: _FakeRoutes(
+          RouteState.fromJson({'enabled': true, 'run': _runJson()}),
+        ),
         storage: storage,
       ).current();
       final refused = CachedDriverRouteRepository(
@@ -201,8 +250,12 @@ void main() {
   group('Orders screen tabs', () {
     Widget tabs(bool enabled) => ProviderScope(
       overrides: [
-        driverRouteRepositoryProvider.overrideWithValue(_FakeRoutes(RouteState(enabled: enabled))),
-        driverRepositoryProvider.overrideWithValue(ScriptedApiDriverRepository()),
+        driverRouteRepositoryProvider.overrideWithValue(
+          _FakeRoutes(RouteState(enabled: enabled)),
+        ),
+        driverRepositoryProvider.overrideWithValue(
+          ScriptedApiDriverRepository(),
+        ),
       ],
       child: MaterialApp(
         supportedLocales: AppLocalizations.supportedLocales,
@@ -216,13 +269,17 @@ void main() {
       ),
     );
 
-    testWidgets('no tabs when route planning is off: the plain Orders list', (tester) async {
+    testWidgets('no tabs when route planning is off: the plain Orders list', (
+      tester,
+    ) async {
       await tester.pumpWidget(tabs(false));
       await tester.pumpAndSettle();
       expect(find.byType(TabBar), findsNothing);
     });
 
-    testWidgets('My Orders and Route tabs when route planning is on', (tester) async {
+    testWidgets('My Orders and Route tabs when route planning is on', (
+      tester,
+    ) async {
       await tester.pumpWidget(tabs(true));
       await tester.pumpAndSettle();
       expect(find.widgetWithText(Tab, 'My Orders'), findsOneWidget);
@@ -231,10 +288,17 @@ void main() {
   });
 
   group('Route tab', () {
-    testWidgets('plans a route, shows the Area sequence and defers an Order', (tester) async {
+    testWidgets('plans a route, shows the Area sequence and defers an Order', (
+      tester,
+    ) async {
       _tall(tester);
       final routes = _FakeRoutes(const RouteState(enabled: true));
-      await tester.pumpWidget(_wrap(const DriverRoutePage(initial: RouteState(enabled: true)), routes));
+      await tester.pumpWidget(
+        _wrap(
+          const DriverRoutePage(initial: RouteState(enabled: true)),
+          routes,
+        ),
+      );
       await tester.tap(find.text('Plan my route'));
       await tester.pumpAndSettle();
       expect(routes.calls, contains('plan'));
@@ -250,11 +314,23 @@ void main() {
       expect(find.text('Deferred to the end'), findsOneWidget);
     });
 
-    testWidgets('reverse sends the shown revision; a fallback route says so', (tester) async {
+    testWidgets('reverse sends the shown revision; a fallback route says so', (
+      tester,
+    ) async {
       _tall(tester);
-      final routes = _FakeRoutes(RouteState.fromJson({'enabled': true, 'run': _runJson(resultSource: 'fallback')}));
-      await tester.pumpWidget(_wrap(DriverRoutePage(initial: routes.state), routes));
-      expect(find.text('This is a standard Area order, not an optimized route.'), findsOneWidget);
+      final routes = _FakeRoutes(
+        RouteState.fromJson({
+          'enabled': true,
+          'run': _runJson(resultSource: 'fallback'),
+        }),
+      );
+      await tester.pumpWidget(
+        _wrap(DriverRoutePage(initial: routes.state), routes),
+      );
+      expect(
+        find.text('This is a standard Area order, not an optimized route.'),
+        findsOneWidget,
+      );
       await tester.tap(find.text('Reverse direction'));
       await tester.pumpAndSettle();
       expect(routes.calls, contains('reverse:1'));
@@ -262,18 +338,29 @@ void main() {
 
     testWidgets('a saved offline route disables changes', (tester) async {
       _tall(tester);
-      final offline = RouteState.fromJson({'enabled': true, 'run': _runJson()}, offline: true);
+      final offline = RouteState.fromJson({
+        'enabled': true,
+        'run': _runJson(),
+      }, offline: true);
       final routes = _FakeRoutes(offline);
       await tester.pumpWidget(_wrap(DriverRoutePage(initial: offline), routes));
       expect(find.textContaining('Offline'), findsOneWidget);
-      final replan = tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Replan'));
+      final replan = tester.widget<OutlinedButton>(
+        find.widgetWithText(OutlinedButton, 'Replan'),
+      );
       expect(replan.onPressed, isNull);
     });
 
     testWidgets('renders in Arabic', (tester) async {
       _tall(tester);
       final state = RouteState.fromJson({'enabled': true, 'run': _runJson()});
-      await tester.pumpWidget(_wrap(DriverRoutePage(initial: state), _FakeRoutes(state), locale: const Locale('ar')));
+      await tester.pumpWidget(
+        _wrap(
+          DriverRoutePage(initial: state),
+          _FakeRoutes(state),
+          locale: const Locale('ar'),
+        ),
+      );
       expect(find.text('النعيمية'), findsWidgets);
       expect(find.text('عكس الاتجاه'), findsOneWidget);
     });
@@ -286,11 +373,23 @@ final class _Failing implements DriverRouteRepository {
   @override
   Future<RouteState> current() async => throw error;
   @override
-  Future<RouteState> plan(String idempotencyKey, {String? startAreaId}) async => throw error;
+  Future<RouteState> plan(String idempotencyKey, {String? startAreaId}) async =>
+      throw error;
   @override
-  Future<RouteState> replan(String idempotencyKey, int expectedRevision, {String? startAreaId}) async => throw error;
+  Future<RouteState> replan(
+    String idempotencyKey,
+    int expectedRevision, {
+    String? startAreaId,
+  }) async => throw error;
   @override
-  Future<RouteState> reverse(String idempotencyKey, int expectedRevision) async => throw error;
+  Future<RouteState> reverse(
+    String idempotencyKey,
+    int expectedRevision,
+  ) async => throw error;
   @override
-  Future<RouteState> defer(String idempotencyKey, String orderId, int expectedRevision) async => throw error;
+  Future<RouteState> defer(
+    String idempotencyKey,
+    String orderId,
+    int expectedRevision,
+  ) async => throw error;
 }

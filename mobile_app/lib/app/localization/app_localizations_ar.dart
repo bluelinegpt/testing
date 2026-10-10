@@ -782,7 +782,8 @@ class AppLocalizationsAr extends AppLocalizations {
   String get routeTabRoute => 'المسار';
 
   @override
-  String get routeIntro => 'خطط مساري يرتب مناطقك بترتيب مناسب وينتهي عند الفرع. هذا ليس ملاحة خطوة بخطوة — افتح الخرائط لكل عنوان.';
+  String get routeIntro =>
+      'خطط مساري يرتب مناطقك بترتيب مناسب وينتهي عند الفرع. هذا ليس ملاحة خطوة بخطوة — افتح الخرائط لكل عنوان.';
 
   @override
   String get routePlanFromBranch => 'خطط مساري';
@@ -827,13 +828,16 @@ class AppLocalizationsAr extends AppLocalizations {
   String get routeOpenInMaps => 'فتح في خرائط Google';
 
   @override
-  String get routeFallbackNotice => 'هذا ترتيب عادي للمناطق، وليس مسارًا محسّنًا.';
+  String get routeFallbackNotice =>
+      'هذا ترتيب عادي للمناطق، وليس مسارًا محسّنًا.';
 
   @override
-  String get routePartialNotice => 'تعذّر ترتيب بعض المناطق، وهي معروضة في النهاية.';
+  String get routePartialNotice =>
+      'تعذّر ترتيب بعض المناطق، وهي معروضة في النهاية.';
 
   @override
-  String get routeOfflineNotice => 'غير متصل — يُعرض مسارك المحفوظ. التعديل غير متاح حتى يعود الاتصال.';
+  String get routeOfflineNotice =>
+      'غير متصل — يُعرض مسارك المحفوظ. التعديل غير متاح حتى يعود الاتصال.';
 
   @override
   String get routeStaleNotice => 'تم تحديث مسارك من جهاز آخر. يُعرض الأحدث.';

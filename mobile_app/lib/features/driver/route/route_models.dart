@@ -7,7 +7,8 @@
 /// is exactly what broke the Trader Orders list.)
 library;
 
-String? _string(Object? value) => value is String && value.isNotEmpty ? value : null;
+String? _string(Object? value) =>
+    value is String && value.isNotEmpty ? value : null;
 
 int _int(Object? value, [int fallback = 0]) => switch (value) {
   final int number => number,
@@ -27,7 +28,10 @@ double? _double(Object? value) => switch (value) {
 bool _bool(Object? value) => value == true;
 
 List<Map<String, dynamic>> _maps(Object? value) => value is List
-    ? [for (final item in value) if (item is Map) Map<String, dynamic>.from(item)]
+    ? [
+        for (final item in value)
+          if (item is Map) Map<String, dynamic>.from(item),
+      ]
     : const [];
 
 final class RouteOrder {
@@ -53,7 +57,11 @@ final class RouteOrder {
 
   final String id;
   final String orderNumber;
-  final String? serialNumber, referenceNumber, customerName, deliveryStatus, areaId;
+  final String? serialNumber,
+      referenceNumber,
+      customerName,
+      deliveryStatus,
+      areaId;
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -98,7 +106,9 @@ final class RouteArea {
     cashHandoverCount: _int(json['cashHandoverCount']),
     latitude: _double(json['latitude']),
     longitude: _double(json['longitude']),
-    orders: [for (final item in _maps(json['orders'])) RouteOrder.fromJson(item)],
+    orders: [
+      for (final item in _maps(json['orders'])) RouteOrder.fromJson(item),
+    ],
   );
 
   final String areaId, areaNameEn, emirateNameEn, status;
@@ -112,8 +122,10 @@ final class RouteArea {
   bool get isDone => status == 'done';
   bool get hasPin => latitude != null && longitude != null;
 
-  String areaName(String locale) => locale == 'ar' ? (areaNameAr ?? areaNameEn) : areaNameEn;
-  String emirateName(String locale) => locale == 'ar' ? (emirateNameAr ?? emirateNameEn) : emirateNameEn;
+  String areaName(String locale) =>
+      locale == 'ar' ? (areaNameAr ?? areaNameEn) : areaNameEn;
+  String emirateName(String locale) =>
+      locale == 'ar' ? (emirateNameAr ?? emirateNameEn) : emirateNameEn;
 
   Map<String, dynamic> toJson() => {
     'areaId': areaId,
@@ -163,7 +175,10 @@ final class RouteRun {
     distanceMeters: _intOrNull(json['distanceMeters']),
     durationSeconds: _intOrNull(json['durationSeconds']),
     areas: [for (final item in _maps(json['areas'])) RouteArea.fromJson(item)],
-    deferredOrders: [for (final item in _maps(json['deferredOrders'])) RouteOrder.fromJson(item)],
+    deferredOrders: [
+      for (final item in _maps(json['deferredOrders']))
+        RouteOrder.fromJson(item),
+    ],
     nextAreaId: _string(json['nextAreaId']),
     cashHandoverOrderCount: _int(json['cashHandoverOrderCount']),
   );
@@ -205,17 +220,31 @@ final class RouteRun {
 /// What the Route tab shows. `offline` marks a saved copy served because the
 /// server could not be reached; actions are disabled while it is set.
 final class RouteState {
-  const RouteState({required this.enabled, this.run, this.stale = false, this.offline = false});
+  const RouteState({
+    required this.enabled,
+    this.run,
+    this.stale = false,
+    this.offline = false,
+  });
 
-  factory RouteState.fromJson(Map<String, dynamic> json, {bool offline = false}) => RouteState(
+  factory RouteState.fromJson(
+    Map<String, dynamic> json, {
+    bool offline = false,
+  }) => RouteState(
     enabled: _bool(json['enabled']),
     stale: _bool(json['stale']),
     offline: offline,
-    run: json['run'] is Map ? RouteRun.fromJson(Map<String, dynamic>.from(json['run'] as Map)) : null,
+    run: json['run'] is Map
+        ? RouteRun.fromJson(Map<String, dynamic>.from(json['run'] as Map))
+        : null,
   );
 
   final bool enabled, stale, offline;
   final RouteRun? run;
 
-  Map<String, dynamic> toJson() => {'enabled': enabled, 'stale': false, 'run': run?.toJson()};
+  Map<String, dynamic> toJson() => {
+    'enabled': enabled,
+    'stale': false,
+    'run': run?.toJson(),
+  };
 }

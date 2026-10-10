@@ -222,16 +222,15 @@ final class CompanyCodeController extends AsyncNotifier<String?> {
       ref.read(storageProvider).read(SensitiveKey.companyMobileCode);
 
   Future<void> change(String code) async {
-    await ref
-        .read(storageProvider)
-        .write(SensitiveKey.companyMobileCode, code);
+    await ref.read(storageProvider).write(SensitiveKey.companyMobileCode, code);
     state = AsyncData(code);
   }
 }
 
-final companyCodeProvider = AsyncNotifierProvider<CompanyCodeController, String?>(
-  CompanyCodeController.new,
-);
+final companyCodeProvider =
+    AsyncNotifierProvider<CompanyCodeController, String?>(
+      CompanyCodeController.new,
+    );
 
 final startupProvider = FutureProvider<void>((ref) async {
   // Firebase must be initialized before `authenticationProvider.future`

@@ -4,7 +4,6 @@ import 'package:bluelinegpt_mobile/app/theme/app_theme.dart';
 import 'package:bluelinegpt_mobile/core/auth/auth_models.dart';
 import 'package:bluelinegpt_mobile/core/validation/safe_parsers.dart';
 import 'package:bluelinegpt_mobile/features/common/pages.dart';
-import 'package:bluelinegpt_mobile/features/driver/driver_pages.dart';
 import 'package:bluelinegpt_mobile/features/driver/route/route_pages.dart';
 import 'package:bluelinegpt_mobile/features/operator_workflow/operator_pages.dart';
 import 'package:bluelinegpt_mobile/features/customer/customer_pages.dart';

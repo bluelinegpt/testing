@@ -789,7 +789,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get routeTabRoute => 'Route';
 
   @override
-  String get routeIntro => 'Plan my route puts your Areas in a good order and ends at the branch. It is not turn-by-turn navigation — open Maps for each address.';
+  String get routeIntro =>
+      'Plan my route puts your Areas in a good order and ends at the branch. It is not turn-by-turn navigation — open Maps for each address.';
 
   @override
   String get routePlanFromBranch => 'Plan my route';
@@ -834,19 +835,24 @@ class AppLocalizationsEn extends AppLocalizations {
   String get routeOpenInMaps => 'Open in Google Maps';
 
   @override
-  String get routeFallbackNotice => 'This is a standard Area order, not an optimized route.';
+  String get routeFallbackNotice =>
+      'This is a standard Area order, not an optimized route.';
 
   @override
-  String get routePartialNotice => 'Some Areas could not be placed and are listed at the end.';
+  String get routePartialNotice =>
+      'Some Areas could not be placed and are listed at the end.';
 
   @override
-  String get routeOfflineNotice => 'Offline — showing your saved route. Changes are disabled until you reconnect.';
+  String get routeOfflineNotice =>
+      'Offline — showing your saved route. Changes are disabled until you reconnect.';
 
   @override
-  String get routeStaleNotice => 'Your route was updated on another device. Showing the latest.';
+  String get routeStaleNotice =>
+      'Your route was updated on another device. Showing the latest.';
 
   @override
-  String get routeActionFailed => 'The route could not be updated. Please try again.';
+  String get routeActionFailed =>
+      'The route could not be updated. Please try again.';
 
   @override
   String get routeEstimate => 'Estimated';

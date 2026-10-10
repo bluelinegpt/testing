@@ -12,9 +12,17 @@ import 'package:dio/dio.dart';
 abstract interface class DriverRouteRepository {
   Future<RouteState> current();
   Future<RouteState> plan(String idempotencyKey, {String? startAreaId});
-  Future<RouteState> replan(String idempotencyKey, int expectedRevision, {String? startAreaId});
+  Future<RouteState> replan(
+    String idempotencyKey,
+    int expectedRevision, {
+    String? startAreaId,
+  });
   Future<RouteState> reverse(String idempotencyKey, int expectedRevision);
-  Future<RouteState> defer(String idempotencyKey, String orderId, int expectedRevision);
+  Future<RouteState> defer(
+    String idempotencyKey,
+    String orderId,
+    int expectedRevision,
+  );
 }
 
 final class ApiDriverRouteRepository implements DriverRouteRepository {
@@ -22,25 +30,42 @@ final class ApiDriverRouteRepository implements DriverRouteRepository {
   final ApiClient api;
 
   @override
-  Future<RouteState> current() async => _state((await api.get<Object?>('portal/driver/route')).data);
+  Future<RouteState> current() async =>
+      _state((await api.get<Object?>('portal/driver/route')).data);
 
   @override
   Future<RouteState> plan(String idempotencyKey, {String? startAreaId}) =>
       _post('plan', idempotencyKey, {'startAreaId': ?startAreaId});
 
   @override
-  Future<RouteState> replan(String idempotencyKey, int expectedRevision, {String? startAreaId}) =>
-      _post('replan', idempotencyKey, {'expectedRevision': expectedRevision, 'startAreaId': ?startAreaId});
+  Future<RouteState> replan(
+    String idempotencyKey,
+    int expectedRevision, {
+    String? startAreaId,
+  }) => _post('replan', idempotencyKey, {
+    'expectedRevision': expectedRevision,
+    'startAreaId': ?startAreaId,
+  });
 
   @override
   Future<RouteState> reverse(String idempotencyKey, int expectedRevision) =>
       _post('reverse', idempotencyKey, {'expectedRevision': expectedRevision});
 
   @override
-  Future<RouteState> defer(String idempotencyKey, String orderId, int expectedRevision) =>
-      _post('defer', idempotencyKey, {'orderId': orderId, 'expectedRevision': expectedRevision});
+  Future<RouteState> defer(
+    String idempotencyKey,
+    String orderId,
+    int expectedRevision,
+  ) => _post('defer', idempotencyKey, {
+    'orderId': orderId,
+    'expectedRevision': expectedRevision,
+  });
 
-  Future<RouteState> _post(String action, String idempotencyKey, Map<String, Object?> body) async {
+  Future<RouteState> _post(
+    String action,
+    String idempotencyKey,
+    Map<String, Object?> body,
+  ) async {
     final response = await api.postWithHeaders<Object?>(
       'portal/driver/route/$action',
       headers: {'X-Idempotency-Key': idempotencyKey},
@@ -78,18 +103,33 @@ final class CachedDriverRouteRepository implements DriverRouteRepository {
       _guard(() => inner.plan(idempotencyKey, startAreaId: startAreaId));
 
   @override
-  Future<RouteState> replan(String idempotencyKey, int expectedRevision, {String? startAreaId}) =>
-      _guard(() => inner.replan(idempotencyKey, expectedRevision, startAreaId: startAreaId));
+  Future<RouteState> replan(
+    String idempotencyKey,
+    int expectedRevision, {
+    String? startAreaId,
+  }) => _guard(
+    () => inner.replan(
+      idempotencyKey,
+      expectedRevision,
+      startAreaId: startAreaId,
+    ),
+  );
 
   @override
   Future<RouteState> reverse(String idempotencyKey, int expectedRevision) =>
       _guard(() => inner.reverse(idempotencyKey, expectedRevision));
 
   @override
-  Future<RouteState> defer(String idempotencyKey, String orderId, int expectedRevision) =>
-      _guard(() => inner.defer(idempotencyKey, orderId, expectedRevision));
+  Future<RouteState> defer(
+    String idempotencyKey,
+    String orderId,
+    int expectedRevision,
+  ) => _guard(() => inner.defer(idempotencyKey, orderId, expectedRevision));
 
-  Future<RouteState> _guard(Future<RouteState> Function() call, {bool allowCache = false}) async {
+  Future<RouteState> _guard(
+    Future<RouteState> Function() call, {
+    bool allowCache = false,
+  }) async {
     try {
       final state = await call();
       await _save(state);
@@ -109,7 +149,9 @@ final class CachedDriverRouteRepository implements DriverRouteRepository {
         : error is DioException
         ? const ApiErrorMapper().map(error).kind
         : null;
-    return kind == ApiFailureKind.network || kind == ApiFailureKind.timeout || kind == ApiFailureKind.unavailable;
+    return kind == ApiFailureKind.network ||
+        kind == ApiFailureKind.timeout ||
+        kind == ApiFailureKind.unavailable;
   }
 
   String _today() => _clock().toIso8601String().substring(0, 10);
@@ -134,8 +176,15 @@ final class CachedDriverRouteRepository implements DriverRouteRepository {
       final raw = await storage.read(SensitiveKey.driverRouteCache);
       if (raw == null) return null;
       final decoded = jsonDecode(raw);
-      if (decoded is! Map || decoded['savedOn'] != _today() || decoded['state'] is! Map) return null;
-      return RouteState.fromJson(Map<String, dynamic>.from(decoded['state'] as Map), offline: true);
+      if (decoded is! Map ||
+          decoded['savedOn'] != _today() ||
+          decoded['state'] is! Map) {
+        return null;
+      }
+      return RouteState.fromJson(
+        Map<String, dynamic>.from(decoded['state'] as Map),
+        offline: true,
+      );
     } on Object {
       return null;
     }

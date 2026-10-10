@@ -22,10 +22,12 @@ final class DriverOrdersWithRouteTabs extends ConsumerStatefulWidget {
   final String? initialDeliveryStatus;
 
   @override
-  ConsumerState<DriverOrdersWithRouteTabs> createState() => _DriverOrdersWithRouteTabsState();
+  ConsumerState<DriverOrdersWithRouteTabs> createState() =>
+      _DriverOrdersWithRouteTabsState();
 }
 
-final class _DriverOrdersWithRouteTabsState extends ConsumerState<DriverOrdersWithRouteTabs> {
+final class _DriverOrdersWithRouteTabsState
+    extends ConsumerState<DriverOrdersWithRouteTabs> {
   late final Future<RouteState> _route;
 
   @override
@@ -39,7 +41,9 @@ final class _DriverOrdersWithRouteTabsState extends ConsumerState<DriverOrdersWi
 
   @override
   Widget build(BuildContext context) {
-    final orders = DriverOrdersPage(initialDeliveryStatus: widget.initialDeliveryStatus);
+    final orders = DriverOrdersPage(
+      initialDeliveryStatus: widget.initialDeliveryStatus,
+    );
     return FutureBuilder<RouteState>(
       future: _route,
       builder: (context, snapshot) {
@@ -57,7 +61,12 @@ final class _DriverOrdersWithRouteTabsState extends ConsumerState<DriverOrdersWi
                 ],
               ),
               Expanded(
-                child: TabBarView(children: [orders, DriverRoutePage(initial: state)]),
+                child: TabBarView(
+                  children: [
+                    orders,
+                    DriverRoutePage(initial: state),
+                  ],
+                ),
               ),
             ],
           ),
@@ -92,27 +101,40 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
       final next = await action(_uuid.v4());
       if (!mounted) return;
       setState(() => _state = next);
-      if (next.stale) messenger.showSnackBar(SnackBar(content: Text(l10n.routeStaleNotice)));
+      if (next.stale) {
+        messenger.showSnackBar(SnackBar(content: Text(l10n.routeStaleNotice)));
+      }
     } on Object {
-      if (mounted) messenger.showSnackBar(SnackBar(content: Text(l10n.routeActionFailed)));
+      if (mounted) {
+        messenger.showSnackBar(SnackBar(content: Text(l10n.routeActionFailed)));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  Future<void> _refresh() => _run((_) => ref.read(driverRouteRepositoryProvider).current());
+  Future<void> _refresh() =>
+      _run((_) => ref.read(driverRouteRepositoryProvider).current());
 
-  Future<void> _plan({String? startAreaId}) =>
-      _run((key) => ref.read(driverRouteRepositoryProvider).plan(key, startAreaId: startAreaId));
+  Future<void> _plan({String? startAreaId}) => _run(
+    (key) => ref
+        .read(driverRouteRepositoryProvider)
+        .plan(key, startAreaId: startAreaId),
+  );
 
-  Future<void> _replan(RouteRun run) =>
-      _run((key) => ref.read(driverRouteRepositoryProvider).replan(key, run.revision));
+  Future<void> _replan(RouteRun run) => _run(
+    (key) => ref.read(driverRouteRepositoryProvider).replan(key, run.revision),
+  );
 
-  Future<void> _reverse(RouteRun run) =>
-      _run((key) => ref.read(driverRouteRepositoryProvider).reverse(key, run.revision));
+  Future<void> _reverse(RouteRun run) => _run(
+    (key) => ref.read(driverRouteRepositoryProvider).reverse(key, run.revision),
+  );
 
-  Future<void> _defer(RouteRun run, RouteOrder order) =>
-      _run((key) => ref.read(driverRouteRepositoryProvider).defer(key, order.id, run.revision));
+  Future<void> _defer(RouteRun run, RouteOrder order) => _run(
+    (key) => ref
+        .read(driverRouteRepositoryProvider)
+        .defer(key, order.id, run.revision),
+  );
 
   /// The start Area is chosen from the Areas of the Driver's own Orders.
   Future<void> _pickStartArea() async {
@@ -121,7 +143,8 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
     if (!mounted) return;
     final areas = <String, String>{};
     for (final order in orders) {
-      if (order.status == 'assigned_to_driver' || order.status == 'out_for_delivery') {
+      if (order.status == 'assigned_to_driver' ||
+          order.status == 'out_for_delivery') {
         areas[order.areaId] = order.areaName;
       }
     }
@@ -131,9 +154,17 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
         child: ListView(
           shrinkWrap: true,
           children: [
-            ListTile(title: Text(l10n.routeChooseArea, style: Theme.of(context).textTheme.titleMedium)),
+            ListTile(
+              title: Text(
+                l10n.routeChooseArea,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
             for (final entry in areas.entries)
-              ListTile(title: Text(entry.value), onTap: () => Navigator.of(context).pop(entry.key)),
+              ListTile(
+                title: Text(entry.value),
+                onTap: () => Navigator.of(context).pop(entry.key),
+              ),
           ],
         ),
       ),
@@ -161,7 +192,12 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(AppSpacing.md),
         children: [
-          if (_state.offline) _Notice(icon: Icons.cloud_off_outlined, color: AppColors.warning, text: l10n.routeOfflineNotice),
+          if (_state.offline)
+            _Notice(
+              icon: Icons.cloud_off_outlined,
+              color: AppColors.warning,
+              text: l10n.routeOfflineNotice,
+            ),
           if (run == null) ...[
             BluelineSectionCard(child: Text(l10n.routeIntro)),
             const SizedBox(height: AppSpacing.md),
@@ -177,9 +213,18 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
               label: Text(l10n.routePlanFromArea),
             ),
           ] else ...[
-            if (run.isFallback) _Notice(icon: Icons.info_outline, color: AppColors.info, text: l10n.routeFallbackNotice),
+            if (run.isFallback)
+              _Notice(
+                icon: Icons.info_outline,
+                color: AppColors.info,
+                text: l10n.routeFallbackNotice,
+              ),
             if (run.partialOptimization)
-              _Notice(icon: Icons.info_outline, color: AppColors.info, text: l10n.routePartialNotice),
+              _Notice(
+                icon: Icons.info_outline,
+                color: AppColors.info,
+                text: l10n.routePartialNotice,
+              ),
             Row(
               children: [
                 Expanded(
@@ -219,8 +264,14 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(l10n.routeNextArea, style: Theme.of(context).textTheme.labelMedium),
-                          Text(next.areaName(locale), style: Theme.of(context).textTheme.titleMedium),
+                          Text(
+                            l10n.routeNextArea,
+                            style: Theme.of(context).textTheme.labelMedium,
+                          ),
+                          Text(
+                            next.areaName(locale),
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
                           Text('${next.orderCount} ${l10n.routeOrders}'),
                         ],
                       ),
@@ -246,7 +297,10 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
               ),
             if (run.deferredOrders.isNotEmpty) ...[
               const SizedBox(height: AppSpacing.md),
-              Text(l10n.routeDeferred, style: Theme.of(context).textTheme.titleSmall),
+              Text(
+                l10n.routeDeferred,
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
               for (final order in run.deferredOrders) _OrderTile(order: order),
             ],
           ],
@@ -270,7 +324,9 @@ final class _Notice extends StatelessWidget {
       children: [
         Icon(icon, size: 18, color: color),
         const SizedBox(width: AppSpacing.xs),
-        Expanded(child: Text(text, style: Theme.of(context).textTheme.bodySmall)),
+        Expanded(
+          child: Text(text, style: Theme.of(context).textTheme.bodySmall),
+        ),
       ],
     ),
   );
@@ -297,7 +353,8 @@ final class _AreaTile extends StatelessWidget {
     final subtitle = [
       area.emirateName(locale),
       '${area.orderCount} ${l10n.routeOrders}',
-      if (area.cashHandoverCount > 0) '${l10n.routeCashHandover}: ${area.cashHandoverCount}',
+      if (area.cashHandoverCount > 0)
+        '${l10n.routeCashHandover}: ${area.cashHandoverCount}',
     ].join(' · ');
     final tag = area.isDone
         ? l10n.routeDone
@@ -350,7 +407,13 @@ final class _OrderTile extends StatelessWidget {
   Widget build(BuildContext context) => ListTile(
     dense: true,
     title: Text(order.customerName ?? order.orderNumber),
-    subtitle: Text([order.orderNumber, ?order.serialNumber, ?order.referenceNumber].join(' · ')),
+    subtitle: Text(
+      [
+        order.orderNumber,
+        ?order.serialNumber,
+        ?order.referenceNumber,
+      ].join(' · '),
+    ),
     trailing: trailing,
     onTap: order.id.isEmpty ? null : () => context.push('/orders/${order.id}'),
   );
