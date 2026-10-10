@@ -13,6 +13,9 @@ import 'package:bluelinegpt_mobile/features/driver/driver_models.dart';
 import 'package:bluelinegpt_mobile/features/driver/driver_offline_cache_repository.dart';
 import 'package:bluelinegpt_mobile/features/driver/driver_repository.dart';
 import 'package:bluelinegpt_mobile/features/driver/driver_sync_queue_repository.dart';
+import 'package:bluelinegpt_mobile/features/driver/route/route_models.dart';
+import 'package:bluelinegpt_mobile/features/driver/route/route_pages.dart';
+import 'package:bluelinegpt_mobile/features/driver/route/route_repository.dart';
 import 'package:bluelinegpt_mobile/features/operator_workflow/operator_models.dart';
 import 'package:bluelinegpt_mobile/features/operator_workflow/operator_pages.dart';
 import 'package:bluelinegpt_mobile/features/operator_workflow/operator_repository.dart';
@@ -582,6 +585,9 @@ void main() {
           ProviderScope(
             overrides: [
               operatorRepositoryProvider.overrideWithValue(operatorRepository),
+              driverRouteRepositoryProvider.overrideWithValue(
+                const _FakeRouteRepository(enabled: false),
+              ),
               authenticationServiceProvider.overrideWithValue(
                 _FakeAuthenticationService(
                   AuthenticationState(
@@ -605,6 +611,48 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(find.byType(OperatorOrdersPage), findsOneWidget);
+        expect(find.text('Route'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'a Driver User gets the Route tab next to their Operator list when '
+      'route planning is on for the Company',
+      (tester) async {
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              operatorRepositoryProvider.overrideWithValue(
+                FakeOperatorRepository(),
+              ),
+              driverRouteRepositoryProvider.overrideWithValue(
+                const _FakeRouteRepository(enabled: true),
+              ),
+              authenticationServiceProvider.overrideWithValue(
+                _FakeAuthenticationService(
+                  AuthenticationState(
+                    AuthenticationStatus.authenticated,
+                    session: _sessionFor(_driverUserUser()),
+                  ),
+                ),
+              ),
+            ],
+            child: MaterialApp(
+              supportedLocales: AppLocalizations.supportedLocales,
+              localizationsDelegates: const [
+                AppLocalizations.delegate,
+                GlobalMaterialLocalizations.delegate,
+                GlobalWidgetsLocalizations.delegate,
+                GlobalCupertinoLocalizations.delegate,
+              ],
+              home: const Scaffold(body: RoleOrdersPage()),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(DriverOrdersWithRouteTabs), findsOneWidget);
+        expect(find.byType(OperatorOrdersPage), findsOneWidget);
+        expect(find.text('Route'), findsOneWidget);
       },
     );
   });
@@ -1193,4 +1241,29 @@ final class _NoopDriverSyncQueueRepository
     implements DriverSyncQueueRepository {
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+final class _FakeRouteRepository implements DriverRouteRepository {
+  const _FakeRouteRepository({required this.enabled});
+  final bool enabled;
+  @override
+  Future<RouteState> current() async => RouteState(enabled: enabled);
+  @override
+  Future<RouteState> plan(String idempotencyKey, {String? startAreaId}) =>
+      throw UnimplementedError();
+  @override
+  Future<RouteState> replan(
+    String idempotencyKey,
+    int expectedRevision, {
+    String? startAreaId,
+  }) => throw UnimplementedError();
+  @override
+  Future<RouteState> reverse(String idempotencyKey, int expectedRevision) =>
+      throw UnimplementedError();
+  @override
+  Future<RouteState> defer(
+    String idempotencyKey,
+    String orderId,
+    int expectedRevision,
+  ) => throw UnimplementedError();
 }

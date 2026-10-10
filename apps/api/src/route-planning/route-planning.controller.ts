@@ -19,13 +19,18 @@ import { type RouteResponse, RoutePlanningService } from "./route-planning.servi
  * navigation). The Driver works only on his own run over his own assigned
  * Orders; the Company and Driver always come from the session.
  *
+ * Two kinds of account can be a Driver here: a Driver account, and a Driver
+ * User (a Company user whose Employee backs a `drivers.employee_id` record).
+ * Any other Company user is refused by the service with
+ * `route_driver_required`.
+ *
  * Every write takes an `x-idempotency-key`, so a double tap on a slow
  * connection returns the first result instead of spending a second engine
  * call or recording a second action.
  */
 @ApiTags("route-planning")
 @ApiBearerAuth()
-@RequireIdentityKinds("driver")
+@RequireIdentityKinds("driver", "company_user")
 @Controller("portal/driver/route")
 export class RoutePlanningController {
   public constructor(@Inject(RoutePlanningService) private readonly routes: RoutePlanningService) {}

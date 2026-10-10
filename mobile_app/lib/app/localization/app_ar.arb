@@ -273,5 +273,8 @@
   "routeEstimate": "تقديري",
   "routeKm": "كم",
   "routeMinutes": "دقيقة",
-  "routeNoStops": "لا توجد طلبات لتخطيط مسارها الآن."
+  "routeNoStops": "لا توجد طلبات لتخطيط مسارها الآن.",
+  "whatsAppCustomer": "واتساب",
+  "smsCustomer": "رسالة نصية",
+  "customerContactMessage": "مرحباً {customer}، معك مندوب التوصيل لطلبك رقم {order}."
 }

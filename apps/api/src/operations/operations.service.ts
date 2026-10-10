@@ -939,12 +939,23 @@ export class OperationsService {
            and ${driverScope}
          group by delivery_status
       `.execute(this.database),
-      sql<{ count: number }>`
-        select count(*)::int as count from orders
-         where company_id = ${companyId}::uuid
-           and delivery_status not in ('hold', 'closed', 'cancelled')
-           and ${driverScope}
-      `.execute(this.database),
+      // For a Driver User, "My Active Orders" is the Driver's own work, the
+      // same rule as their Orders list (`driverWorkPredicate`): a delivered
+      // Order counts only while they still hold its cash. Office-side
+      // states (Trader not yet settled, on hold) are not the Driver's work.
+      ownDriverId === undefined
+        ? sql<{ count: number }>`
+            select count(*)::int as count from orders
+             where company_id = ${companyId}::uuid
+               and delivery_status not in ('hold', 'closed', 'cancelled')
+          `.execute(this.database)
+        : sql<{ count: number }>`
+            select count(*)::int as count from orders
+             where company_id = ${companyId}::uuid
+               and assigned_driver_id = ${ownDriverId}::uuid
+               and order_type <> 'gcc_international'
+               and ${driverWorkPredicate("orders")}
+          `.execute(this.database),
       sql<{ count: number }>`
         select count(*)::int as count from orders
          where company_id = ${companyId}::uuid

@@ -1729,6 +1729,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'You have no Orders to route right now.'**
   String get routeNoStops;
+
+  /// No description provided for @whatsAppCustomer.
+  ///
+  /// In en, this message translates to:
+  /// **'WhatsApp'**
+  String get whatsAppCustomer;
+
+  /// No description provided for @smsCustomer.
+  ///
+  /// In en, this message translates to:
+  /// **'SMS'**
+  String get smsCustomer;
+
+  /// No description provided for @customerContactMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Hello {customer}, this is your delivery driver for order {order}.'**
+  String customerContactMessage(String customer, String order);
 }
 
 class _AppLocalizationsDelegate

@@ -502,25 +502,48 @@ export class RoutePlanningService {
 
   private async scope(): Promise<DriverScope> {
     const identity = this.identities.current();
-    if (identity.kind !== "driver" || identity.companyId === null) {
+    const isDriverAccount = identity.kind === "driver";
+    // A Driver User: a Company user whose linked Employee backs a Driver --
+    // the same explicit `drivers.employee_id` chain `OperationsService`
+    // uses for that account's Orders list. Never inferred from a name or
+    // mobile number.
+    const isDriverUser =
+      identity.kind === "company_user" && identity.profileType === "employee";
+    if ((!isDriverAccount && !isDriverUser) || identity.companyId === null) {
       throw new ApplicationException(
         "route_driver_required",
         "A Driver account is required",
         HttpStatus.FORBIDDEN,
       );
     }
-    const driver = await sql<{ id: string }>`
-      select d.id
-        from drivers d
-        join user_business_links l
-          on l.company_id = d.company_id and l.entity_type = 'driver' and l.entity_id = d.id
-         and l.account_id = ${identity.identityId}::uuid and l.access_status = 'active'
-       where d.company_id = ${identity.companyId}::uuid
-         and d.id = ${identity.profileId ?? null}::uuid
-         and d.account_status = 'active'
-       limit 1
-    `.execute(this.database);
+    const driver = isDriverAccount
+      ? await sql<{ id: string }>`
+          select d.id
+            from drivers d
+            join user_business_links l
+              on l.company_id = d.company_id and l.entity_type = 'driver' and l.entity_id = d.id
+             and l.account_id = ${identity.identityId}::uuid and l.access_status = 'active'
+           where d.company_id = ${identity.companyId}::uuid
+             and d.id = ${identity.profileId ?? null}::uuid
+             and d.account_status = 'active'
+           limit 1
+        `.execute(this.database)
+      : await sql<{ id: string }>`
+          select d.id
+            from drivers d
+           where d.company_id = ${identity.companyId}::uuid
+             and d.employee_id = ${identity.profileId ?? null}::uuid
+             and d.account_status = 'active'
+           limit 1
+        `.execute(this.database);
     const row = driver.rows[0];
+    if (row === undefined && isDriverUser) {
+      throw new ApplicationException(
+        "route_driver_required",
+        "A Driver account is required",
+        HttpStatus.FORBIDDEN,
+      );
+    }
     if (row === undefined) {
       throw new ApplicationException(
         "profile_access_inactive",

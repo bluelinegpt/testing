@@ -77,17 +77,17 @@ final class ApiClient {
     required this.tokenProvider,
     this.companyCodeProvider,
   }) : _dio = Dio(
-        BaseOptions(
-          // Dio resolves relative request paths against this URI. A missing
-          // trailing slash makes `/api/v1` behave like a file and turns
-          // `auth/login` into `/api/auth/login`, which is not an API route.
-          baseUrl: effectiveBaseUrl(baseUrl).toString(),
-          connectTimeout: const Duration(seconds: 15),
-          receiveTimeout: const Duration(seconds: 30),
-          sendTimeout: const Duration(seconds: 30),
-          headers: const {'Accept': 'application/json'},
-        ),
-      ) {
+         BaseOptions(
+           // Dio resolves relative request paths against this URI. A missing
+           // trailing slash makes `/api/v1` behave like a file and turns
+           // `auth/login` into `/api/auth/login`, which is not an API route.
+           baseUrl: effectiveBaseUrl(baseUrl).toString(),
+           connectTimeout: const Duration(seconds: 15),
+           receiveTimeout: const Duration(seconds: 30),
+           sendTimeout: const Duration(seconds: 30),
+           headers: const {'Accept': 'application/json'},
+         ),
+       ) {
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {

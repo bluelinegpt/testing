@@ -36,7 +36,11 @@ final class DriverOrder {
       amountCollected,
       status,
       traderName;
-  final String? psystemSerial, reference, notes, emirateNameEn, emirateNameAr,
+  final String? psystemSerial,
+      reference,
+      notes,
+      emirateNameEn,
+      emirateNameAr,
       driverReconciliationStatus;
 }
 
@@ -186,7 +190,45 @@ String driverActionTargetStatus(DriverAction action) => switch (action) {
 bool driverActionRequiresReason(DriverAction action) =>
     action == DriverAction.hold || action == DriverAction.returnToBranch;
 
-bool isSafeCustomerContact(String value) => UaeMobileValidator.isValid(value);
+/// The Customer mobile number in international form (`+9715XXXXXXXX`), or
+/// `null` when it is not a usable UAE mobile number. The office types numbers
+/// in many shapes (`0501234567`, `501234567`, `971501234567`,
+/// `+971 50 123 4567`, `00971...`, Arabic digits), so every one of those is
+/// accepted; anything else (short test numbers, landlines, text) is refused
+/// so the Call, WhatsApp and SMS actions never open a wrong number.
+String? customerMobileE164(String raw) {
+  final compact = SafeNumberParser.normalize(
+    raw,
+  ).replaceAll(RegExp(r'[\s()\-.]'), '');
+  final match = RegExp(
+    r'^(?:\+971|00971|971|0)?(5[024568]\d{7})$',
+  ).firstMatch(compact);
+  return match == null ? null : '+971${match.group(1)}';
+}
+
+bool isSafeCustomerContact(String value) => customerMobileE164(value) != null;
+
+Uri? customerCallUri(String raw) {
+  final number = customerMobileE164(raw);
+  return number == null ? null : Uri(scheme: 'tel', path: number);
+}
+
+/// Opens a chat with the Customer in WhatsApp, with [message] typed in but
+/// not sent: the Driver reviews it and presses send himself.
+Uri? customerWhatsAppUri(String raw, String message) {
+  final number = customerMobileE164(raw);
+  if (number == null) return null;
+  return Uri.parse(
+    'https://wa.me/${number.substring(1)}?text=${Uri.encodeComponent(message)}',
+  );
+}
+
+/// Opens the phone's SMS app with [message] filled in, not sent.
+Uri? customerSmsUri(String raw, String message) {
+  final number = customerMobileE164(raw);
+  if (number == null) return null;
+  return Uri.parse('sms:$number?body=${Uri.encodeComponent(message)}');
+}
 
 /// Whether the data currently shown for a Driver came from the network just
 /// now, or from `driver_orders_cache`/`driver_dashboard_cache` because the
@@ -262,4 +304,31 @@ final class DriverQueueEntry {
     state: state ?? this.state,
     nextEligibleAt: nextEligibleAt ?? this.nextEligibleAt,
   );
+}
+
+/// Google Maps search for where the Order goes: the address together with
+/// its Area, Emirate and country, so Maps looks in the right place. A short
+/// or vague address on its own ("dd", "villa 3") made Maps search near the
+/// phone instead and open an unrelated place. With no address the Area and
+/// Emirate still give the Driver the right neighbourhood. `null` only when
+/// there is neither an address nor an Area.
+Uri? orderMapUri({
+  required String address,
+  required String areaName,
+  String? emirateName,
+}) {
+  final street = address.trim();
+  final area = areaName.trim();
+  if (street.isEmpty && area.isEmpty) return null;
+  final parts = <String>[
+    if (street.isNotEmpty) street,
+    if (area.isNotEmpty) area,
+    if (emirateName != null && emirateName.trim().isNotEmpty)
+      emirateName.trim(),
+    'UAE',
+  ];
+  return Uri.https('www.google.com', '/maps/search/', {
+    'api': '1',
+    'query': parts.join(', '),
+  });
 }

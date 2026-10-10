@@ -104,6 +104,55 @@ final class _FieldRow extends StatelessWidget {
   );
 }
 
+/// Call, WhatsApp and SMS for the Customer. All three open the phone's own
+/// app; nothing is sent by BluelineGPT. WhatsApp and SMS open with a short
+/// greeting naming the Order, which the Driver can edit before sending.
+/// Disabled when the number is not a usable UAE mobile number.
+final class _CustomerContactActions extends StatelessWidget {
+  const _CustomerContactActions({required this.order, required this.onOpenUri});
+  final DriverStyleOrderData order;
+  final void Function(Uri uri, String errorMessage) onOpenUri;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final reference = order.reference?.trim();
+    final orderLabel = (reference == null || reference.isEmpty)
+        ? order.serialNumber
+        : reference;
+    final message = l10n.customerContactMessage(
+      order.customerName.trim(),
+      orderLabel,
+    );
+    final call = customerCallUri(order.customerMobile);
+    final whatsApp = customerWhatsAppUri(order.customerMobile, message);
+    final sms = customerSmsUri(order.customerMobile, message);
+    void Function()? opener(Uri? uri) =>
+        uri == null ? null : () => onOpenUri(uri, l10n.externalAppUnavailable);
+    return Wrap(
+      spacing: AppSpacing.xs,
+      runSpacing: AppSpacing.xs,
+      children: [
+        OutlinedButton.icon(
+          onPressed: opener(call),
+          icon: const Icon(Icons.call_outlined),
+          label: Text(l10n.callCustomer),
+        ),
+        OutlinedButton.icon(
+          onPressed: opener(whatsApp),
+          icon: const Icon(Icons.chat_outlined),
+          label: Text(l10n.whatsAppCustomer),
+        ),
+        OutlinedButton.icon(
+          onPressed: opener(sms),
+          icon: const Icon(Icons.sms_outlined),
+          label: Text(l10n.smsCustomer),
+        ),
+      ],
+    );
+  }
+}
+
 /// Renders the approved primary field set — grouped into a Header card
 /// (Serial No., Reference, status), a Customer card (Name, Mobile, Call), a
 /// Delivery card (Emirate, Area, Address, Open Map), and an Order card
@@ -170,16 +219,7 @@ final class DriverStyleOrderFields extends StatelessWidget {
             ),
             if (onOpenUri != null) ...[
               const SizedBox(height: AppSpacing.xs),
-              OutlinedButton.icon(
-                onPressed: isSafeCustomerContact(order.customerMobile)
-                    ? () => onOpenUri!(
-                        Uri(scheme: 'tel', path: order.customerMobile),
-                        l10n.externalAppUnavailable,
-                      )
-                    : null,
-                icon: const Icon(Icons.call_outlined),
-                label: Text(l10n.callCustomer),
-              ),
+              _CustomerContactActions(order: order, onOpenUri: onOpenUri!),
             ],
           ],
         ),
@@ -208,15 +248,17 @@ final class DriverStyleOrderFields extends StatelessWidget {
             if (onOpenUri != null) ...[
               const SizedBox(height: AppSpacing.xs),
               OutlinedButton.icon(
-                onPressed: order.address.trim().isEmpty
-                    ? null
-                    : () => onOpenUri!(
-                        Uri.https('www.google.com', '/maps/search/', {
-                          'api': '1',
-                          'query': order.address,
-                        }),
-                        l10n.externalAppUnavailable,
-                      ),
+                onPressed: switch (orderMapUri(
+                  address: order.address,
+                  areaName: order.areaName,
+                  emirateName: emirateName,
+                )) {
+                  final uri? => () => onOpenUri!(
+                    uri,
+                    l10n.externalAppUnavailable,
+                  ),
+                  null => null,
+                },
                 icon: const Icon(Icons.map_outlined),
                 label: Text(l10n.openMap),
               ),

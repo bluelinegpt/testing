@@ -1,0 +1,7 @@
+{
+  "ENVIRONMENT_NAME": "production",
+  "API_BASE_URL": "https://bluelinegpt-api-test.onrender.com/api/v1",
+  "REALTIME_URL": "wss://bluelinegpt-api-test.onrender.com/api/v1/communication/realtime",
+  "ENABLE_VERBOSE_LOGGING": false,
+  "ENABLE_MOCK_SERVICES": false
+}

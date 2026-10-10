@@ -18,8 +18,16 @@ import 'package:uuid/uuid.dart';
 /// any other reason, the plain Orders list is shown unchanged and no tab
 /// appears.
 final class DriverOrdersWithRouteTabs extends ConsumerStatefulWidget {
-  const DriverOrdersWithRouteTabs({super.key, this.initialDeliveryStatus});
+  const DriverOrdersWithRouteTabs({
+    super.key,
+    this.initialDeliveryStatus,
+    this.ordersList,
+  });
   final String? initialDeliveryStatus;
+
+  /// The My Orders tab. Defaults to the Driver account's list; a Driver User
+  /// (Company user linked to a Driver) passes their own Orders list here.
+  final Widget? ordersList;
 
   @override
   ConsumerState<DriverOrdersWithRouteTabs> createState() =>
@@ -41,9 +49,9 @@ final class _DriverOrdersWithRouteTabsState
 
   @override
   Widget build(BuildContext context) {
-    final orders = DriverOrdersPage(
-      initialDeliveryStatus: widget.initialDeliveryStatus,
-    );
+    final orders =
+        widget.ordersList ??
+        DriverOrdersPage(initialDeliveryStatus: widget.initialDeliveryStatus);
     return FutureBuilder<RouteState>(
       future: _route,
       builder: (context, snapshot) {

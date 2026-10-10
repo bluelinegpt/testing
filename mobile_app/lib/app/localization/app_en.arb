@@ -273,5 +273,9 @@
   "routeEstimate": "Estimated",
   "routeKm": "km",
   "routeMinutes": "min",
-  "routeNoStops": "You have no Orders to route right now."
+  "routeNoStops": "You have no Orders to route right now.",
+  "whatsAppCustomer": "WhatsApp",
+  "smsCustomer": "SMS",
+  "customerContactMessage": "Hello {customer}, this is your delivery driver for order {order}.",
+  "@customerContactMessage": {"placeholders": {"customer": {"type": "String"}, "order": {"type": "String"}}}
 }

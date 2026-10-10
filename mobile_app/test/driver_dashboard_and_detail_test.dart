@@ -1363,6 +1363,8 @@ void main() {
           find.widgetWithText(OutlinedButton, 'Call Customer'),
           findsOneWidget,
         );
+        expect(find.widgetWithText(OutlinedButton, 'WhatsApp'), findsOneWidget);
+        expect(find.widgetWithText(OutlinedButton, 'SMS'), findsOneWidget);
         // Delivery card: Emirate, Area, Address, Open Map.
         expect(find.byIcon(Icons.location_on_outlined), findsOneWidget);
         expect(find.textContaining('Deira'), findsOneWidget);

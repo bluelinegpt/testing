@@ -865,4 +865,15 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get routeNoStops => 'You have no Orders to route right now.';
+
+  @override
+  String get whatsAppCustomer => 'WhatsApp';
+
+  @override
+  String get smsCustomer => 'SMS';
+
+  @override
+  String customerContactMessage(String customer, String order) {
+    return 'Hello $customer, this is your delivery driver for order $order.';
+  }
 }

@@ -27,11 +27,22 @@ final class RoleOrdersPage extends ConsumerWidget {
       );
     }
     if (user?.hasRole(UserRole.operatorRole) == true) {
-      return hasOperatorOrderAccess(user!.permissions)
-          ? OperatorOrdersPage(initialDeliveryStatus: initialDeliveryStatus)
-          : MessagePage(
-              message: AppLocalizations.of(context).operatorAccessRequired,
-            );
+      if (!hasOperatorOrderAccess(user!.permissions)) {
+        return MessagePage(
+          message: AppLocalizations.of(context).operatorAccessRequired,
+        );
+      }
+      final list = OperatorOrdersPage(
+        initialDeliveryStatus: initialDeliveryStatus,
+      );
+      // A Driver User (Company user linked to a Driver) gets the Route tab
+      // too; the tab appears only when route planning is on for the Company.
+      return user.linkedDriverId != null
+          ? DriverOrdersWithRouteTabs(
+              initialDeliveryStatus: initialDeliveryStatus,
+              ordersList: list,
+            )
+          : list;
     }
     if (user?.hasRole(UserRole.customer) == true) {
       return const CustomerAccountUnavailablePage();

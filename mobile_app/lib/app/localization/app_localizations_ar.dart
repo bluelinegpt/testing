@@ -856,4 +856,15 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get routeNoStops => 'لا توجد طلبات لتخطيط مسارها الآن.';
+
+  @override
+  String get whatsAppCustomer => 'واتساب';
+
+  @override
+  String get smsCustomer => 'رسالة نصية';
+
+  @override
+  String customerContactMessage(String customer, String order) {
+    return 'مرحباً $customer، معك مندوب التوصيل لطلبك رقم $order.';
+  }
 }
