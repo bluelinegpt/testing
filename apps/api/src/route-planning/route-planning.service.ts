@@ -18,7 +18,7 @@ import {
   type RouteFallbackReason,
   type RoutePlanResult,
 } from "./route-planner.js";
-import { ROUTE_PROVIDER, type RouteProvider } from "./route-provider.js";
+import { ROUTE_PROVIDERS, type RoutePoint, type RouteProviderRegistry } from "./route-provider.js";
 
 type Executor = Kysely<DatabaseSchema> | Transaction<DatabaseSchema>;
 
@@ -66,7 +66,7 @@ export interface RouteRunView {
   readonly revision: number;
   readonly direction: "recommended" | "reversed";
   readonly provider: string;
-  readonly routeSource: "gps" | "selected_area" | "fallback";
+  readonly routeSource: RouteSource;
   readonly resultSource: "provider" | "fallback";
   readonly fallbackReason: RouteFallbackReason | null;
   readonly partialOptimization: boolean;
@@ -87,6 +87,8 @@ export interface RouteResponse {
   readonly run: RouteRunView | null;
 }
 
+export type RouteSource = "gps" | "selected_area" | "branch" | "fallback";
+
 interface DriverScope {
   readonly companyId: string;
   readonly driverId: string;
@@ -101,7 +103,7 @@ interface RunRow {
   readonly revision: number;
   readonly direction: "recommended" | "reversed";
   readonly provider: string;
-  readonly routeSource: "gps" | "selected_area" | "fallback";
+  readonly routeSource: RouteSource;
   readonly resultSource: "provider" | "fallback";
   readonly fallbackReason: RouteFallbackReason | null;
   readonly partialOptimization: boolean;
@@ -132,6 +134,14 @@ interface Settings {
   readonly companyEnabled: boolean;
   readonly platformEnabled: boolean;
   readonly dailyCallBudget: number;
+  readonly provider: string;
+  readonly branch: RoutePoint | null;
+}
+
+interface ResolvedStart {
+  readonly areaId: string | null;
+  readonly coordinates: RoutePoint | null;
+  readonly source: Exclude<RouteSource, "fallback"> | null;
 }
 
 const RUN_COLUMNS = sql`
@@ -166,7 +176,7 @@ export class RoutePlanningService {
     @Inject(IdentityContextAccessor) private readonly identities: IdentityContextAccessor,
     @Inject(BusinessDayService)
     private readonly businessDays: Pick<BusinessDayService, "businessDateOf">,
-    @Inject(ROUTE_PROVIDER) private readonly provider: RouteProvider,
+    @Inject(ROUTE_PROVIDERS) private readonly providers: RouteProviderRegistry,
   ) {}
 
   /** The Driver's run for today, rebuilt over live Order data. */
@@ -198,7 +208,7 @@ export class RoutePlanningService {
     const existing = await this.activeRun(this.database, scope);
     if (existing !== null) return this.respond(scope, enabled, existing, false);
 
-    const start = await this.resolveStart(scope.companyId, input);
+    const start = await this.resolveStart(scope.companyId, input, settings.branch);
     const computed = await this.compute(scope, settings, start.coordinates);
 
     try {
@@ -258,7 +268,7 @@ export class RoutePlanningService {
     if (current.revision !== input.expectedRevision) {
       return this.respond(scope, settings.platformEnabled, current, true);
     }
-    const start = await this.resolveStart(scope.companyId, input);
+    const start = await this.resolveStart(scope.companyId, input, settings.branch);
     const computed = await this.compute(scope, settings, start.coordinates);
     return this.mutate(
       scope,
@@ -443,21 +453,21 @@ export class RoutePlanningService {
   private async compute(
     scope: DriverScope,
     settings: Settings,
-    start: { latitude: number; longitude: number } | null,
+    start: RoutePoint | null,
   ): Promise<{ result: RoutePlanResult; providerName: string }> {
     const areas = await this.stopAreas(scope);
+    const provider = this.providers.forCompany(settings.provider);
     const result = await planRoute({
       areas: areas.map(toRouteArea),
       gate: { companyEnabled: settings.companyEnabled, platformEnabled: settings.platformEnabled },
-      provider: this.provider,
+      provider,
       start,
+      // A Driver usually ends the run at the branch to hand over the cash.
+      end: settings.branch,
       reserveCall: () => this.reserveCall(scope, settings.dailyCallBudget),
     });
     if (result.reserved) await this.recordOutcome(scope, result);
-    return {
-      result,
-      providerName: result.resultSource === "provider" ? this.provider.name : "none",
-    };
+    return { result, providerName: result.resultSource === "provider" ? provider.name : "none" };
   }
 
   /**
@@ -532,18 +542,30 @@ export class RoutePlanningService {
       companyEnabled: boolean | null;
       platformEnabled: boolean | null;
       budget: number | null;
+      provider: string | null;
+      branchLatitude: string | null;
+      branchLongitude: string | null;
     }>`
       select s.is_enabled as "companyEnabled",
              (select f.is_enabled from platform_feature_flags f where f.code = 'route_optimization_enabled') as "platformEnabled",
-             s.daily_call_budget as budget
+             s.daily_call_budget as budget,
+             s.provider,
+             s.branch_latitude::text as "branchLatitude",
+             s.branch_longitude::text as "branchLongitude"
         from (select 1) one
         left join company_route_optimization_settings s on s.company_id = ${companyId}::uuid
     `.execute(executor);
     const row = result.rows[0];
+    const branch =
+      row?.branchLatitude == null || row.branchLongitude == null
+        ? null
+        : { latitude: Number(row.branchLatitude), longitude: Number(row.branchLongitude) };
     return {
       companyEnabled: row?.companyEnabled === true,
       platformEnabled: row?.platformEnabled === true,
       dailyCallBudget: row?.budget ?? 0,
+      provider: row?.provider ?? "area_matrix",
+      branch,
     };
   }
 
@@ -634,20 +656,25 @@ export class RoutePlanningService {
     return result.rows.length > 0;
   }
 
+  /**
+   * The run's start: GPS when the Driver shared it, else a chosen Area, else
+   * the branch (a Driver usually sets out from the branch).
+   */
   private async resolveStart(
     companyId: string,
     input: RouteStartInput,
-  ): Promise<{
-    areaId: string | null;
-    coordinates: { latitude: number; longitude: number } | null;
-  }> {
+    branch: RoutePoint | null,
+  ): Promise<ResolvedStart> {
     if (input.startLatitude !== undefined && input.startLongitude !== undefined) {
       return {
         areaId: null,
         coordinates: { latitude: input.startLatitude, longitude: input.startLongitude },
+        source: "gps",
       };
     }
-    if (input.startAreaId === undefined) return { areaId: null, coordinates: null };
+    if (input.startAreaId === undefined) {
+      return { areaId: null, coordinates: branch, source: branch === null ? null : "branch" };
+    }
     const area = await sql<{
       id: string;
       latitude: string | null;
@@ -671,16 +698,12 @@ export class RoutePlanningService {
       row.verified && row.latitude !== null && row.longitude !== null
         ? { latitude: Number(row.latitude), longitude: Number(row.longitude) }
         : null;
-    return { areaId: row.id, coordinates };
+    return { areaId: row.id, coordinates, source: coordinates === null ? null : "selected_area" };
   }
 
-  private routeSource(
-    result: RoutePlanResult,
-    start: { areaId: string | null; coordinates: unknown },
-  ): "gps" | "selected_area" | "fallback" {
+  private routeSource(result: RoutePlanResult, start: ResolvedStart): RouteSource {
     if (result.resultSource === "fallback") return "fallback";
-    if (start.areaId !== null) return "selected_area";
-    return start.coordinates === null ? "fallback" : "gps";
+    return start.source ?? "fallback";
   }
 
   private planDetails(result: RoutePlanResult): Record<string, unknown> {

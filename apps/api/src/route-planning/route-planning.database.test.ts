@@ -13,8 +13,11 @@ import type { DatabaseSchema } from "../infrastructure/database/database.types.j
 import type { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import { calculateOrderFinancials } from "../operations/order-financial-model.js";
 import type { IdentityContextAccessor } from "../security/identity-context.js";
+import { AreaMatrixRouteProvider } from "./area-matrix-route-provider.js";
+import { RouteOptimizationAdminService } from "./route-optimization-admin.service.js";
 import { RoutePlanningService } from "./route-planning.service.js";
-import type { RouteProvider } from "./route-provider.js";
+import { RouteSetupService } from "./route-setup.service.js";
+import type { RouteProvider, RouteProviderRegistry } from "./route-provider.js";
 
 /**
  * Driver route planning against a real PostgreSQL schema.
@@ -210,6 +213,9 @@ function countingProvider(
   return {
     name: "area_matrix",
     available: true,
+    // Metered here on purpose, so the budget path is exercised.
+    metered: true,
+    maxStops: 25,
     plan: vi.fn((request: { stops: readonly { areaId: string }[] }) => {
       const ids = request.stops.map((stop) => stop.areaId);
       return Promise.resolve({ orderedAreaIds: order ? order(ids) : ids, responseId: "engine-1" });
@@ -245,12 +251,13 @@ function serviceFor(
     BusinessDayService,
     "businessDateOf"
   >;
+  const registry: RouteProviderRegistry = { forCompany: () => provider };
   return new RoutePlanningService(
     executor as Kysely<DatabaseSchema>,
     transactions,
     identities,
     businessDays as BusinessDayService,
-    provider,
+    registry,
   );
 }
 
@@ -526,6 +533,164 @@ describe.skipIf(!run)("Driver route planning (database)", () => {
         orderCount: 1,
       });
       expect(view?.nextAreaId).toBe(b);
+    });
+  });
+});
+
+function txManager(tx: Transaction<DatabaseSchema>): KyselyTransactionManager {
+  return {
+    execute: <T>(work: (t: Transaction<DatabaseSchema>) => Promise<T>) => work(tx),
+  } as unknown as KyselyTransactionManager;
+}
+
+function setupFor(
+  tx: Transaction<DatabaseSchema>,
+  f: Pick<Fixture, "companyId" | "actorId">,
+): RouteSetupService {
+  const identities = {
+    current: () => ({
+      companyId: f.companyId,
+      identityId: f.actorId,
+      kind: "company_user",
+      permissions: [],
+    }),
+  } as unknown as IdentityContextAccessor;
+  return new RouteSetupService(tx as unknown as Kysely<DatabaseSchema>, txManager(tx), identities);
+}
+
+async function platformActor(tx: Db) {
+  const id = randomUUID();
+  await sql`insert into accounts(id, company_id, account_kind, username, password_hash, preferred_language)
+    values (${id}::uuid, null, 'platform_administrator', ${`rp.p.${id}`}, 'x', 'en')`.execute(tx);
+  return { accountId: id, correlationId: "route-planning-test" };
+}
+
+describe.skipIf(!run)("Route planning setup and Platform controls (database)", () => {
+  it("saves a pin as verified by the administrator, clears it, and audits both", async () => {
+    await inRollback(async (tx) => {
+      const f = await companyFixture(tx, { enabled: false });
+      const areaId = await areaFixture(tx, f, "Al Majaz", { verified: false });
+      const setup = setupFor(tx, f);
+      const saved = await setup.setAreaPin(
+        areaId,
+        { latitude: 25.326, longitude: 55.383 },
+        "corr-pin-0001",
+      );
+      expect(saved.areas.find((area) => area.id === areaId)).toMatchObject({
+        latitude: 25.326,
+        longitude: 55.383,
+      });
+      expect(saved.areas.find((area) => area.id === areaId)?.coordinatesVerifiedAt).not.toBeNull();
+      expect(saved).toMatchObject({ enabled: false, verifiedAreaCount: 1, areaCount: 1 });
+      const cleared = await setup.clearAreaPin(areaId, "corr-pin-0002");
+      expect(cleared.areas.find((area) => area.id === areaId)).toMatchObject({
+        latitude: null,
+        coordinatesVerifiedAt: null,
+      });
+      const audit = await sql<{ action: string }>`
+        select action from audit_events where company_id = ${f.companyId}::uuid and subject_id = ${areaId}
+         order by occurred_at`.execute(tx);
+      expect(audit.rows.map((row) => row.action)).toEqual([
+        "area.coordinates_verified",
+        "area.coordinates_cleared",
+      ]);
+    });
+  });
+
+  it("refuses another Company's Area and never enables route planning when saving the branch", async () => {
+    await inRollback(async (tx) => {
+      const f = await companyFixture(tx, { enabled: false });
+      const g = await companyFixture(tx, { enabled: false });
+      const foreignArea = await areaFixture(tx, g, "Foreign Area");
+      const setup = setupFor(tx, f);
+      await expect(
+        setup.setAreaPin(foreignArea, { latitude: 25, longitude: 55 }, "corr-pin-0003"),
+      ).rejects.toMatchObject({
+        errorCode: "area_not_found",
+      });
+      const result = await setup.setBranch({ latitude: 25.27, longitude: 55.38 }, "corr-branch-01");
+      expect(result).toMatchObject({
+        companyEnabled: false,
+        branch: { latitude: 25.27, longitude: 55.38 },
+      });
+    });
+  });
+
+  it("Platform update is version-checked and audited; the kill switch is audited", async () => {
+    await inRollback(async (tx) => {
+      const f = await companyFixture(tx, { enabled: false });
+      const actor = await platformActor(tx);
+      const admin = new RouteOptimizationAdminService(
+        tx as unknown as Kysely<DatabaseSchema>,
+        txManager(tx),
+      );
+      const initial = await admin.overview(f.companyId);
+      expect(initial).toMatchObject({ isEnabled: false, version: 0, provider: "area_matrix" });
+      const enabled = await admin.update(
+        f.companyId,
+        { isEnabled: true, dailyCallBudget: 50, expectedVersion: 0 },
+        actor,
+      );
+      expect(enabled).toMatchObject({ isEnabled: true, dailyCallBudget: 50, version: 1 });
+      await expect(
+        admin.update(
+          f.companyId,
+          { isEnabled: false, dailyCallBudget: 50, expectedVersion: 0 },
+          actor,
+        ),
+      ).rejects.toMatchObject({ errorCode: "route_optimization_settings_stale" });
+      const flag = await admin.configureKillSwitch({ isEnabled: true, note: "pilot" }, actor);
+      expect(flag).toMatchObject({ isEnabled: true, note: "pilot" });
+      const audit = await sql<{ action: string }>`
+        select action from audit_events where actor_account_id = ${actor.accountId}::uuid order by occurred_at`.execute(
+        tx,
+      );
+      expect(audit.rows.map((row) => row.action)).toEqual([
+        "platform.company_route_optimization.updated",
+        "platform.route_optimization.kill_switch_changed",
+      ]);
+    });
+  });
+
+  it("end to end with the free engine: starts and ends at the branch, Emirates in blocks, no budget used", async () => {
+    await inRollback(async (tx) => {
+      const f = await companyFixture(tx, { platform: true, budget: 1 });
+      const ajmanId = await sql<{
+        id: string;
+      }>`select id from emirates where code = 'AJM' limit 1`.execute(tx);
+      const ajman = { ...f, emirateId: ajmanId.rows[0]?.id ?? f.emirateId };
+      await setupFor(tx, f).setBranch({ latitude: 25.27, longitude: 55.38 }, "corr-branch-02");
+      const sharjahAreas = [
+        await areaFixture(tx, f, "Rolla", { latitude: 25.358, longitude: 55.389 }),
+        await areaFixture(tx, f, "Al Nahda", { latitude: 25.302, longitude: 55.371 }),
+      ];
+      const ajmanAreas = [
+        await areaFixture(tx, ajman, "Al Nuaimiya", { latitude: 25.392, longitude: 55.453 }),
+        await areaFixture(tx, ajman, "Al Rashidiya", { latitude: 25.408, longitude: 55.443 }),
+      ];
+      for (const areaId of [...sharjahAreas, ...ajmanAreas]) await orderFixture(tx, f, areaId);
+      const engine = new AreaMatrixRouteProvider();
+      const service = serviceFor(tx, f, engine);
+      const result = await service.plan({}, "plan-key-0020");
+      expect(result.run).toMatchObject({
+        resultSource: "provider",
+        provider: "area_matrix",
+        routeSource: "branch",
+        fallbackReason: null,
+      });
+      expect(result.run?.distanceMeters).toBeGreaterThan(0);
+      const order = result.run?.areas.map((area) => area.areaId) ?? [];
+      const emirateOf = (id: string) => (ajmanAreas.includes(id) ? "ajm" : "shj");
+      const changes = order.filter(
+        (id, index) => index > 0 && emirateOf(id) !== emirateOf(order[index - 1] as string),
+      );
+      expect(order).toHaveLength(4);
+      expect(changes).toHaveLength(ajmanId.rows[0] === undefined ? 0 : 1);
+      const usage =
+        await sql`select 1 from company_route_optimization_usage where company_id = ${f.companyId}::uuid`.execute(
+          tx,
+        );
+      expect(usage.rows).toHaveLength(0);
     });
   });
 });

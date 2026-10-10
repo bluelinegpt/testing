@@ -59,3 +59,16 @@ export class DeferRouteOrderDto {
   @Max(1_000_000)
   public expectedRevision!: number;
 }
+
+/** One Area pin or the branch location: both coordinates are required. */
+export class RoutePointDto {
+  @ApiProperty({ minimum: -90, maximum: 90 })
+  @Type(() => Number)
+  @IsLatitude()
+  public latitude!: number;
+
+  @ApiProperty({ minimum: -180, maximum: 180 })
+  @Type(() => Number)
+  @IsLongitude()
+  public longitude!: number;
+}

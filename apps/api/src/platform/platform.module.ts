@@ -53,6 +53,8 @@ import {
 } from "./company-website.controller.js";
 import { CompanyWebsiteService } from "./company-website.service.js";
 import { PlatformCompanyWhatsAppController } from "./platform-company-whatsapp.controller.js";
+import { PlatformRouteOptimizationController } from "./platform-route-optimization.controller.js";
+import { RouteOptimizationAdminService } from "../route-planning/route-optimization-admin.service.js";
 import { PlatformAnnouncementController } from "./platform-announcement.controller.js";
 import { AnnouncementsService } from "../announcements/announcements.service.js";
 import { PlatformCompanyWhatsAppService } from "./platform-company-whatsapp.service.js";
@@ -98,6 +100,7 @@ import { CompanyWebsiteAiSetupProvider } from "./company-website-ai-setup.provid
     PlatformCompanyUserController,
     PlatformCompanyWebsiteController,
     PlatformCompanyWhatsAppController,
+    PlatformRouteOptimizationController,
     PlatformAnnouncementController,
     PublicCompanyWebsiteController,
   ],
@@ -132,6 +135,7 @@ import { CompanyWebsiteAiSetupProvider } from "./company-website-ai-setup.provid
     PlatformTargetCompanyGuard,
     CompanyWebsiteService,
     PlatformCompanyWhatsAppService,
+    RouteOptimizationAdminService,
     // Re-provided leaf service (database only), as elsewhere in this module.
     AnnouncementsService,
     CompanyWebsiteDomainService,

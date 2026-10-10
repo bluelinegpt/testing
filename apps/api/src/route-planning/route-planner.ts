@@ -1,8 +1,4 @@
-import {
-  ROUTE_PROVIDER_WAYPOINT_CEILING,
-  type RouteProvider,
-  type RouteProviderResult,
-} from "./route-provider.js";
+import type { RoutePoint, RouteProvider, RouteProviderResult } from "./route-provider.js";
 
 /**
  * Pure route-planning rules: which Areas are sequenced, in what order, and
@@ -10,8 +6,9 @@ import {
  *
  * The engine is called at most once per plan, never retried, and only when
  * every gate passes: Company enabled, Platform kill switch on, at least one
- * Area with a verified pin, a configured provider, and a successful budget
- * reservation. Every other path is the deterministic fallback ordering.
+ * Area with a verified pin, a configured provider, and -- for a paid engine
+ * only -- a successful budget reservation. Every other path is the
+ * deterministic fallback ordering.
  */
 
 export type RouteFallbackReason =
@@ -59,8 +56,10 @@ export interface RoutePlanInput {
   readonly areas: readonly RouteArea[];
   readonly gate: RouteGate;
   readonly provider: RouteProvider;
-  readonly start: { readonly latitude: number; readonly longitude: number } | null;
-  /** Atomically reserves one engine call; resolves false when over budget. */
+  readonly start: RoutePoint | null;
+  /** Usually the branch: the Driver returns there to hand over cash. */
+  readonly end: RoutePoint | null;
+  /** Atomically reserves one paid engine call; resolves false when over budget. */
   readonly reserveCall: () => Promise<boolean>;
 }
 
@@ -141,15 +140,18 @@ export async function planRoute(input: RoutePlanInput): Promise<RoutePlanResult>
   const unverified = ordered.filter((area) => !hasVerifiedPin(area));
   if (verified.length === 0) return fallback(representatives, "unverified_coordinates", false);
   if (!input.provider.available) return fallback(representatives, "provider_unavailable", false);
-  if (!(await input.reserveCall())) return fallback(representatives, "budget", true);
+  const metered = input.provider.metered;
+  if (metered && !(await input.reserveCall())) return fallback(representatives, "budget", true);
 
-  const sent = verified.slice(0, ROUTE_PROVIDER_WAYPOINT_CEILING);
+  const sent = verified.slice(0, input.provider.maxStops);
   let result: RouteProviderResult;
   try {
     result = await input.provider.plan({
       start: input.start,
+      end: input.end,
       stops: sent.map((area) => ({
         areaId: area.id,
+        emirateId: area.emirateId,
         latitude: area.latitude,
         longitude: area.longitude,
       })),
@@ -157,7 +159,7 @@ export async function planRoute(input: RoutePlanInput): Promise<RoutePlanResult>
   } catch {
     // One attempt only. A retry storm against a paid API is how a quota
     // becomes an invoice.
-    return fallback(representatives, "provider_error", true);
+    return fallback(representatives, "provider_error", metered);
   }
 
   const sentIds = new Set(sent.map((area) => area.id));
@@ -177,7 +179,7 @@ export async function planRoute(input: RoutePlanInput): Promise<RoutePlanResult>
     fallbackReason: null,
     partialOptimization: leftOver.length > 0,
     providerResult: result,
-    reserved: true,
+    reserved: metered,
   };
 }
 

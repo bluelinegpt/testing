@@ -30,6 +30,7 @@ import { PlatformAgentController } from "./platform-agent.controller.js";
 import { PlatformCompanyWebsiteController } from "./company-website.controller.js";
 import { PlatformCompanyWhatsAppController } from "./platform-company-whatsapp.controller.js";
 import { PlatformAnnouncementController } from "./platform-announcement.controller.js";
+import { PlatformRouteOptimizationController } from "./platform-route-optimization.controller.js";
 
 /**
  * The Platform route inventory, enumerated rather than assumed.
@@ -64,6 +65,7 @@ const platformControllers = [
   PlatformCompanyWebsiteController,
   PlatformCompanyWhatsAppController,
   PlatformAnnouncementController,
+  PlatformRouteOptimizationController,
 ];
 
 interface PlatformRoute {
@@ -297,6 +299,7 @@ describe("Platform route inventory", () => {
       "PlatformCompanyUserController",
       "PlatformCompanyWebsiteController",
       "PlatformCompanyWhatsAppController",
+      "PlatformRouteOptimizationController",
     ]);
     const bad: string[] = [];
     for (const route of routes) {
@@ -315,7 +318,9 @@ describe("Platform route inventory", () => {
               ? "src/platform/company-website.controller.ts"
               : controller === "PlatformCompanyWhatsAppController"
                 ? "src/platform/platform-company-whatsapp.controller.ts"
-                : "src/platform/platform-company.controller.ts",
+                : controller === "PlatformRouteOptimizationController"
+                  ? "src/platform/platform-route-optimization.controller.ts"
+                  : "src/platform/platform-company.controller.ts",
         ),
         "utf8",
       );

@@ -43,3 +43,37 @@ describe("route planning DTOs", () => {
     expect(requireKey("  plan-0001  ")).toBe("plan-0001");
   });
 });
+
+describe("route setup and Platform DTOs", () => {
+  it("requires both coordinates for a pin or the branch", async () => {
+    const { RoutePointDto } = await import("./route-planning.dto.js");
+    await expect(validate(RoutePointDto, { latitude: 25.2 })).rejects.toThrow();
+    await expect(validate(RoutePointDto, { latitude: 25.2, longitude: 200 })).rejects.toThrow();
+    await expect(
+      validate(RoutePointDto, { latitude: "25.2", longitude: "55.3" }),
+    ).resolves.toMatchObject({ latitude: 25.2 });
+  });
+
+  it("Platform update takes no provider (fixed to the free engine) and a version", async () => {
+    const { UpdateCompanyRouteOptimizationDto } =
+      await import("../platform/platform-route-optimization.dto.js");
+    await expect(
+      validate(UpdateCompanyRouteOptimizationDto, {
+        isEnabled: true,
+        dailyCallBudget: 10,
+        expectedVersion: 0,
+        provider: "google_routes",
+      }),
+    ).rejects.toThrow();
+    await expect(
+      validate(UpdateCompanyRouteOptimizationDto, { isEnabled: true, dailyCallBudget: 10 }),
+    ).rejects.toThrow();
+    await expect(
+      validate(UpdateCompanyRouteOptimizationDto, {
+        isEnabled: true,
+        dailyCallBudget: 10,
+        expectedVersion: 0,
+      }),
+    ).resolves.toBeDefined();
+  });
+});

@@ -28,12 +28,15 @@ function area(
   };
 }
 
+/** A paid engine double: metered, 25 stops per request, counts its calls. */
 function provider(
   orderedAreaIds?: (ids: string[]) => string[],
 ): RouteProvider & { plan: ReturnType<typeof vi.fn> } {
   return {
-    name: "area_matrix",
+    name: "google_routes",
     available: true,
+    metered: true,
+    maxStops: ROUTE_PROVIDER_WAYPOINT_CEILING,
     plan: vi.fn((request: { stops: readonly { areaId: string }[] }) => {
       const ids = request.stops.map((stop) => stop.areaId);
       return Promise.resolve({
@@ -51,6 +54,7 @@ function input(
     gate: { companyEnabled: true, platformEnabled: true },
     provider: provider(),
     start: null,
+    end: null,
     reserveCall: () => Promise.resolve(true),
     ...overrides,
   };
@@ -111,7 +115,13 @@ describe("planRoute gates", () => {
 
   it("never reserves or calls when no provider is configured", async () => {
     const reserveCall = vi.fn(() => Promise.resolve(true));
-    const unavailable: RouteProvider = { name: "none", available: false, plan: vi.fn() };
+    const unavailable: RouteProvider = {
+      name: "none",
+      available: false,
+      metered: true,
+      maxStops: 25,
+      plan: vi.fn(),
+    };
     const result = await planRoute(
       input({ areas: [area("a", "Al Barsha")], provider: unavailable, reserveCall }),
     );
@@ -141,6 +151,8 @@ describe("planRoute gates", () => {
     const failing: RouteProvider & { plan: ReturnType<typeof vi.fn> } = {
       name: "google_routes",
       available: true,
+      metered: true,
+      maxStops: 25,
       plan: vi.fn(() => Promise.reject(new Error("503"))),
     };
     const result = await planRoute(
@@ -152,6 +164,34 @@ describe("planRoute gates", () => {
       reserved: true,
     });
     expect(failing.plan).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("planRoute with the free stored-pin engine", () => {
+  it("never reserves budget for an unmetered engine, even when the budget is used up", async () => {
+    const reserveCall = vi.fn(() => Promise.resolve(false));
+    const free: RouteProvider & { plan: ReturnType<typeof vi.fn> } = {
+      ...provider(),
+      name: "area_matrix",
+      metered: false,
+      maxStops: 60,
+    };
+    const result = await planRoute(
+      input({ areas: [area("a", "Al Barsha"), area("b", "Deira")], provider: free, reserveCall }),
+    );
+    expect(result).toMatchObject({ resultSource: "provider", reserved: false });
+    expect(reserveCall).not.toHaveBeenCalled();
+    expect(free.plan).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes the end point and each stop's Emirate to the engine", async () => {
+    const engine = provider();
+    const branch = { latitude: 25.3, longitude: 55.4 };
+    await planRoute(input({ areas: [area("a", "Al Barsha")], provider: engine, end: branch }));
+    expect(engine.plan.mock.calls[0]?.[0]).toMatchObject({
+      end: branch,
+      stops: [{ areaId: "a", emirateId: "dubai" }],
+    });
   });
 });
 
