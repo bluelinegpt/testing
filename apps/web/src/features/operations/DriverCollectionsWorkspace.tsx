@@ -2080,12 +2080,12 @@ function CreateDriverCollectionDialog({
                       total, its Visa and Cash parts, then what comes off the
                       cash, ending with the Net Cash the Driver hands over.
                       No combined "net expected" -- Visa is already in the bank. */}
-                  <dl className="reconciliation-summary" data-testid="collection-review-summary">
-                    <div className="detail-line">
+                  <dl className="collection-calculation" data-testid="collection-review-summary">
+                    <div className="calc-line">
                       <dt>{t("operations.collectionSplit.totalAmount")}</dt>
                       <dd>{money(preview?.grossCollections)}</dd>
                     </div>
-                    <div className="detail-line">
+                    <div className="calc-line">
                       <dt>
                         {t("operations.collectionSplit.totalVisa", {
                           count: preview?.visaOrderCount ?? liveSplit.visaCount,
@@ -2093,7 +2093,7 @@ function CreateDriverCollectionDialog({
                       </dt>
                       <dd>{money(preview?.visaGross ?? "0")}</dd>
                     </div>
-                    <div className="detail-line">
+                    <div className="calc-line">
                       <dt>
                         {t("operations.collectionSplit.totalCash", {
                           count: preview?.cashOrderCount ?? liveSplit.cashCount,
@@ -2101,25 +2101,23 @@ function CreateDriverCollectionDialog({
                       </dt>
                       <dd>{money(preview?.cashGross ?? preview?.grossCollections)}</dd>
                     </div>
-                    <div className="detail-line">
+                    <div className="calc-line">
                       <dt>{t("operations.expenses")}</dt>
                       <dd>{minusAmount(preview?.expenseTotal)}</dd>
                     </div>
                     {Number(preview?.driverPayableDeduction ?? 0) === 0 ? null : (
-                      <div className="detail-line">
+                      <div className="calc-line">
                         <dt>{driverFeeLabel}</dt>
                         <dd>{minusAmount(preview?.driverPayableDeduction)}</dd>
                       </div>
                     )}
-                    <div className="detail-line detail-line-total">
+                    <div className="calc-line calc-line-total">
                       <dt>
                         {companyPays
                           ? t("operations.collectionSplit.companyPaysDriver")
                           : t("operations.collectionSplit.netCash")}
                       </dt>
-                      <dd>
-                        <strong>{money(cashDue)}</strong>
-                      </dd>
+                      <dd>{money(cashDue)}</dd>
                     </div>
                   </dl>
                   <div

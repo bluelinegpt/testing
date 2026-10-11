@@ -12641,3 +12641,45 @@ tr.row-highlighted {
   background: var(--surface-subtle);
   color: var(--text-primary);
 }
+
+/* Driver Collection review: one calculation read top to bottom, label on the
+   left and amount on the right, in normal case (Aiman, 11 Oct 2026). */
+.collection-calculation {
+  max-width: 560px;
+  margin: 0 0 18px;
+  padding: 0;
+}
+.collection-calculation .calc-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 24px;
+  padding: 7px 4px;
+  border-bottom: 1px solid var(--border-color, #dce3ee);
+}
+.collection-calculation dt {
+  margin: 0;
+  color: var(--text-primary, #111827);
+  font-size: 0.95rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.collection-calculation dd {
+  margin: 0;
+  color: var(--text-primary, #111827);
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+  white-space: nowrap;
+}
+.collection-calculation .calc-line-total {
+  border-top: 2px solid var(--text-primary, #111827);
+  border-bottom: 3px double var(--text-primary, #111827);
+  margin-top: 2px;
+}
+.collection-calculation .calc-line-total dt,
+.collection-calculation .calc-line-total dd {
+  font-size: 1.05rem;
+  font-weight: 800;
+}
