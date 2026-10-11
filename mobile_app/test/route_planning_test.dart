@@ -374,8 +374,6 @@ void main() {
       expect(find.text('Next Area'), findsOneWidget);
       expect(find.text('Al Nuaimiya'), findsWidgets);
 
-      await tester.tap(find.text('Al Nuaimiya').last);
-      await tester.pumpAndSettle();
       await tester.tap(find.text('Defer').first);
       await tester.pumpAndSettle();
       expect(routes.calls, contains('defer:order-1:1'));
@@ -491,6 +489,41 @@ void main() {
       );
     });
 
+    test('groups the route by Area and moves a whole Area', () {
+      final json = _runJson(startedAt: 'x');
+      final areas = json['areas'] as List;
+      final run = RouteState.fromJson({
+        'enabled': true,
+        'run': {
+          ...json,
+          'areas': [
+            areas[0],
+            {
+              ...areas[1] as Map,
+              'status': 'pending',
+              'orderCount': 1,
+              'orders': [
+                {'id': 'order-3', 'orderNumber': 'ORD-3'},
+              ],
+            },
+          ],
+        },
+      }).run!;
+      final plan = TripPlan.of(run);
+      expect(plan.areaGroups.length, 2);
+      expect(plan.areaGroups.last.stops.single.$1, 2);
+      expect([for (final stop in plan.movedArea(1, 0)) stop.order.id], [
+        'order-3',
+        'order-1',
+        'order-2',
+      ]);
+      expect([for (final stop in plan.afterPrevious) stop.order.id], [
+        'order-3',
+        'order-1',
+        'order-2',
+      ]);
+    });
+
     test('the Driver\'s own order is used across Areas', () {
       final json = _runJson(startedAt: 'x');
       final run = RouteState.fromJson({
@@ -535,8 +568,6 @@ void main() {
       final state = RouteState.fromJson({'enabled': true, 'run': _runJson()});
       final routes = _FakeRoutes(state);
       await tester.pumpWidget(_wrap(DriverRoutePage(initial: state), routes));
-      await tester.tap(find.text('Al Nuaimiya').last);
-      await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Move down').first);
       await tester.pumpAndSettle();
       expect(
@@ -558,7 +589,7 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, 'Start trip').last);
       await tester.pumpAndSettle();
       expect(routes.calls, contains('start'));
-      expect(find.text('Current stop'), findsOneWidget);
+      expect(find.text('Current stop'), findsWidgets);
       expect(find.text('Collect: AED 450.00'), findsOneWidget);
       expect(find.widgetWithText(FilledButton, 'Navigate'), findsOneWidget);
     });
@@ -614,7 +645,8 @@ void main() {
       });
       final routes = _FakeRoutes(started);
       await tester.pumpWidget(_wrap(DriverRoutePage(initial: started), routes));
-      expect(find.text('Full route'), findsOneWidget);
+      expect(find.text('Route list (2)'), findsOneWidget);
+      expect(find.text('Then: 4502 · Al Nuaimiya'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('route-stop-next')));
       await tester.pumpAndSettle();
       expect(routes.calls, contains('reorder:1:area-ajm:order-2,order-1'));
@@ -630,10 +662,51 @@ void main() {
       });
       final routes = _FakeRoutes(started);
       await tester.pumpWidget(_wrap(DriverRoutePage(initial: started), routes));
+      await tester.tap(find.text('Route list (2)'));
+      await tester.pumpAndSettle();
+      expect(find.text('Al Nuaimiya'), findsOneWidget);
       await tester.tap(find.byTooltip('Change number').last);
       await tester.pumpAndSettle();
       expect(find.text('Move 4502 to number'), findsOneWidget);
       await tester.tap(find.text('Number 1'));
+      await tester.pumpAndSettle();
+      expect(routes.calls, contains('reorder:1:area-ajm:order-2,order-1'));
+    });
+
+    testWidgets('Previous brings back the stop passed with Next', (
+      tester,
+    ) async {
+      _tall(tester);
+      final started = RouteState.fromJson({
+        'enabled': true,
+        'run': _runJson(
+          startedAt: '2026-10-10 09:00:00+04',
+          deferred: ['order-9'],
+        ),
+      });
+      final routes = _FakeRoutes(started);
+      await tester.pumpWidget(_wrap(DriverRoutePage(initial: started), routes));
+      await tester.tap(find.byKey(const ValueKey('route-stop-previous')));
+      await tester.pumpAndSettle();
+      expect(
+        routes.calls,
+        contains('reorder:1:area-ajm:order-9,order-1,order-2'),
+      );
+    });
+
+    testWidgets('the route list arrows move an Order one place', (
+      tester,
+    ) async {
+      _tall(tester);
+      final started = RouteState.fromJson({
+        'enabled': true,
+        'run': _runJson(startedAt: '2026-10-10 09:00:00+04'),
+      });
+      final routes = _FakeRoutes(started);
+      await tester.pumpWidget(_wrap(DriverRoutePage(initial: started), routes));
+      await tester.tap(find.text('Route list (2)'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Move down').first);
       await tester.pumpAndSettle();
       expect(routes.calls, contains('reorder:1:area-ajm:order-2,order-1'));
     });

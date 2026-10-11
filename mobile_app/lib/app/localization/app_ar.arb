@@ -312,5 +312,11 @@
   "routePositionNumber": "رقم {number}",
   "routeNoStartAreas": "لا توجد مناطق للبدء منها حالياً.",
   "routePlanFromAreaHint": "اختر المنطقة التي ستذهب إليها أولاً، مثل المنطقة التي أنت فيها الآن، وسيتم ترتيب باقي المسار بعدها.",
-  "routeStopSaved": "تم الحفظ. المحطة التالية جاهزة."
+  "routeStopSaved": "تم الحفظ. المحطة التالية جاهزة.",
+  "routePrevious": "السابق",
+  "routeListTab": "قائمة المسار ({count})",
+  "routeListHint": "اضغط على الرقم أو استخدم الأسهم لتغيير الترتيب.",
+  "routeMoveArea": "نقل المنطقة",
+  "routeNow": "الآن",
+  "routeThen": "بعدها"
 }

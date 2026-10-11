@@ -343,6 +343,26 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
     await _saveStops(run, plan.afterNext);
   }
 
+  /// "Previous": the stop he passed with Next comes back and is current.
+  Future<void> _previous(RouteRun run) async {
+    final plan = TripPlan.of(run);
+    if (plan.total < 2) return;
+    await _saveStops(run, plan.afterPrevious);
+  }
+
+  /// Moves a whole Area (all its stops) to another place in the trip.
+  Future<void> _setTripAreaPosition(RouteRun run, int from) async {
+    final locale = Localizations.localeOf(context).languageCode;
+    final plan = TripPlan.of(run);
+    final areas = plan.areaOrder;
+    if (from < 0 || areas.length < 2) return;
+    final to = await _pickPosition(areas[from].areaName(locale), [
+      for (final area in areas) area.areaName(locale),
+    ], from);
+    if (to == null || to == from || !mounted) return;
+    await _saveStops(run, plan.movedArea(from, to));
+  }
+
   /// Gives the stop at [from] a new number in the route.
   Future<void> _setStopPosition(RouteRun run, int from) async {
     final locale = Localizations.localeOf(context).languageCode;
@@ -513,7 +533,11 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
           onOpenOrder: _openOrder,
           onStatus: _stopStatus,
           onNext: () => _next(run),
+          onPrevious: () => _previous(run),
           onSetPosition: (index) => _setStopPosition(run, index),
+          onMoveStop: (from, to) =>
+              _saveStops(run, TripPlan.of(run).moved(from, to)),
+          onMoveArea: (areaIndex) => _setTripAreaPosition(run, areaIndex),
           onShowMap: _showRouteOnMap,
         ),
       );
@@ -677,11 +701,13 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
   }
 }
 
-/// The trip, one stop at a time, on one screen. The current stop carries
-/// everything the Driver needs at the door: Delivered, Hold, Return to
-/// branch, Next, and Call/WhatsApp/SMS. Below it the whole route is listed
-/// with numbers; tapping a number moves that stop to another number.
-final class _TripView extends StatelessWidget {
+/// The trip. Two views, one tap apart:
+/// - "Current stop": everything the Driver needs at the door (Delivered,
+///   Hold, Return to branch, Previous, Next, Call/WhatsApp/SMS).
+/// - "Route list": every stop still to do, grouped by Area and numbered in
+///   order. He can move an Order up or down, give it another number, or move
+///   a whole Area.
+final class _TripView extends StatefulWidget {
   const _TripView({
     required this.run,
     required this.locale,
@@ -690,7 +716,10 @@ final class _TripView extends StatelessWidget {
     required this.onOpenOrder,
     required this.onStatus,
     required this.onNext,
+    required this.onPrevious,
     required this.onSetPosition,
+    required this.onMoveStop,
+    required this.onMoveArea,
     required this.onShowMap,
   });
 
@@ -701,8 +730,18 @@ final class _TripView extends StatelessWidget {
   final Future<void> Function(RouteOrder order) onOpenOrder;
   final Future<void> Function(RouteOrder order, String status) onStatus;
   final Future<void> Function() onNext;
+  final Future<void> Function() onPrevious;
   final Future<void> Function(int index) onSetPosition;
+  final Future<void> Function(int from, int to) onMoveStop;
+  final Future<void> Function(int areaIndex) onMoveArea;
   final Future<void> Function(List<TripStop> stops) onShowMap;
+
+  @override
+  State<_TripView> createState() => _TripViewState();
+}
+
+final class _TripViewState extends State<_TripView> {
+  bool _showList = false;
 
   Future<void> _open(BuildContext context, Uri? uri) async {
     if (uri == null) return;
@@ -719,59 +758,126 @@ final class _TripView extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
+    final run = widget.run;
     final plan = TripPlan.of(run);
     final current = plan.current;
+    final canMove = widget.actionsEnabled && plan.total > 1;
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(AppSpacing.md),
       children: [
-        ...notices,
+        ...widget.notices,
         Text(
           '${l10n.routeTripStarted} · ${run.referenceNumber} · '
           '${l10n.routeStopsLeft(plan.total)}',
           style: theme.textTheme.bodySmall,
         ),
         const SizedBox(height: AppSpacing.sm),
-        if (current != null)
+        if (plan.total > 0) ...[
+          SegmentedButton<bool>(
+            showSelectedIcon: false,
+            segments: [
+              ButtonSegment(
+                value: false,
+                icon: const Icon(Icons.local_shipping_outlined),
+                label: Text(l10n.routeCurrentStop),
+              ),
+              ButtonSegment(
+                value: true,
+                icon: const Icon(Icons.format_list_numbered),
+                label: Text(l10n.routeListTab(plan.total)),
+              ),
+            ],
+            selected: {_showList},
+            onSelectionChanged: (selection) =>
+                setState(() => _showList = selection.first),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+        ],
+        if (current != null && !_showList)
           _CurrentStopCard(
             stop: current,
-            locale: locale,
-            actionsEnabled: actionsEnabled,
-            canGoNext: plan.total > 1,
+            following: plan.following,
+            locale: widget.locale,
+            actionsEnabled: widget.actionsEnabled,
+            canMove: plan.total > 1,
             onOpen: (uri) => _open(context, uri),
-            onDetails: () => onOpenOrder(current.order),
-            onStatus: (status) => onStatus(current.order, status),
-            onNext: onNext,
+            onDetails: () => widget.onOpenOrder(current.order),
+            onStatus: (status) => widget.onStatus(current.order, status),
+            onNext: widget.onNext,
+            onPrevious: widget.onPrevious,
           ),
-        if (plan.total > 0) ...[
-          const SizedBox(height: AppSpacing.md),
+        if (current != null && _showList) ...[
           Row(
             children: [
               Expanded(
                 child: Text(
-                  l10n.routeFullRoute,
-                  style: theme.textTheme.titleSmall,
+                  plan.total > 1 ? l10n.routeListHint : '',
+                  style: theme.textTheme.bodySmall,
                 ),
               ),
               TextButton.icon(
-                onPressed: () => onShowMap(plan.stops),
+                onPressed: () => widget.onShowMap(plan.stops),
                 icon: const Icon(Icons.map_outlined),
                 label: Text(l10n.routeShowOnMap),
               ),
             ],
           ),
-          if (plan.total > 1)
-            Text(l10n.routeChangeNumberHint, style: theme.textTheme.bodySmall),
-          for (final (index, stop) in plan.stops.indexed)
-            _StopTile(
-              number: index + 1,
-              stop: stop,
-              locale: locale,
-              isCurrent: index == 0,
-              onNumber: actionsEnabled && plan.total > 1
-                  ? () => onSetPosition(index)
-                  : null,
-              onTap: () => onOpenOrder(stop.order),
+          for (final (groupIndex, group) in plan.areaGroups.indexed)
+            Card(
+              key: ValueKey('route-group-$groupIndex'),
+              margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.place_outlined),
+                    title: Text(
+                      group.area.areaName(widget.locale).isEmpty
+                          ? '—'
+                          : group.area.areaName(widget.locale),
+                      style: theme.textTheme.titleSmall,
+                    ),
+                    subtitle: Text(
+                      [
+                        if (group.area.emirateName(widget.locale).isNotEmpty)
+                          group.area.emirateName(widget.locale),
+                        '${group.stops.length} ${l10n.routeOrders}',
+                      ].join(' · '),
+                    ),
+                    trailing: plan.areaOrder.length > 1
+                        ? IconButton(
+                            tooltip: l10n.routeMoveArea,
+                            onPressed: widget.actionsEnabled
+                                ? () => widget.onMoveArea(
+                                    plan.areaOrder.indexWhere(
+                                      (area) =>
+                                          area.areaId == group.area.areaId,
+                                    ),
+                                  )
+                                : null,
+                            icon: const Icon(Icons.swap_vert),
+                          )
+                        : null,
+                  ),
+                  for (final (index, stop) in group.stops)
+                    _StopTile(
+                      number: index + 1,
+                      stop: stop,
+                      isCurrent: index == 0,
+                      onNumber: canMove
+                          ? () => widget.onSetPosition(index)
+                          : null,
+                      onUp: canMove && index > 0
+                          ? () => widget.onMoveStop(index, index - 1)
+                          : null,
+                      onDown: canMove && index < plan.total - 1
+                          ? () => widget.onMoveStop(index, index + 1)
+                          : null,
+                      onTap: () => widget.onOpenOrder(stop.order),
+                    ),
+                ],
+              ),
             ),
         ],
         if (current == null) ...[
@@ -816,23 +922,27 @@ final class _TripView extends StatelessWidget {
 final class _CurrentStopCard extends StatelessWidget {
   const _CurrentStopCard({
     required this.stop,
+    required this.following,
     required this.locale,
     required this.actionsEnabled,
-    required this.canGoNext,
+    required this.canMove,
     required this.onOpen,
     required this.onDetails,
     required this.onStatus,
     required this.onNext,
+    required this.onPrevious,
   });
 
   final TripStop stop;
+  final TripStop? following;
   final String locale;
   final bool actionsEnabled;
-  final bool canGoNext;
+  final bool canMove;
   final Future<void> Function(Uri? uri) onOpen;
   final VoidCallback onDetails;
   final void Function(String status) onStatus;
   final VoidCallback onNext;
+  final VoidCallback onPrevious;
 
   static const _tall = Size.fromHeight(48);
 
@@ -957,20 +1067,41 @@ final class _CurrentStopCard extends StatelessWidget {
             children: [
               Expanded(
                 child: FilledButton.tonalIcon(
+                  key: const ValueKey('route-stop-previous'),
+                  style: FilledButton.styleFrom(minimumSize: _tall),
+                  onPressed: actionsEnabled && canMove ? onPrevious : null,
+                  icon: const Icon(Icons.skip_previous_rounded),
+                  label: Text(l10n.routePrevious),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              Expanded(
+                child: FilledButton.tonalIcon(
                   key: const ValueKey('route-stop-next'),
                   style: FilledButton.styleFrom(minimumSize: _tall),
-                  onPressed: actionsEnabled && canGoNext ? onNext : null,
+                  onPressed: actionsEnabled && canMove ? onNext : null,
                   icon: const Icon(Icons.skip_next_rounded),
                   label: Text(l10n.routeNext),
                 ),
               ),
-              const SizedBox(width: AppSpacing.xs),
-              TextButton.icon(
-                onPressed: onDetails,
-                icon: const Icon(Icons.description_outlined),
-                label: Text(l10n.routeDetails),
-              ),
             ],
+          ),
+          if (following case final then?)
+            Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.xs),
+              child: Text(
+                '${l10n.routeThen}: ${then.order.label}'
+                '${then.area.areaName(locale).isEmpty ? '' : ' · ${then.area.areaName(locale)}'}',
+                style: theme.textTheme.bodySmall,
+              ),
+            ),
+          Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: TextButton.icon(
+              onPressed: onDetails,
+              icon: const Icon(Icons.description_outlined),
+              label: Text(l10n.routeDetails),
+            ),
           ),
         ],
       ),
@@ -978,23 +1109,25 @@ final class _CurrentStopCard extends StatelessWidget {
   }
 }
 
-/// One numbered stop in the full route. The number is the stop's place;
-/// tapping it (or the swap button) gives the stop another number.
+/// One numbered stop in the route list. Tap the number to give it another
+/// number; the arrows move it one place up or down.
 final class _StopTile extends StatelessWidget {
   const _StopTile({
     required this.number,
     required this.stop,
-    required this.locale,
     required this.isCurrent,
     required this.onNumber,
+    required this.onUp,
+    required this.onDown,
     required this.onTap,
   });
 
   final int number;
   final TripStop stop;
-  final String locale;
   final bool isCurrent;
   final VoidCallback? onNumber;
+  final VoidCallback? onUp;
+  final VoidCallback? onDown;
   final VoidCallback onTap;
 
   @override
@@ -1004,7 +1137,6 @@ final class _StopTile extends StatelessWidget {
     return ListTile(
       dense: true,
       selected: isCurrent,
-      contentPadding: EdgeInsets.zero,
       leading: InkWell(
         customBorder: const CircleBorder(),
         onTap: onNumber,
@@ -1018,20 +1150,34 @@ final class _StopTile extends StatelessWidget {
           ),
         ),
       ),
-      title: Text(order.label),
+      title: Text(
+        isCurrent ? '${order.label} · ${l10n.routeNow}' : order.label,
+      ),
       subtitle: Text(
         [
-          if (stop.area.areaName(locale).isNotEmpty) stop.area.areaName(locale),
           if (order.customerName?.trim().isNotEmpty ?? false)
             order.customerName!.trim(),
+          if (order.amountDue case final amount?) 'AED $amount',
           if (order.noAnswerCount > 0)
             '${l10n.routeNoAnswerCount} ×${order.noAnswerCount}',
         ].join(' · '),
       ),
-      trailing: IconButton(
-        tooltip: l10n.routeChangeNumber,
-        onPressed: onNumber,
-        icon: const Icon(Icons.swap_vert),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            tooltip: l10n.routeMoveUp,
+            visualDensity: VisualDensity.compact,
+            onPressed: onUp,
+            icon: const Icon(Icons.arrow_upward, size: 18),
+          ),
+          IconButton(
+            tooltip: l10n.routeMoveDown,
+            visualDensity: VisualDensity.compact,
+            onPressed: onDown,
+            icon: const Icon(Icons.arrow_downward, size: 18),
+          ),
+        ],
       ),
       onTap: order.id.isEmpty ? null : onTap,
     );
@@ -1104,6 +1250,8 @@ final class _AreaTile extends StatelessWidget {
         : null;
     return Card(
       child: ExpansionTile(
+        // Open by default, so the Driver sees the Order sequence at once.
+        initiallyExpanded: !area.isDone,
         leading: InkWell(
           customBorder: const CircleBorder(),
           onTap: onNumber,

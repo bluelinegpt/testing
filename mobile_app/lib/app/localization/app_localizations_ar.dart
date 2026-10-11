@@ -989,4 +989,24 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get routeStopSaved => 'تم الحفظ. المحطة التالية جاهزة.';
+
+  @override
+  String get routePrevious => 'السابق';
+
+  @override
+  String routeListTab(int count) {
+    return 'قائمة المسار ($count)';
+  }
+
+  @override
+  String get routeListHint => 'اضغط على الرقم أو استخدم الأسهم لتغيير الترتيب.';
+
+  @override
+  String get routeMoveArea => 'نقل المنطقة';
+
+  @override
+  String get routeNow => 'الآن';
+
+  @override
+  String get routeThen => 'بعدها';
 }

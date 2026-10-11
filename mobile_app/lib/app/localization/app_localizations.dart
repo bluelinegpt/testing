@@ -1963,6 +1963,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Saved. The next stop is ready.'**
   String get routeStopSaved;
+
+  /// No description provided for @routePrevious.
+  ///
+  /// In en, this message translates to:
+  /// **'Previous'**
+  String get routePrevious;
+
+  /// No description provided for @routeListTab.
+  ///
+  /// In en, this message translates to:
+  /// **'Route list ({count})'**
+  String routeListTab(int count);
+
+  /// No description provided for @routeListHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap a number or use the arrows to change the order.'**
+  String get routeListHint;
+
+  /// No description provided for @routeMoveArea.
+  ///
+  /// In en, this message translates to:
+  /// **'Move Area'**
+  String get routeMoveArea;
+
+  /// No description provided for @routeNow.
+  ///
+  /// In en, this message translates to:
+  /// **'now'**
+  String get routeNow;
+
+  /// No description provided for @routeThen.
+  ///
+  /// In en, this message translates to:
+  /// **'Then'**
+  String get routeThen;
 }
 
 class _AppLocalizationsDelegate

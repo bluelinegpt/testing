@@ -1000,4 +1000,24 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get routeStopSaved => 'Saved. The next stop is ready.';
+
+  @override
+  String get routePrevious => 'Previous';
+
+  @override
+  String routeListTab(int count) {
+    return 'Route list ($count)';
+  }
+
+  @override
+  String get routeListHint => 'Tap a number or use the arrows to change the order.';
+
+  @override
+  String get routeMoveArea => 'Move Area';
+
+  @override
+  String get routeNow => 'now';
+
+  @override
+  String get routeThen => 'Then';
 }

@@ -362,6 +362,51 @@ final class TripPlan {
   /// "Next": the current stop goes to the end.
   List<TripStop> get afterNext =>
       stops.length < 2 ? stops : moved(0, stops.length - 1);
+
+  /// "Previous": the last stop (the one he passed with Next) comes back to
+  /// the front and becomes current again.
+  List<TripStop> get afterPrevious =>
+      stops.length < 2 ? stops : moved(stops.length - 1, 0);
+
+  /// The stop after the current one, if any.
+  TripStop? get following => stops.length < 2 ? null : stops[1];
+
+  /// The route in Area groups, in trip order: each group is one Area with
+  /// its stops and their 0-based numbers. An Area visited twice (the Driver
+  /// split it) appears as two groups.
+  List<({RouteArea area, List<(int, TripStop)> stops})> get areaGroups {
+    final groups = <({RouteArea area, List<(int, TripStop)> stops})>[];
+    for (final (index, stop) in stops.indexed) {
+      if (groups.isNotEmpty && groups.last.area.areaId == stop.area.areaId) {
+        groups.last.stops.add((index, stop));
+      } else {
+        groups.add((area: stop.area, stops: [(index, stop)]));
+      }
+    }
+    return groups;
+  }
+
+  /// The Areas in the order first reached.
+  List<RouteArea> get areaOrder {
+    final seen = <String>{};
+    return [
+      for (final stop in stops)
+        if (seen.add(stop.area.areaId)) stop.area,
+    ];
+  }
+
+  /// All stops of the Area at [from] (in [areaOrder]) moved together to
+  /// Area place [to]; each Area keeps its own Orders in their order.
+  List<TripStop> movedArea(int from, int to) {
+    final areas = [...areaOrder];
+    final area = areas.removeAt(from);
+    areas.insert(to.clamp(0, areas.length), area);
+    return [
+      for (final place in areas)
+        for (final stop in stops)
+          if (stop.area.areaId == place.areaId) stop,
+    ];
+  }
 }
 
 /// Google Maps directions through the stops' Areas in trip order, so the

@@ -318,5 +318,12 @@
   "@routePositionNumber": {"placeholders": {"number": {"type": "int"}}},
   "routeNoStartAreas": "There are no Areas to start from right now.",
   "routePlanFromAreaHint": "Choose the Area you will go to first, for example the one you are in now. The rest of the route is arranged from there.",
-  "routeStopSaved": "Saved. The next stop is ready."
+  "routeStopSaved": "Saved. The next stop is ready.",
+  "routePrevious": "Previous",
+  "routeListTab": "Route list ({count})",
+  "@routeListTab": {"placeholders": {"count": {"type": "int"}}},
+  "routeListHint": "Tap a number or use the arrows to change the order.",
+  "routeMoveArea": "Move Area",
+  "routeNow": "now",
+  "routeThen": "Then"
 }
