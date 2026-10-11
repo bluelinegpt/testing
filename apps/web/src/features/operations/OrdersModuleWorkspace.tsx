@@ -1888,120 +1888,142 @@ export function OrdersModuleWorkspace({
                   {formatCurrency(summary?.selectedAmountToCollect ?? "0", "AED", locale)}
                 </span>
               </div>
+              {/* Grouped like Aiman's layout (11 Oct 2026): delivery status,
+                  Driver, manifest, Trader reports, then copy / clear. In Arabic
+                  the first group sits on the right. */}
               <div className="bulk-actions">
-                {canAssignDriver && !selectedHasInternational ? (
-                  <button onClick={() => setBulkAction("assign")} type="button">
-                    <Truck aria-hidden="true" size={17} />
-                    {t("operations.assignDriver")}
-                  </button>
+                {(canUpdateStatus && !selectedHasInternational) ||
+                (canUpdateStatus &&
+                  bulkSelectedOrders.some((order) => order.orderType === "gcc_international")) ||
+                (canUpdateStatus && filters.quickView === "hold" && !allMatching) ? (
+                  <div className="bulk-action-group">
+                    {canUpdateStatus && !selectedHasInternational ? (
+                      <button onClick={() => setBulkAction("status")} type="button">
+                        <MoreHorizontal aria-hidden="true" size={17} />
+                        {t("operations.changeStatus")}
+                      </button>
+                    ) : null}
+                    {canUpdateStatus &&
+                    bulkSelectedOrders.some((order) => order.orderType === "gcc_international") ? (
+                      <button onClick={() => setBulkAction("carrier")} type="button">
+                        {t("operations.internationalCarrierBulkAction")}
+                      </button>
+                    ) : null}
+                    {canUpdateStatus && filters.quickView === "hold" && !allMatching ? (
+                      <button onClick={() => setBulkAction("reactivate")} type="button">
+                        {t("operations.reactivateHoldOrders")}
+                      </button>
+                    ) : null}
+                  </div>
                 ) : null}
-                {canReconcile && !selectedHasInternational ? (
-                  <button
-                    onClick={() =>
-                      onNavigate(
-                        collectFromDriverPath({
-                          driverId: bulkSelectedOrders[0]?.assignedDriverId ?? filters.driverId,
-                          orderIds: bulkSelectedOrders.map((order) => order.id),
-                        }),
-                      )
-                    }
-                    type="button"
-                  >
-                    <HandCoins aria-hidden="true" size={17} />
-                    {t("operations.actions.collectMoney")}
-                  </button>
-                ) : null}
-                {canCollectSelectedTraderReceivables ? (
-                  <button
-                    onClick={() =>
-                      onNavigate(
-                        selectedTraderReceivableId !== undefined &&
-                          selectedTraderReceivableId !== null
-                          ? `/trader-receivables?collectReceivableId=${encodeURIComponent(selectedTraderReceivableId)}&returnTo=%2Forders`
-                          : `/trader-receivables?collectTraderId=${encodeURIComponent(String(traderReceivableTraderId))}&returnTo=%2Forders`,
-                      )
-                    }
-                    type="button"
-                  >
-                    <HandCoins aria-hidden="true" size={17} />
-                    {t("operations.actions.collectFromTrader")}
-                  </button>
-                ) : null}
-                <button
-                  disabled={bulkSelectedOrders.length < 2}
-                  onClick={() =>
-                    void traderReportPdf.run(
-                      `operations/trader-receivables/bulk-report/pdf?language=${locale}`,
-                      "Trader-Reports.pdf",
-                      "preview",
-                      { orderIds: bulkSelectedOrders.map((order) => order.id) },
-                    )
-                  }
-                  title={t("operations.traderBulkReportHint")}
-                  type="button"
-                >
-                  <FileText aria-hidden="true" size={17} />
-                  {t("operations.actions.traderBulkReport")}
-                </button>
-                <button
-                  disabled={!canOpenTraderCollectionReport}
-                  onClick={() => void openTraderReport("collection")}
-                  title={
-                    bulkSelectedOrders.length !== 1
-                      ? t("operations.traderReportSelectOne")
-                      : t("operations.traderCollectionReportUnavailable")
-                  }
-                  type="button"
-                >
-                  <FileText aria-hidden="true" size={17} />
-                  {t("operations.actions.traderCollectionReport")}
-                </button>
-                <button
-                  disabled={!canOpenTraderSettlementReport}
-                  onClick={() => void openTraderReport("settlement")}
-                  title={
-                    bulkSelectedOrders.length !== 1
-                      ? t("operations.traderReportSelectOne")
-                      : t("operations.traderSettlementReportUnavailable")
-                  }
-                  type="button"
-                >
-                  <FileText aria-hidden="true" size={17} />
-                  {t("operations.actions.traderSettlementReport")}
-                </button>
-                {canUpdateStatus && !selectedHasInternational ? (
-                  <button onClick={() => setBulkAction("status")} type="button">
-                    <MoreHorizontal aria-hidden="true" size={17} />
-                    {t("operations.changeStatus")}
-                  </button>
-                ) : null}
-                {canUpdateStatus &&
-                bulkSelectedOrders.some((order) => order.orderType === "gcc_international") ? (
-                  <button onClick={() => setBulkAction("carrier")} type="button">
-                    {t("operations.internationalCarrierBulkAction")}
-                  </button>
+                {(canAssignDriver || canReconcile) && !selectedHasInternational ? (
+                  <div className="bulk-action-group">
+                    {canAssignDriver && !selectedHasInternational ? (
+                      <button onClick={() => setBulkAction("assign")} type="button">
+                        <Truck aria-hidden="true" size={17} />
+                        {t("operations.assignDriver")}
+                      </button>
+                    ) : null}
+                    {canReconcile && !selectedHasInternational ? (
+                      <button
+                        onClick={() =>
+                          onNavigate(
+                            collectFromDriverPath({
+                              driverId: bulkSelectedOrders[0]?.assignedDriverId ?? filters.driverId,
+                              orderIds: bulkSelectedOrders.map((order) => order.id),
+                            }),
+                          )
+                        }
+                        type="button"
+                      >
+                        <HandCoins aria-hidden="true" size={17} />
+                        {t("operations.actions.collectMoney")}
+                      </button>
+                    ) : null}
+                  </div>
                 ) : null}
                 {canManifest ? (
-                  <button onClick={() => setBulkAction("manifest")} type="button">
-                    <Printer aria-hidden="true" size={17} />
-                    {t("operations.actions.printManifest")}
-                  </button>
+                  <div className="bulk-action-group">
+                    {canManifest ? (
+                      <button onClick={() => setBulkAction("manifest")} type="button">
+                        <Printer aria-hidden="true" size={17} />
+                        {t("operations.actions.printManifest")}
+                      </button>
+                    ) : null}
+                  </div>
                 ) : null}
-                {canUpdateStatus && filters.quickView === "hold" && !allMatching ? (
-                  <button onClick={() => setBulkAction("reactivate")} type="button">
-                    {t("operations.reactivateHoldOrders")}
-                  </button>
-                ) : null}
-                <button
-                  disabled={allMatching || bulkSelectedOrders.length === 0}
-                  onClick={() => void copyNumbers()}
-                  type="button"
-                >
-                  {t("operations.copyNumbers")}
-                </button>
-                <button className="button-link" onClick={clearSelection} type="button">
-                  {t("common.clear")}
-                </button>
+                <div className="bulk-action-group">
+                    <button
+                      disabled={bulkSelectedOrders.length < 2}
+                      onClick={() =>
+                        void traderReportPdf.run(
+                          `operations/trader-receivables/bulk-report/pdf?language=${locale}`,
+                          "Trader-Reports.pdf",
+                          "preview",
+                          { orderIds: bulkSelectedOrders.map((order) => order.id) },
+                        )
+                      }
+                      title={t("operations.traderBulkReportHint")}
+                      type="button"
+                    >
+                      <FileText aria-hidden="true" size={17} />
+                      {t("operations.actions.traderBulkReport")}
+                    </button>
+                    <button
+                      disabled={!canOpenTraderCollectionReport}
+                      onClick={() => void openTraderReport("collection")}
+                      title={
+                        bulkSelectedOrders.length !== 1
+                          ? t("operations.traderReportSelectOne")
+                          : t("operations.traderCollectionReportUnavailable")
+                      }
+                      type="button"
+                    >
+                      <FileText aria-hidden="true" size={17} />
+                      {t("operations.actions.traderCollectionReport")}
+                    </button>
+                    <button
+                      disabled={!canOpenTraderSettlementReport}
+                      onClick={() => void openTraderReport("settlement")}
+                      title={
+                        bulkSelectedOrders.length !== 1
+                          ? t("operations.traderReportSelectOne")
+                          : t("operations.traderSettlementReportUnavailable")
+                      }
+                      type="button"
+                    >
+                      <FileText aria-hidden="true" size={17} />
+                      {t("operations.actions.traderSettlementReport")}
+                    </button>
+                    {canCollectSelectedTraderReceivables ? (
+                      <button
+                        onClick={() =>
+                          onNavigate(
+                            selectedTraderReceivableId !== undefined &&
+                              selectedTraderReceivableId !== null
+                              ? `/trader-receivables?collectReceivableId=${encodeURIComponent(selectedTraderReceivableId)}&returnTo=%2Forders`
+                              : `/trader-receivables?collectTraderId=${encodeURIComponent(String(traderReceivableTraderId))}&returnTo=%2Forders`,
+                          )
+                        }
+                        type="button"
+                      >
+                        <HandCoins aria-hidden="true" size={17} />
+                        {t("operations.actions.collectFromTrader")}
+                      </button>
+                    ) : null}
+                </div>
+                <div className="bulk-action-group bulk-action-group-plain">
+                    <button
+                      disabled={allMatching || bulkSelectedOrders.length === 0}
+                      onClick={() => void copyNumbers()}
+                      type="button"
+                    >
+                      {t("operations.copyNumbers")}
+                    </button>
+                    <button className="button-link" onClick={clearSelection} type="button">
+                      {t("common.clear")}
+                    </button>
+                </div>
               </div>
             </div>
           ) : null}

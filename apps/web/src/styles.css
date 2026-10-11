@@ -1135,6 +1135,21 @@
   flex-wrap: wrap;
   gap: 12px;
 }
+/* Selected-Orders actions in boxed groups (Aiman, 11 Oct 2026). */
+.bulk-action-group {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 6px 12px;
+  background: var(--surface-color);
+  border: 1px solid rgb(79 99 246 / 24%);
+  border-radius: 8px;
+}
+.bulk-action-group-plain {
+  background: transparent;
+  border-color: transparent;
+}
 .bulk-actions button {
   display: inline-flex;
   align-items: center;

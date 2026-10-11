@@ -1114,6 +1114,36 @@ describe("OrdersModuleWorkspace", () => {
     }));
   });
 
+  it("groups the selected-Orders actions: status, Driver, manifest, Trader reports, then copy / clear", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({ filteredCount: 1, items: [order], page: 1, pageSize: 25, totalCount: 1 });
+        }
+        if (path.startsWith("configuration/areas")) return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        return Promise.resolve([]);
+      }),
+      post: vi.fn(),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
+    );
+    fireEvent.click(await screen.findByLabelText("Select all Orders on this page"));
+    const groups = [...document.querySelectorAll(".bulk-action-group")].map((group) => group.textContent ?? "");
+    const groupOf = (label: string) => groups.findIndex((text) => text.includes(label));
+    // Trader reports sit together; copy / clear always come last.
+    const reports = groupOf("Combined Trader Reports");
+    expect(reports).toBeGreaterThanOrEqual(0);
+    expect(groups[reports]).toContain("Trader Collection Report");
+    expect(groups[reports]).toContain("Trader Settlement Report");
+    expect(groupOf("Copy Numbers")).toBe(groups.length - 1);
+    // Every group that is offered keeps the agreed order.
+    const order_ = ["Change delivery status", "Assign driver", "Print Driver Shipment Manifest", "Combined Trader Reports", "Copy Numbers"]
+      .map(groupOf)
+      .filter((index) => index >= 0);
+    expect(order_).toEqual([...order_].sort((left, right) => left - right));
+  });
+
   it("uses a searchable Emirate-aware Area filter without internal Area codes", async () => {
     const api = {
       get: vi.fn((path: string) => {
