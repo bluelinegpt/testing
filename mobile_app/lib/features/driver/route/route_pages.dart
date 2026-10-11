@@ -232,12 +232,16 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
   /// [from] and [to] index the Areas still to visit; finished Areas keep
   /// their place after them.
   Future<void> _moveArea(RouteRun run, int from, int to) {
-    final pending = [for (final area in run.areas) if (!area.isDone) area];
+    final pending = [
+      for (final area in run.areas)
+        if (!area.isDone) area,
+    ];
     final moved = pending.removeAt(from);
-    pending.insert(to > from ? to - 1 : to, moved);
+    pending.insert(to, moved);
     return _saveOrder(run, [
       ...pending,
-      for (final area in run.areas) if (area.isDone) area,
+      for (final area in run.areas)
+        if (area.isDone) area,
     ]);
   }
 
@@ -331,10 +335,16 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
     ];
     final pendingAreas = run == null
         ? const <RouteArea>[]
-        : [for (final area in run.areas) if (!area.isDone) area];
+        : [
+            for (final area in run.areas)
+              if (!area.isDone) area,
+          ];
     final doneAreas = run == null
         ? const <RouteArea>[]
-        : [for (final area in run.areas) if (area.isDone) area];
+        : [
+            for (final area in run.areas)
+              if (area.isDone) area,
+          ];
     if (run != null && run.isStarted) {
       return RefreshIndicator(
         onRefresh: _refresh,
@@ -437,7 +447,7 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 buildDefaultDragHandles: false,
-                onReorder: (from, to) {
+                onReorderItem: (from, to) {
                   if (actionsEnabled) _moveArea(run, from, to);
                 },
                 children: [
@@ -460,7 +470,10 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
             if (doneAreas.isNotEmpty)
               Card(
                 child: ExpansionTile(
-                  leading: const Icon(Icons.check_circle, color: AppColors.success),
+                  leading: const Icon(
+                    Icons.check_circle,
+                    color: AppColors.success,
+                  ),
                   title: Text('${l10n.routeDone} (${doneAreas.length})'),
                   children: [
                     for (final area in doneAreas)
@@ -584,7 +597,10 @@ final class _TripView extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (plan.isFinished)
-                  Text(l10n.routeTripFinished, style: theme.textTheme.titleMedium),
+                  Text(
+                    l10n.routeTripFinished,
+                    style: theme.textTheme.titleMedium,
+                  ),
                 const SizedBox(height: AppSpacing.xs),
                 Text(
                   '${l10n.routeReturnToBranch}: AED ${run.cashHandoverAmount}'

@@ -1895,7 +1895,7 @@ abstract class AppLocalizations {
   /// No description provided for @routeOnMyWayMessage.
   ///
   /// In en, this message translates to:
-  /// **'Hello {customer}, I'm on my way with your order {order}.'**
+  /// **'Hello {customer}, I\'m on my way with your order {order}.'**
   String routeOnMyWayMessage(String customer, String order);
 }
 

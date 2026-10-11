@@ -310,10 +310,14 @@ final class TripPlan {
 
   final List<TripStop> stops;
 
-  List<TripStop> get untried =>
-      [for (final stop in stops) if (stop.order.noAnswerCount == 0) stop];
-  List<TripStop> get retry =>
-      [for (final stop in stops) if (stop.order.noAnswerCount > 0) stop];
+  List<TripStop> get untried => [
+    for (final stop in stops)
+      if (stop.order.noAnswerCount == 0) stop,
+  ];
+  List<TripStop> get retry => [
+    for (final stop in stops)
+      if (stop.order.noAnswerCount > 0) stop,
+  ];
   TripStop? get current => untried.isEmpty ? null : untried.first;
   bool get isFinished => stops.isEmpty;
   int get total => stops.length;

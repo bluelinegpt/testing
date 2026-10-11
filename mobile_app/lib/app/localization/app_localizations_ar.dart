@@ -875,7 +875,8 @@ class AppLocalizationsAr extends AppLocalizations {
   String get routeStartTripConfirmTitle => 'بدء الرحلة؟';
 
   @override
-  String get routeStartTripConfirmBody => 'سيتم تحويل طلباتك المسندة إلى قيد التوصيل.';
+  String get routeStartTripConfirmBody =>
+      'سيتم تحويل طلباتك المسندة إلى قيد التوصيل.';
 
   @override
   String routeStartTripDone(int count) {
@@ -883,10 +884,12 @@ class AppLocalizationsAr extends AppLocalizations {
   }
 
   @override
-  String get routeStartTripSomeFailed => 'تعذّر بدء بعض الطلبات لأن المكتب عدّلها.';
+  String get routeStartTripSomeFailed =>
+      'تعذّر بدء بعض الطلبات لأن المكتب عدّلها.';
 
   @override
-  String get routeArrangeHint => 'اسحب المناطق لترتيبها كما تريد، واستخدم الأسهم لترتيب الطلبات داخل كل منطقة.';
+  String get routeArrangeHint =>
+      'اسحب المناطق لترتيبها كما تريد، واستخدم الأسهم لترتيب الطلبات داخل كل منطقة.';
 
   @override
   String get routeReplanConfirm => 'هل تريد استبدال ترتيبك بالمسار المقترح؟';

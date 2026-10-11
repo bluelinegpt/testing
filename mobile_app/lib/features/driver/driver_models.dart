@@ -365,9 +365,8 @@ Uri? orderDirectionsUri({
 }
 
 /// Driving directions to a fixed point (the branch).
-Uri pointDirectionsUri(double latitude, double longitude) =>
-    Uri.https('www.google.com', '/maps/dir/', {
-      'api': '1',
-      'destination': '$latitude,$longitude',
-      'travelmode': 'driving',
-    });
+Uri pointDirectionsUri(double latitude, double longitude) => Uri.https(
+  'www.google.com',
+  '/maps/dir/',
+  {'api': '1', 'destination': '$latitude,$longitude', 'travelmode': 'driving'},
+);

@@ -884,7 +884,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get routeStartTripConfirmTitle => 'Start trip?';
 
   @override
-  String get routeStartTripConfirmBody => 'Your assigned orders will be marked Out for delivery.';
+  String get routeStartTripConfirmBody =>
+      'Your assigned orders will be marked Out for delivery.';
 
   @override
   String routeStartTripDone(int count) {
@@ -892,13 +893,16 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get routeStartTripSomeFailed => 'Some orders could not be started because the office changed them.';
+  String get routeStartTripSomeFailed =>
+      'Some orders could not be started because the office changed them.';
 
   @override
-  String get routeArrangeHint => 'Drag the Areas into the order you want. Use the arrows to order the orders inside an Area.';
+  String get routeArrangeHint =>
+      'Drag the Areas into the order you want. Use the arrows to order the orders inside an Area.';
 
   @override
-  String get routeReplanConfirm => 'Replace your own order with the suggested route?';
+  String get routeReplanConfirm =>
+      'Replace your own order with the suggested route?';
 
   @override
   String get routeReplanConfirmAction => 'Replace';

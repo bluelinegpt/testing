@@ -81,3 +81,22 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+// The production Android app is also saved as TawseelHub.apk, next to
+// Flutter's own app-prod-release.apk in build/app/outputs/flutter-apk.
+// Flutter's file keeps its name because the Flutter tool looks for it after
+// Gradle finishes; renaming it instead would make `flutter build apk` fail.
+afterEvaluate {
+    tasks.matching { it.name == "assembleProdRelease" }.configureEach {
+        val outputs = layout.buildDirectory.dir("outputs")
+        doLast {
+            val source = outputs.get().file("apk/prod/release/app-prod-release.apk").asFile
+            if (source.exists()) {
+                val targetDir = outputs.get().dir("flutter-apk").asFile
+                targetDir.mkdirs()
+                source.copyTo(java.io.File(targetDir, "TawseelHub.apk"), overwrite = true)
+                println("Saved ${'$'}{targetDir}${'$'}{java.io.File.separator}TawseelHub.apk")
+            }
+        }
+    }
+}

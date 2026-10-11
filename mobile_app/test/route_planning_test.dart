@@ -152,7 +152,9 @@ final class _FakeRoutes implements DriverRouteRepository {
     List<String> areaIds, {
     List<String>? orderIds,
   }) async {
-    calls.add('reorder:$expectedRevision:${areaIds.join(',')}:${orderIds?.join(',')}');
+    calls.add(
+      'reorder:$expectedRevision:${areaIds.join(',')}:${orderIds?.join(',')}',
+    );
     return state;
   }
 
@@ -440,7 +442,9 @@ void main() {
   });
 
   group('Arrange and start trip', () {
-    testWidgets('moving an Order saves the Driver\'s own order', (tester) async {
+    testWidgets('moving an Order saves the Driver\'s own order', (
+      tester,
+    ) async {
       _tall(tester);
       final state = RouteState.fromJson({'enabled': true, 'run': _runJson()});
       final routes = _FakeRoutes(state);
@@ -501,11 +505,17 @@ void main() {
         'run': {
           ...json,
           'areas': [
-            {...(json['areas'] as List).first as Map, 'orders': [], 'orderCount': 0},
+            {
+              ...(json['areas'] as List).first as Map,
+              'orders': [],
+              'orderCount': 0,
+            },
           ],
         },
       });
-      await tester.pumpWidget(_wrap(DriverRoutePage(initial: done), _FakeRoutes(done)));
+      await tester.pumpWidget(
+        _wrap(DriverRoutePage(initial: done), _FakeRoutes(done)),
+      );
       expect(find.text('All stops done.'), findsOneWidget);
       expect(
         find.textContaining('Return to branch and hand over: AED 120.00'),
