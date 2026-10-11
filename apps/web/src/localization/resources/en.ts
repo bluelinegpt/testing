@@ -2183,6 +2183,7 @@ export const englishTranslations = {
     collectionSelectionSummary: "Selected orders: {{count}} · To collect: AED {{amount}}",
     questions: {
       title: "Quick questions",
+      allClear: "Nothing waiting",
       label: {
         ready_to_close: "Ready to close",
         collect_from_driver: "Ready to collect from driver",
@@ -2192,6 +2193,12 @@ export const englishTranslations = {
         no_driver: "No driver",
         out_not_delivered: "Out, not delivered",
         on_hold: "On hold",
+      },
+      groupAction: {
+        collect: "Collect from this driver",
+        settle: "New settlement for this trader",
+        confirmReceipt: "Confirm receipt for this trader",
+        collectFees: "Collect fees from this trader",
       },
       ask: {
         ready_to_close: "Which orders are ready to close?",

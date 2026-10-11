@@ -1172,6 +1172,46 @@ export function OrdersModuleWorkspace({
     changeGrouping("");
   };
 
+  /* Ready questions (step 3): the next action for one Driver or one Trader,
+     straight from its group header. Each opens the EXISTING screen and dialog
+     with that Driver or Trader preselected; nothing is written from here, and
+     every check of the target screen still applies. */
+  const questionGroupAction = (
+    group: VisibleOrderGroup,
+  ): { readonly label: string; readonly path: string } | null => {
+    const first = group.orders[0];
+    if (filters.question === "" || first === undefined) return null;
+    const orderIds = group.orders.map((order) => order.id);
+    if (filters.question === "collect_from_driver" && group.key.startsWith("driver:")) {
+      if (!canReconcile || !first.assignedDriverId) return null;
+      return {
+        label: t("operations.questions.groupAction.collect"),
+        path: collectFromDriverPath({ driverId: first.assignedDriverId, orderIds }),
+      };
+    }
+    if (!group.key.startsWith("trader:") || !first.traderId) return null;
+    const traderId = encodeURIComponent(first.traderId);
+    if (filters.question === "pay_trader" && canSettle) {
+      return {
+        label: t("operations.questions.groupAction.settle"),
+        path: `/trader-settlements?openDialog=new_settlement&traderId=${traderId}&returnTo=%2Forders`,
+      };
+    }
+    if (filters.question === "confirm_trader_receipt" && canSettle) {
+      return {
+        label: t("operations.questions.groupAction.confirmReceipt"),
+        path: `/trader-settlements?openDialog=confirm_receipt&traderId=${traderId}&returnTo=%2Forders`,
+      };
+    }
+    if (filters.question === "trader_owes_fees") {
+      return {
+        label: t("operations.questions.groupAction.collectFees"),
+        path: `/trader-receivables?collectTraderId=${traderId}&returnTo=%2Forders`,
+      };
+    }
+    return null;
+  };
+
   const renderGroupsRecursive = (groups: readonly VisibleOrderGroup[]): React.ReactNode => {
     return groups.flatMap((group) => {
       const hasChildren = group.children.length > 0;
@@ -1228,6 +1268,18 @@ export function OrdersModuleWorkspace({
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                   <strong>{group.label}</strong>
                   <span>{t("operations.visibleOrderCount", { count: leafOrders.length })}</span>
+                  {(() => {
+                    const action = questionGroupAction(group);
+                    return action === null ? null : (
+                      <button
+                        className="button button-primary order-group-action"
+                        onClick={() => onNavigate(action.path)}
+                        type="button"
+                      >
+                        {action.label}
+                      </button>
+                    );
+                  })()}
                 </div>
               )}
             </td>
@@ -1460,12 +1512,22 @@ export function OrdersModuleWorkspace({
           role="group"
         >
           <span className="order-questions-title">{t("operations.questions.title")}</span>
+          {/* Only questions with work waiting are shown (a 0 is noise). The
+              open question stays, even at 0, so the operator sees it is done
+              and can click it to return to the list. */}
+          {Object.keys(questionCounts).length > 0 &&
+          !orderQuestions.some(
+            (question) =>
+              (questionCounts[question.key]?.count ?? 0) > 0 || filters.question === question.key,
+          ) ? (
+            <span className="order-questions-clear">{t("operations.questions.allClear")}</span>
+          ) : null}
           {orderQuestions.map((question) => {
             const counted = questionCounts[question.key];
             const selected = filters.question === question.key;
+            if (!selected && (counted === undefined || counted.count === 0)) return null;
             const classes = ["order-question"];
             if (selected) classes.push("active");
-            if (counted !== undefined && counted.count === 0) classes.push("is-empty");
             return (
               <button
                 aria-pressed={selected}

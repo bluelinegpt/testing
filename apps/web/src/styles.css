@@ -12735,8 +12735,9 @@ tr.row-highlighted {
   background: var(--primary-subtle, #eef1ff);
   color: var(--primary-strong, #4f63f6);
 }
-.order-question.is-empty {
-  opacity: 0.55;
+.order-questions-clear {
+  color: var(--text-muted);
+  font-size: 0.85rem;
 }
 .order-question-amount {
   color: var(--text-muted);

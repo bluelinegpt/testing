@@ -2219,6 +2219,7 @@ export const arabicTranslations = {
     collectionSelectionSummary: "الطلبات المحددة: {{count}} · المبلغ المطلوب تحصيله: {{amount}} درهم",
     questions: {
       title: "أسئلة سريعة",
+      allClear: "لا يوجد شيء بانتظارك",
       label: {
         ready_to_close: "جاهزة للإغلاق",
         collect_from_driver: "جاهزة للتحصيل من المندوب",
@@ -2228,6 +2229,12 @@ export const arabicTranslations = {
         no_driver: "بدون مندوب",
         out_not_delivered: "خارج للتوصيل ولم تُسلّم",
         on_hold: "معلقة",
+      },
+      groupAction: {
+        collect: "تحصيل من هذا المندوب",
+        settle: "تسوية جديدة لهذا التاجر",
+        confirmReceipt: "تأكيد الاستلام لهذا التاجر",
+        collectFees: "تحصيل الرسوم من هذا التاجر",
       },
       ask: {
         ready_to_close: "أي الطلبات جاهزة للإغلاق؟",

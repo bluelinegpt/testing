@@ -1142,7 +1142,8 @@ describe("OrdersModuleWorkspace", () => {
     const collect = await questions.findByRole("button", { name: /Ready to collect from driver/u });
     await waitFor(() => expect(collect.textContent).toContain("45"));
     expect(collect).toHaveAttribute("title", "Which orders are ready to collect from the driver?");
-    expect(questions.getByRole("button", { name: /On hold/u })).toHaveClass("is-empty");
+    // A question with nothing waiting is not shown at all.
+    expect(questions.queryByRole("button", { name: /On hold/u })).not.toBeInTheDocument();
 
     fireEvent.click(collect);
     await waitFor(() =>
@@ -1157,6 +1158,74 @@ describe("OrdersModuleWorkspace", () => {
     // Clicking the active question again returns to the normal list.
     fireEvent.click(collect);
     await waitFor(() => expect(collect).toHaveAttribute("aria-pressed", "false"));
+  });
+
+  it("says nothing is waiting when every question is at 0", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path === "operations/orders/questions") {
+          return Promise.resolve({ items: [{ amount: null, count: 0, key: "ready_to_close" }] });
+        }
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({ filteredCount: 1, items: [order], page: 1, pageSize: 25, totalCount: 1 });
+        }
+        if (path.startsWith("configuration/areas")) return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        return Promise.resolve([]);
+      }),
+      post: vi.fn(),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
+    );
+    const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
+    expect(await questions.findByText("Nothing waiting")).toBeInTheDocument();
+    expect(questions.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("puts the next action on each Driver / Trader group of a ready question", async () => {
+    const delivered = {
+      ...order,
+      assignedDriverId: "20000000-0000-4000-8000-000000000001",
+      assignedDriverName: "Ahmed",
+      deliveryStatus: "delivered",
+      driverReconciliationStatus: "pending",
+      traderId: "30000000-0000-4000-8000-000000000001",
+    };
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path === "operations/orders/questions") {
+          return Promise.resolve({
+            items: [
+              { amount: "110.00", count: 1, key: "collect_from_driver" },
+              { amount: "90.00", count: 1, key: "pay_trader" },
+            ],
+          });
+        }
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({ filteredCount: 1, items: [delivered], page: 1, pageSize: 25, totalCount: 1 });
+        }
+        if (path.startsWith("configuration/areas")) return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        return Promise.resolve([]);
+      }),
+      post: vi.fn(),
+    };
+    const onNavigate = vi.fn();
+    renderWithRouter(
+      <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={onNavigate} permissions={["users_roles.manage"]} />,
+    );
+    const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
+
+    fireEvent.click(await questions.findByRole("button", { name: /Ready to collect from driver/u }));
+    fireEvent.click(await screen.findByRole("button", { name: "Collect from this driver" }));
+    expect(onNavigate).toHaveBeenLastCalledWith(
+      expect.stringMatching(/^\/drivers\?openDialog=collect_money.*driverId=20000000-0000-4000-8000-000000000001.*orderIds=10000000-0000-4000-8000-000000000001/u),
+    );
+
+    fireEvent.click(questions.getByRole("button", { name: /Waiting payment to trader/u }));
+    fireEvent.click(await screen.findByRole("button", { name: "New settlement for this trader" }));
+    expect(onNavigate).toHaveBeenLastCalledWith(
+      "/trader-settlements?openDialog=new_settlement&traderId=30000000-0000-4000-8000-000000000001&returnTo=%2Forders",
+    );
   });
 
   it("groups the selected-Orders actions: status, Driver, manifest, Trader reports, then copy / clear", async () => {
