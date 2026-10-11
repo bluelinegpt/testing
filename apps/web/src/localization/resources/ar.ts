@@ -2220,6 +2220,11 @@ export const arabicTranslations = {
     questions: {
       title: "أسئلة سريعة",
       allClear: "لا يوجد شيء بانتظارك",
+      closeAll: "إغلاق جميع الطلبات الجاهزة ({{count}})",
+      closeAllConfirm: "إغلاق {{count}} طلبات الآن؟ يتم إغلاق الطلبات المكتملة فقط.",
+      closeAllYes: "نعم، أغلقها",
+      closeAllDone: "تم إغلاق {{count}} طلبات.",
+      closeAllSkipped: "تم تخطي {{count}} لأنها لم تعد جاهزة:",
       label: {
         ready_to_close: "جاهزة للإغلاق",
         collect_from_driver: "جاهزة للتحصيل من المندوب",

@@ -260,6 +260,32 @@ describe.skipIf(!runHttpTests)("Orders ready questions", () => {
           expect(await listFor("no_driver")).toEqual([noDriver]);
           expect(await listFor("out_not_delivered")).toEqual([outForDelivery]);
 
+          // "Close all ready" (step 4): the existing bulk Close, scoped by the
+          // question, closes exactly the ready Order and nothing else.
+          const closeAll = await request(server)
+            .post("/api/v1/operations/orders/bulk-status")
+            .set("Authorization", `Bearer ${token}`)
+            .send({
+              allowPartial: true,
+              excludedOrderIds: [],
+              question: "ready_to_close",
+              selectionMode: "filter",
+              targetStatus: "closed",
+            });
+          expect(closeAll.status).toBe(201);
+          expect(closeAll.body).toMatchObject({ ineligible: [], processedCount: 1 });
+          const statuses = await sql<{ id: string; status: string }>`
+            select id, delivery_status as status from orders
+             where company_id = ${companyId}::uuid
+               and id in (${toClose}::uuid, ${toPay}::uuid, ${toCollect}::uuid)
+          `.execute(transaction);
+          expect(Object.fromEntries(statuses.rows.map((row) => [row.id, row.status]))).toEqual({
+            [toClose]: "closed",
+            [toCollect]: "delivered",
+            [toPay]: "delivered",
+          });
+          expect(await listFor("ready_to_close")).toEqual([]);
+
           const invalid = await request(server)
             .get("/api/v1/operations/orders?question=drop_table")
             .set("Authorization", `Bearer ${token}`);

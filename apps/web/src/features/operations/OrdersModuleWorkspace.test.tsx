@@ -1160,6 +1160,52 @@ describe("OrdersModuleWorkspace", () => {
     await waitFor(() => expect(collect).toHaveAttribute("aria-pressed", "false"));
   });
 
+  it("closes all ready Orders after a confirmation, and reports the ones skipped", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path === "operations/orders/questions") {
+          return Promise.resolve({ items: [{ amount: null, count: 4, key: "ready_to_close" }] });
+        }
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({ filteredCount: 1, items: [order], page: 1, pageSize: 25, totalCount: 1 });
+        }
+        if (path.startsWith("configuration/areas")) return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        return Promise.resolve([]);
+      }),
+      post: vi.fn((path: string) =>
+        path === "operations/orders/bulk-status"
+          ? Promise.resolve({
+              ineligible: [{ orderNumber: "ORD-000009", reason: "Driver Cash is not complete" }],
+              processedCount: 3,
+            })
+          : Promise.resolve({}),
+      ),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
+    );
+    const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
+    fireEvent.click(await questions.findByRole("button", { name: /Ready to close/u }));
+    fireEvent.click(await questions.findByRole("button", { name: "Close all 4 ready orders" }));
+    // Nothing is closed before the confirmation.
+    expect(api.post).not.toHaveBeenCalledWith("operations/orders/bulk-status", expect.anything());
+    fireEvent.click(questions.getByRole("button", { name: "Yes, close them" }));
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith("operations/orders/bulk-status", {
+        allowPartial: true,
+        excludedOrderIds: [],
+        question: "ready_to_close",
+        selectionMode: "filter",
+        targetStatus: "closed",
+      }),
+    );
+    expect(
+      await screen.findByText(
+        "3 orders closed. 1 skipped because they are no longer ready: ORD-000009",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("says nothing is waiting when every question is at 0", async () => {
     const api = {
       get: vi.fn((path: string) => {

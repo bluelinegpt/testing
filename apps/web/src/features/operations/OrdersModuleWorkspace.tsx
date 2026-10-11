@@ -412,6 +412,7 @@ export function OrdersModuleWorkspace({
   const [questionCounts, setQuestionCounts] = useState<Readonly<Record<string, OrderQuestionCount>>>(
     {},
   );
+  const [closeAllStage, setCloseAllStage] = useState<"idle" | "confirm" | "busy">("idle");
   const persistenceKey =
     persistenceScope === undefined
       ? null
@@ -825,7 +826,47 @@ export function OrdersModuleWorkspace({
   /* One click answers the question: the list shows exactly its Orders, grouped
      the way the next action works (per Driver to collect, per Trader to pay).
      Clicking the active question again returns to the normal list. */
+  /* "Close all ready" (step 4). The existing bulk Close, scoped by the
+     question: the API re-checks every Order against the real close gate under
+     row locks and skips -- never forces -- one that stopped being ready since
+     the count was read. */
+  const closeAllReady = async () => {
+    setCloseAllStage("busy");
+    try {
+      const result = await api.post<{
+        ineligible: readonly { orderNumber: string; reason: string }[];
+        processedCount: number;
+      }>("operations/orders/bulk-status", {
+        allowPartial: true,
+        excludedOrderIds: [],
+        question: "ready_to_close",
+        selectionMode: "filter",
+        targetStatus: "closed",
+      });
+      const skipped = result.ineligible ?? [];
+      setOrderActionNotice(
+        [
+          t("operations.questions.closeAllDone", { count: result.processedCount }),
+          skipped.length === 0
+            ? ""
+            : `${t("operations.questions.closeAllSkipped", { count: skipped.length })} ${skipped
+                .map((item) => item.orderNumber)
+                .join(", ")}`,
+        ]
+          .filter((line) => line !== "")
+          .join(" "),
+      );
+      clearSelection();
+      await load();
+    } catch (requestError) {
+      setOrderActionNotice(bulkStatusError(requestError, t));
+    } finally {
+      setCloseAllStage("idle");
+    }
+  };
+
   const selectQuestion = (question: (typeof orderQuestions)[number]) => {
+    setCloseAllStage("idle");
     if (filters.question === question.key) {
       updateFilters({ question: "" });
       setGrouping("");
@@ -1549,6 +1590,49 @@ export function OrdersModuleWorkspace({
               </button>
             );
           })}
+          {filters.question === "ready_to_close" &&
+          canUpdateStatus &&
+          (questionCounts.ready_to_close?.count ?? 0) > 0 ? (
+            <span className="order-questions-close-all">
+              {closeAllStage === "idle" ? (
+                <button
+                  className="button button-primary"
+                  onClick={() => setCloseAllStage("confirm")}
+                  type="button"
+                >
+                  {t("operations.questions.closeAll", {
+                    count: questionCounts.ready_to_close?.count ?? 0,
+                  })}
+                </button>
+              ) : (
+                <>
+                  <span role="status">
+                    {t("operations.questions.closeAllConfirm", {
+                      count: questionCounts.ready_to_close?.count ?? 0,
+                    })}
+                  </span>
+                  <button
+                    className="button button-primary"
+                    disabled={closeAllStage === "busy"}
+                    onClick={() => void closeAllReady()}
+                    type="button"
+                  >
+                    {closeAllStage === "busy"
+                      ? t("common.working")
+                      : t("operations.questions.closeAllYes")}
+                  </button>
+                  <button
+                    className="button button-secondary"
+                    disabled={closeAllStage === "busy"}
+                    onClick={() => setCloseAllStage("idle")}
+                    type="button"
+                  >
+                    {t("common.cancel")}
+                  </button>
+                </>
+              )}
+            </span>
+          ) : null}
         </div>
         {false ? (
           <section className="card" aria-label={t("operations.quickView.accountant")}>

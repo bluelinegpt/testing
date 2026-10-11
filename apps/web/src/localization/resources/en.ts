@@ -2184,6 +2184,11 @@ export const englishTranslations = {
     questions: {
       title: "Quick questions",
       allClear: "Nothing waiting",
+      closeAll: "Close all {{count}} ready orders",
+      closeAllConfirm: "Close {{count}} orders now? Only orders that are fully done are closed.",
+      closeAllYes: "Yes, close them",
+      closeAllDone: "{{count}} orders closed.",
+      closeAllSkipped: "{{count}} skipped because they are no longer ready:",
       label: {
         ready_to_close: "Ready to close",
         collect_from_driver: "Ready to collect from driver",

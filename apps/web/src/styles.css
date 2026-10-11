@@ -12744,3 +12744,12 @@ tr.row-highlighted {
   font-size: 0.78rem;
   font-weight: 600;
 }
+
+.order-questions-close-all {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-inline-start: auto;
+  font-size: 0.85rem;
+}
