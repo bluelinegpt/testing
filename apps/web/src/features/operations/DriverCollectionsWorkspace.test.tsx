@@ -75,7 +75,80 @@ const eligibleOrder = {
   traderName: "Test Trader",
 };
 
-function setup(overrides: { readonly getExtra?: (path: string) => unknown } = {}) {
+/**
+ * Preview mock that follows the request the way the API does: each Order is
+ * Cash or Visa (override, else the default); an Order with 0.00 has no method;
+ * expenses come out of cash only.
+ */
+function previewFor(body: unknown, orders: readonly { amountCollected: string; id: string }[]) {
+  const request = (body ?? {}) as {
+    defaultPaymentMethod?: "cash" | "visa";
+    expenses?: readonly { amount: number }[];
+    orderIds?: readonly string[];
+    orderPaymentMethods?: readonly { method: "cash" | "visa"; orderId: string }[];
+  };
+  let cash = 0;
+  let visa = 0;
+  let cashCount = 0;
+  let visaCount = 0;
+  let zeroCount = 0;
+  for (const id of request.orderIds ?? []) {
+    const amount = Number(orders.find((order) => order.id === id)?.amountCollected ?? 0);
+    if (amount === 0) {
+      zeroCount += 1;
+      continue;
+    }
+    const method =
+      request.orderPaymentMethods?.find((line) => line.orderId === id)?.method ??
+      request.defaultPaymentMethod ??
+      "cash";
+    if (method === "cash") {
+      cash += amount;
+      cashCount += 1;
+    } else {
+      visa += amount;
+      visaCount += 1;
+    }
+  }
+  const expenses = (request.expenses ?? []).reduce((total, row) => total + row.amount, 0);
+  const cashNet = cash - expenses;
+  return {
+    cashGross: cash.toFixed(2),
+    cashNetExpected: cashNet.toFixed(2),
+    cashOrderCount: cashCount,
+    collectionPaymentMethod:
+      cashCount > 0 && visaCount > 0 ? "mixed" : cashCount > 0 ? "cash" : visaCount > 0 ? "visa" : "none",
+    companyPaysDriver: (cashNet < 0 ? -cashNet : 0).toFixed(2),
+    difference: "0.00",
+    driverId: "drv-1",
+    driverFeeAllocations: [],
+    driverPayableDeduction: "0.00",
+    eligibleDriverFeeAccrualCount: 0,
+    expenseTotal: expenses.toFixed(2),
+    grossCollections: (cash + visa).toFixed(2),
+    netAmountExpected: (cashNet + visa).toFixed(2),
+    oldestFirstDriverFeeProposal: [],
+    orderCount: (request.orderIds ?? []).length,
+    remainingDriverFeeOutstanding: "0.00",
+    requestedDriverFeeOffset: "0.00",
+    safeMaximumDriverFeeOffset: "0.00",
+    totalOutstandingDriverFees: "0.00",
+    visaExpected: visa.toFixed(2),
+    visaGross: visa.toFixed(2),
+    visaOrderCount: visaCount,
+    warnings: [],
+    zeroOrderCount: zeroCount,
+  };
+}
+
+function setup(
+  overrides: {
+    readonly eligibleOrders?: readonly (typeof eligibleOrder)[];
+    readonly getExtra?: (path: string) => unknown;
+    readonly postExtra?: (path: string, body: unknown) => unknown;
+  } = {},
+) {
+  const eligibleOrders = overrides.eligibleOrders ?? [eligibleOrder];
   const getCalls: string[] = [];
   const api = {
     get: vi.fn((path: string) => {
@@ -101,30 +174,21 @@ function setup(overrides: { readonly getExtra?: (path: string) => unknown } = {}
         return Promise.resolve([]);
       }
       if (path.startsWith("operations/cash/eligible-orders")) {
-        return Promise.resolve({ items: [eligibleOrder], page: 1, pageSize: 25, total: 1 });
+        return Promise.resolve({
+          items: eligibleOrders,
+          page: 1,
+          pageSize: 25,
+          total: eligibleOrders.length,
+        });
       }
       return Promise.resolve({ items: [], page: 1, pageSize: 25, total: 0 });
     }),
     getBinary: vi.fn(() => Promise.resolve(new Blob(["%PDF-fake"], { type: "application/pdf" }))),
     post: vi.fn((path: string, body?: unknown) => {
+      const extraFirst = overrides.postExtra?.(path, body);
+      if (extraFirst !== undefined) return Promise.resolve(extraFirst);
       if (path === "operations/cash/reconciliations/preview") {
-        return Promise.resolve({
-          difference: "0.00",
-          driverId: driver.id,
-          driverFeeAllocations: [],
-          driverPayableDeduction: "0.00",
-          eligibleDriverFeeAccrualCount: 0,
-          expenseTotal: "0.00",
-          grossCollections: "60.00",
-          netAmountExpected: "60.00",
-          oldestFirstDriverFeeProposal: [],
-          orderCount: 1,
-          remainingDriverFeeOutstanding: "0.00",
-          requestedDriverFeeOffset: "0.00",
-          safeMaximumDriverFeeOffset: "0.00",
-          totalOutstandingDriverFees: "0.00",
-          warnings: [],
-        });
+        return Promise.resolve(previewFor(body, eligibleOrders));
       }
       if (path === "operations/cash/reconciliations/selected") {
         return Promise.resolve({ reconciliationId: "rec-new", reconciliationNumber: "REC-000200" });
@@ -386,12 +450,27 @@ describe("DriverCollectionsWorkspace", () => {
   });
 
   describe("Create Driver Collection dialog", () => {
-    async function openCreateDialog() {
-      setup();
+    async function openCreateDialog(options: Parameters<typeof setup>[0] = {}) {
+      const context = setup(options);
       fireEvent.click(await screen.findByRole("button", { name: "New Collection" }));
       fireEvent.click(await screen.findByText("Test Driver — Outsourced"));
-      return screen.getByRole("dialog");
+      return Object.assign(screen.getByRole("dialog"), { api: context.api });
     }
+
+    const confirmBody = (api: ReturnType<typeof setup>["api"]) =>
+      api.post.mock.calls.find((call) => call[0] === "operations/cash/reconciliations/selected")?.[1] as
+        | Record<string, unknown>
+        | undefined;
+
+    const lastPreviewBody = (api: ReturnType<typeof setup>["api"]) =>
+      api.post.mock.calls.filter((call) => call[0] === "operations/cash/reconciliations/preview").slice(-1)[0]?.[1] as
+        | Record<string, unknown>
+        | undefined;
+
+    const bankAccounts = (path: string) =>
+      path.startsWith("operations/accounting/cash-bank/bank-accounts")
+        ? [{ accountName: "Main", bankName: "Test Bank", id: "bank-1" }]
+        : undefined;
 
     it("shows Payment Method before Driver Expenses in the DOM order (§2)", async () => {
       await openCreateDialog();
@@ -404,15 +483,128 @@ describe("DriverCollectionsWorkspace", () => {
       expect(expensesIndex).toBeGreaterThan(paymentIndex);
     });
 
-    it("changing Payment Method clears the Order selection (Cash/Visa cannot mix)", async () => {
+    it("keeps the selection when the default method changes and applies it to Orders not switched", async () => {
       const dialog = await openCreateDialog();
       const checkbox = await screen.findByRole("checkbox", { name: /ORD-1/ });
       fireEvent.click(checkbox);
-      expect(checkbox).toBeChecked();
-      fireEvent.change(within(dialog).getByLabelText("Payment method"), {
+      fireEvent.change(within(dialog).getByLabelText("Default payment method"), {
         target: { value: "visa" },
       });
-      await waitFor(() => expect(checkbox).not.toBeChecked());
+      expect(checkbox).toBeChecked();
+      expect(within(dialog).getByLabelText("Payment method for ORD-1")).toHaveValue("visa");
+      await waitFor(() =>
+        expect(lastPreviewBody(dialog.api)).toMatchObject({ defaultPaymentMethod: "visa" }),
+      );
+    });
+
+    it("switches one Order to Visa, shows Cash and Visa counts, and sends the switch to the preview", async () => {
+      const second = { ...eligibleOrder, amountCollected: "40.00", id: "order-2", orderNumber: "ORD-2" };
+      const dialog = await openCreateDialog({ eligibleOrders: [eligibleOrder, second] });
+      fireEvent.click(await screen.findByRole("checkbox", { name: /ORD-1/ }));
+      fireEvent.click(screen.getByRole("checkbox", { name: /ORD-2/ }));
+      fireEvent.change(within(dialog).getByLabelText("Payment method for ORD-2"), {
+        target: { value: "visa" },
+      });
+      // Switching the method must not untick the row.
+      expect(screen.getByRole("checkbox", { name: /ORD-2/ })).toBeChecked();
+      const split = within(within(dialog).getByTestId("collection-split-summary"));
+      expect(split.getByText("Cash orders").nextElementSibling?.textContent).toBe("1 · AED 60.00");
+      expect(split.getByText("Visa orders").nextElementSibling?.textContent).toBe("1 · AED 40.00");
+      await waitFor(() =>
+        expect(lastPreviewBody(dialog.api)).toMatchObject({
+          defaultPaymentMethod: "cash",
+          orderPaymentMethods: [{ method: "visa", orderId: "order-2" }],
+        }),
+      );
+    });
+
+    it("shows Nothing to collect, with no switch, for an Order with 0.00", async () => {
+      const zero = { ...eligibleOrder, amountCollected: "0.00", id: "order-0", orderNumber: "ORD-0" };
+      const dialog = await openCreateDialog({ eligibleOrders: [eligibleOrder, zero] });
+      await screen.findByRole("checkbox", { name: /ORD-0/ });
+      expect(within(dialog).queryByLabelText("Payment method for ORD-0")).not.toBeInTheDocument();
+      expect(within(dialog).getByLabelText("Payment method for ORD-1")).toBeInTheDocument();
+      expect(
+        screen.getByRole("checkbox", { name: /ORD-0/ }).closest("tr")?.textContent,
+      ).toContain("Nothing to collect");
+    });
+
+    it("confirms a Visa-only collection with a bank account and no cash line", async () => {
+      const dialog = await openCreateDialog({ getExtra: bankAccounts });
+      fireEvent.click(await screen.findByRole("checkbox", { name: /ORD-1/ }));
+      fireEvent.change(within(dialog).getByLabelText("Payment method for ORD-1"), {
+        target: { value: "visa" },
+      });
+      await within(dialog).findByText("No cash to hand over.");
+      const confirmButton = screen.getByRole("button", { name: "Confirm reconciliation" });
+      expect(confirmButton).toBeDisabled();
+      fireEvent.change(await within(dialog).findByLabelText("Bank Account"), {
+        target: { value: "bank-1" },
+      });
+      await waitFor(() => expect(confirmButton).toBeEnabled());
+      fireEvent.click(confirmButton);
+      await waitFor(() => expect(confirmBody(dialog.api)).toBeDefined());
+      expect(confirmBody(dialog.api)).toMatchObject({
+        defaultPaymentMethod: "cash",
+        orderPaymentMethods: [{ method: "visa", orderId: "order-1" }],
+        payments: [
+          {
+            amount: 60,
+            bankAccountId: "bank-1",
+            bankReference: expect.stringMatching(/^REF-\d{8}-/),
+            paymentMethod: "bank_transfer",
+          },
+        ],
+      });
+    });
+
+    it("asks for the cash paid to the Driver when expenses are higher than the cash", async () => {
+      const dialog = await openCreateDialog({
+        postExtra: (path, body) =>
+          path === "operations/cash/reconciliations/preview"
+            ? {
+                ...previewFor(body, [eligibleOrder]),
+                cashNetExpected: "-40.00",
+                companyPaysDriver: "40.00",
+                expenseTotal: "100.00",
+                netAmountExpected: "-40.00",
+              }
+            : undefined,
+      });
+      fireEvent.click(await screen.findByRole("checkbox", { name: /ORD-1/ }));
+      expect(await within(dialog).findByText("Company pays Driver")).toBeInTheDocument();
+      fireEvent.change(await within(dialog).findByLabelText("Cash paid to Driver"), {
+        target: { value: "30" },
+      });
+      await within(dialog).findByText("Cash paid to Driver must be exactly AED 40.00.");
+      expect(screen.getByRole("button", { name: "Confirm reconciliation" })).toBeDisabled();
+      fireEvent.change(within(dialog).getByLabelText("Cash paid to Driver"), {
+        target: { value: "40" },
+      });
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Confirm reconciliation" })).toBeEnabled(),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Confirm reconciliation" }));
+      await waitFor(() => expect(confirmBody(dialog.api)).toBeDefined());
+      expect(confirmBody(dialog.api)?.payments).toEqual([
+        { amount: 40, direction: "out", paymentMethod: "cash" },
+      ]);
+    });
+
+    it("lists a Driver whose only pending Orders have nothing to collect", async () => {
+      setup({
+        getExtra: (path) =>
+          path.startsWith("operations/cash/drivers")
+            ? {
+                items: [{ ...driver, pendingCollectionTotal: "0.00", pendingOrderCount: 2 }],
+                page: 1,
+                pageSize: 25,
+                total: 1,
+              }
+            : undefined,
+      });
+      fireEvent.click(await screen.findByRole("button", { name: "New Collection" }));
+      expect(await screen.findByText("Test Driver — Outsourced")).toBeInTheDocument();
     });
 
     it("shows a negative Difference and an empty Actual Received before any entry", async () => {
@@ -450,7 +642,8 @@ describe("DriverCollectionsWorkspace", () => {
     });
 
     it("confirms with zero Difference and shows the Reconciliation Number on success", async () => {
-      const dialog = within(await openCreateDialog());
+      const dialogElement = await openCreateDialog();
+      const dialog = within(dialogElement);
       fireEvent.click(await screen.findByRole("checkbox", { name: /ORD-1/ }));
       // Actual Received is never pre-filled — enter the exact Net Expected (60.00)
       // to bring the Difference to zero.
@@ -466,6 +659,11 @@ describe("DriverCollectionsWorkspace", () => {
       // the confirmation message and in the summary list, plus Preview/Print/
       // Download/Done actions rather than a single bare Print button.
       expect((await dialog.findAllByText(/REC-000200/)).length).toBeGreaterThanOrEqual(2);
+      expect(confirmBody(dialogElement.api)).toMatchObject({
+        defaultPaymentMethod: "cash",
+        orderPaymentMethods: [],
+        payments: [{ amount: 60, paymentMethod: "cash" }],
+      });
       expect(dialog.getByRole("button", { name: "Preview Report" })).toBeInTheDocument();
       expect(dialog.getByRole("button", { name: "Print" })).toBeInTheDocument();
       expect(dialog.getByRole("button", { name: "Download PDF" })).toBeInTheDocument();

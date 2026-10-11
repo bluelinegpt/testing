@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useSessionAccess } from "../../app/SessionAccessContext.js";
 import { useListState } from "../accounting/use-list-state.js";
 import { formatDate } from "../../localization/formatters.js";
-import { normalizeLocale } from "../../localization/locale.js";
+import { normalizeLocale, type SupportedLocale } from "../../localization/locale.js";
 
 import {
   businessDateFilterDefaults,
@@ -45,7 +45,7 @@ interface CollectionRow {
   readonly businessDate: string;
   /** Company Business Date from the backend, derived from confirmedAt. */
   readonly confirmationBusinessDate?: string | null;
-  readonly collectionPaymentMethod: "cash" | "visa" | null;
+  readonly collectionPaymentMethod: CollectionHeaderMethod | null;
   readonly confirmedAt: string | null;
   readonly confirmedBy: string;
   readonly driverName: string;
@@ -74,7 +74,7 @@ interface ReportDataOrder {
   readonly driverReconciliationStatusLabel: string;
   readonly emirateName: string | null;
   readonly orderNumber: string;
-  readonly paymentMethod: "cash" | "visa" | null;
+  readonly paymentMethod: "cash" | "none" | "visa" | null;
   readonly referenceNumber: string | null;
   readonly serialNumber: string;
   readonly serviceFee: string;
@@ -97,7 +97,7 @@ interface ReportData {
   }[];
   readonly header: {
     readonly businessDate: string;
-    readonly collectionPaymentMethod: "cash" | "visa" | null;
+    readonly collectionPaymentMethod: CollectionHeaderMethod | null;
     readonly confirmedAt: string | null;
     readonly confirmedBy: string;
     readonly createdAt: string;
@@ -139,6 +139,8 @@ interface EligibleOrderRow {
   readonly customerName: string;
   readonly deliveredAt: string | null;
   readonly id: string;
+  /** True for an Order with nothing to collect (0.00): it has no payment method. */
+  readonly isZeroCollection?: boolean;
   readonly orderNumber: string;
   readonly referenceNumber: string | null;
   readonly serialNumber: string;
@@ -161,6 +163,18 @@ interface DriverOption {
 }
 
 interface PreviewResult {
+  /* Cash/Visa per Order (11 Oct 2026). Expenses and the fee offset come out of
+     cash only; Visa money goes to the bank in full. A negative cash net is what
+     the Company pays the Driver, in cash. Optional so an older API still loads. */
+  readonly cashGross?: string;
+  readonly cashNetExpected?: string;
+  readonly cashOrderCount?: number;
+  readonly collectionPaymentMethod?: CollectionHeaderMethod;
+  readonly companyPaysDriver?: string;
+  readonly visaExpected?: string;
+  readonly visaGross?: string;
+  readonly visaOrderCount?: number;
+  readonly zeroOrderCount?: number;
   readonly difference: string;
   readonly driverId: string;
   readonly driverFeeAllocations: readonly {
@@ -229,6 +243,40 @@ function money(value: string | number | undefined): string {
   const numeric = Number(value ?? 0);
   if (!Number.isFinite(numeric)) return "0.00";
   return (Math.round(numeric * 100) / 100).toFixed(2);
+}
+
+/** Payment method of one Order line: an Order with nothing to collect has none. */
+type CollectionMethod = "cash" | "visa";
+type LineMethod = CollectionMethod | "none";
+/** A collection's method is derived from its lines, never chosen. */
+type CollectionHeaderMethod = LineMethod | "mixed";
+
+const methodLabelKeys: Record<CollectionHeaderMethod, string> = {
+  cash: "operations.paymentMethodCash",
+  mixed: "operations.collectionSplit.paymentMethodMixed",
+  none: "operations.collectionSplit.nothingToCollect",
+  visa: "operations.paymentMethodVisa",
+};
+
+function methodLabelKey(value: CollectionHeaderMethod | null | undefined): string {
+  return value === null || value === undefined
+    ? "operations.paymentMethodNotAssigned"
+    : methodLabelKeys[value];
+}
+
+function isZeroAmount(value: string | undefined): boolean {
+  return Number(value ?? 0) === 0;
+}
+
+/** Delivered date in Dubai time. Accepts Postgres timestamptz text ("2026-10-10 14:23:11+00"). */
+function deliveredOn(value: string | null, locale: SupportedLocale): string {
+  if (value === null || value.trim() === "") return "";
+  const iso = value.trim().replace(" ", "T").replace(/([+-]\d{2})$/, "$1:00");
+  try {
+    return formatDate(iso, locale);
+  } catch {
+    return value;
+  }
 }
 
 function message(error: unknown, fallback: string): string {
@@ -473,11 +521,7 @@ export function DriverCollectionsWorkspace({
                 </td>
                 <td>{row.driverName}</td>
                 <td>
-                  {row.collectionPaymentMethod === null
-                    ? t("operations.paymentMethodNotAssigned")
-                    : t(
-                        `operations.paymentMethod${row.collectionPaymentMethod === "cash" ? "Cash" : "Visa"}`,
-                      )}
+                  {t(methodLabelKey(row.collectionPaymentMethod))}
                 </td>
                 <td>{row.businessDate}</td>
                 <td dir="ltr">
@@ -803,6 +847,7 @@ function FilterBar({
             <option value="">{t("operations.all")}</option>
             <option value="cash">{t("operations.paymentMethodCash")}</option>
             <option value="visa">{t("operations.paymentMethodVisa")}</option>
+            <option value="mixed">{t("operations.collectionSplit.paymentMethodMixed")}</option>
             <option value="not_assigned">{t("operations.paymentMethodNotAssigned")}</option>
           </select>
         </label>
@@ -966,6 +1011,12 @@ function FilterBar({
 // Create Driver Collection dialog (§2/§6/§7/§8/§9): the workflow order is
 // fixed — Driver, then Payment Method, then eligible Orders, then Expenses,
 // then Totals, then Confirmation. Payment Method must stay before Expenses.
+//
+// Cash/Visa per Order (11 Oct 2026, spec driver-collection-mixed-payment-spec):
+// the Payment Method step sets a default; each Order line can be switched to
+// Cash or Visa; an Order with nothing to collect has no method. Expenses and
+// the Outsourced Driver Fee Offset come out of cash only. When they are higher
+// than the cash, the Company pays the Driver the difference in cash.
 // ---------------------------------------------------------------------------
 
 function CreateDriverCollectionDialog({
@@ -997,11 +1048,22 @@ function CreateDriverCollectionDialog({
   const [drivers, setDrivers] = useState<readonly DriverOption[]>([]);
   const [driver, setDriver] = useState<DriverOption>();
 
-  // Step 2 — Payment Method (Cash/Visa), immediately after Driver.
-  const [paymentMethod, setPaymentMethod] = useState<"cash" | "visa">("cash");
+  // Step 2 — Payment Method, immediately after Driver: a default for every
+  // Order the operator has not switched, plus the per-Order switches.
+  const [defaultMethod, setDefaultMethod] = useState<CollectionMethod>("cash");
+  const [methodOverrides, setMethodOverrides] = useState<ReadonlyMap<string, CollectionMethod>>(
+    new Map(),
+  );
   const [bankAccounts, setBankAccounts] = useState<readonly { id: string; name: string }[]>([]);
   const [selectedBankAccountId, setSelectedBankAccountId] = useState("");
   const [bankReference, setBankReference] = useState("");
+  /* Minted once per dialog, so the confirm fingerprint -- and with it the
+     idempotency key -- stays the same from one render to the next. */
+  const [autoBankReference] = useState(() => {
+    const dateOnly = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    const random = Math.random().toString(16).substring(2, 8).toUpperCase();
+    return `REF-${dateOnly}-${random}`;
+  });
 
   // Step 3 — Eligible Orders.
   const [ordersPage, setOrdersPage] = useState<PagedResponse<EligibleOrderRow>>();
@@ -1060,6 +1122,7 @@ function CreateDriverCollectionDialog({
   const [saving, setSaving] = useState(false);
   const [confirmError, setConfirmError] = useState<string>();
   const [confirmed, setConfirmed] = useState<{
+    paymentMethod: CollectionHeaderMethod;
     driverFeeOffset: string;
     driverFeePaymentId: string | null;
     driverFeePaymentNumber: string | null;
@@ -1118,6 +1181,7 @@ function CreateDriverCollectionDialog({
   const chooseDriver = (next: DriverOption) => {
     setDriver(next);
     setSelectedIds(new Set());
+    setMethodOverrides(new Map());
     setPreview(undefined);
     setActualReceived("");
     setDriverFeeOffset("0.00");
@@ -1125,17 +1189,11 @@ function CreateDriverCollectionDialog({
     idempotency.reset();
   };
 
-  // Changing Payment Method resets the Order selection so a change can never
-  // silently leave Cash-context Orders selected under a Visa collection (§6):
-  // one collection carries exactly one method for every linked Order.
-  const changePaymentMethod = (next: "cash" | "visa") => {
-    setPaymentMethod(next);
-    setSelectedIds(new Set());
-    setPreview(undefined);
+  // The default applies to every Order the operator has not switched; a
+  // switched Order keeps its own method. The selection is kept.
+  const changeDefaultMethod = (next: CollectionMethod) => {
+    setDefaultMethod(next);
     setManualDriverFeeAllocations(undefined);
-    setSelectedBankAccountId("");
-    setBankReference("");
-    loadOrders();
   };
 
   const toggleOrder = (id: string) =>
@@ -1154,6 +1212,53 @@ function CreateDriverCollectionDialog({
     knownCollectAmounts.current.set(order.id, order.amountCollected);
   }
   const selectionCount = selectedIds.size;
+
+  const lineMethodOf = (id: string): LineMethod =>
+    isZeroAmount(knownCollectAmounts.current.get(id))
+      ? "none"
+      : (methodOverrides.get(id) ?? defaultMethod);
+
+  /** Switch one or more Order lines; an Order with nothing to collect is skipped. */
+  const setOrderMethod = (ids: Iterable<string>, method: CollectionMethod) => {
+    setMethodOverrides((current) => {
+      const next = new Map(current);
+      for (const id of ids) {
+        if (!isZeroAmount(knownCollectAmounts.current.get(id))) next.set(id, method);
+      }
+      return next;
+    });
+    setManualDriverFeeAllocations(undefined);
+  };
+
+  // Live split of the selection -- the settlement itself uses the preview.
+  const liveSplit = (() => {
+    let cashCents = 0;
+    let visaCents = 0;
+    let cashCount = 0;
+    let visaCount = 0;
+    let zeroCount = 0;
+    for (const id of selectedIds) {
+      const value = Number(knownCollectAmounts.current.get(id) ?? 0);
+      const cents = Number.isFinite(value) ? Math.round(value * 100) : 0;
+      const method = lineMethodOf(id);
+      if (method === "cash") {
+        cashCents += cents;
+        cashCount += 1;
+      } else if (method === "visa") {
+        visaCents += cents;
+        visaCount += 1;
+      } else {
+        zeroCount += 1;
+      }
+    }
+    return {
+      cashAmount: (cashCents / 100).toFixed(2),
+      cashCount,
+      visaAmount: (visaCents / 100).toFixed(2),
+      visaCount,
+      zeroCount,
+    };
+  })();
   const selectionTotal = (() => {
     let cents = 0;
     for (const id of selectedIds) {
@@ -1198,6 +1303,17 @@ function CreateDriverCollectionDialog({
     [selectedIds],
   );
 
+  /* Only switched Orders that are still selected: the backend refuses a method
+     for an Order outside the collection or with nothing to collect. */
+  const orderPaymentMethods = useMemo(
+    () =>
+      [...selectedIds].sort().flatMap((orderId) => {
+        const method = methodOverrides.get(orderId);
+        return method === undefined ? [] : [{ method, orderId }];
+      }),
+    [methodOverrides, selectedIds],
+  );
+
   useEffect(() => {
     if (selectedIds.size === 0) {
       setPreview(undefined);
@@ -1208,6 +1324,8 @@ function CreateDriverCollectionDialog({
       void api
         .post<PreviewResult>("operations/cash/reconciliations/preview", {
           ...selection,
+          defaultPaymentMethod: defaultMethod,
+          orderPaymentMethods,
           driverFeeAllocations: manualDriverFeeAllocations,
           driverFeeOffsetAmount: Number(money(driverFeeOffset)),
           expenses: cleanExpenses,
@@ -1234,48 +1352,70 @@ function CreateDriverCollectionDialog({
     api,
     JSON.stringify(cleanExpenses),
     JSON.stringify(manualDriverFeeAllocations),
+    JSON.stringify(orderPaymentMethods),
+    defaultMethod,
     selection,
     t,
     driverFeeOffset,
   ]);
 
-  const netExpected = preview === undefined ? 0 : Number(preview.netAmountExpected);
-  const difference = money(Number(money(actualReceived || 0)) - netExpected);
+  // Cash side: what the Driver hands over, or -- when expenses and the offset
+  // are higher than the cash -- what the Company pays the Driver, in cash.
+  const cashNet =
+    preview === undefined ? 0 : Number(preview.cashNetExpected ?? preview.netAmountExpected);
+  const companyPays = Number(money(cashNet)) < 0;
+  const cashDue = Number(money(Math.abs(cashNet)));
+  const cashMoves = cashDue > 0;
+  const difference = cashMoves ? money(Number(money(actualReceived || 0)) - cashDue) : "0.00";
+  // Visa side: the Visa Orders total goes to the bank in full.
+  const visaExpected = preview === undefined ? 0 : Number(money(preview.visaExpected ?? "0"));
+  const visaNeedsBank = visaExpected > 0;
 
-  const paymentRow: any = {
-    amount: Number(money(actualReceived)),
-    paymentMethod: paymentMethod === "visa" ? "bank_transfer" : "cash",
+  type PaymentLine = {
+    readonly amount: number;
+    readonly bankAccountId?: string;
+    readonly bankReference?: string;
+    readonly direction?: "out";
+    readonly paymentMethod: "bank_transfer" | "cash";
   };
-  if (paymentMethod === "visa" && selectedBankAccountId) {
-    paymentRow.bankAccountId = selectedBankAccountId;
-    const trimmedRef = (bankReference ?? "").trim();
-    if (trimmedRef) {
-      paymentRow.bankReference = trimmedRef;
-    } else {
-      const today = new Date().toISOString().split("T")[0] as string;
-      const dateOnly = today.replace(/-/g, "");
-      const random = Math.random().toString(16).substring(2, 8).toUpperCase();
-      paymentRow.bankReference = "REF-" + dateOnly + "-" + random;
-    }
+  const payments: PaymentLine[] = [];
+  if (cashMoves && actualReceived.trim() !== "") {
+    const amount = Number(money(actualReceived));
+    payments.push(
+      companyPays ? { amount, direction: "out", paymentMethod: "cash" } : { amount, paymentMethod: "cash" },
+    );
+  }
+  if (visaNeedsBank) {
+    payments.push({
+      amount: visaExpected,
+      paymentMethod: "bank_transfer",
+      ...(selectedBankAccountId === ""
+        ? {}
+        : {
+            bankAccountId: selectedBankAccountId,
+            bankReference: bankReference.trim() === "" ? autoBankReference : bankReference.trim(),
+          }),
+    });
   }
 
   const confirmPayload = {
     ...selection,
-    collectionPaymentMethod: paymentMethod,
+    defaultPaymentMethod: defaultMethod,
     driverFeeAllocations: manualDriverFeeAllocations,
     driverFeeOffsetAmount: Number(money(driverFeeOffset)),
     expenses: cleanExpenses,
-    payments: actualReceived.trim() === "" ? [] : [paymentRow],
+    orderPaymentMethods,
+    payments,
   };
-  const fingerprint = `${paymentMethod}|${materialFingerprint({
+  const fingerprint = `${defaultMethod}|${JSON.stringify(orderPaymentMethods)}|${materialFingerprint({
     excludedOrderIds: [],
     expenses: cleanExpenses.map((row) => ({ ...row, amount: String(row.amount) })),
     orderIds: [...selectedIds],
-    payments: confirmPayload.payments.map((row) => ({
+    payments: payments.map((row) => ({
       amount: String(row.amount),
-      paymentMethod: row.paymentMethod,
-      bankAccountId: (row as any).bankAccountId,
-      bankReference: (row as any).bankReference || undefined
+      ...(row.bankAccountId === undefined ? {} : { bankAccountId: row.bankAccountId }),
+      ...(row.bankReference === undefined ? {} : { bankReference: row.bankReference }),
+      paymentMethod: row.direction === "out" ? `${row.paymentMethod}:out` : row.paymentMethod,
     })),
     driverFeeOffsetAmount: driverFeeOffset,
     driverFeeAllocations: manualDriverFeeAllocations,
@@ -1288,9 +1428,8 @@ function CreateDriverCollectionDialog({
     preview !== undefined &&
     preview.warnings.length === 0 &&
     expenseNeedingDescription === undefined &&
-    actualReceived.trim() !== "" &&
-    Number(difference) === 0 &&
-    (paymentMethod === "cash" || selectedBankAccountId !== "") &&
+    (!cashMoves || (actualReceived.trim() !== "" && Number(difference) === 0)) &&
+    (!visaNeedsBank || selectedBankAccountId !== "") &&
     !saving;
 
   const confirm = async () => {
@@ -1309,6 +1448,7 @@ function CreateDriverCollectionDialog({
         "X-Idempotency-Key": idempotency.keyFor(fingerprint),
       });
       setConfirmed({
+        paymentMethod: preview?.collectionPaymentMethod ?? defaultMethod,
         grossCollections: preview?.grossCollections ?? "0.00",
         id: result.reconciliationId,
         number: result.reconciliationNumber,
@@ -1397,7 +1537,7 @@ function CreateDriverCollectionDialog({
             </div>
             <div className="detail-line">
               <dt>{t("operations.paymentMethod")}</dt>
-              <dd>{t(`operations.paymentMethod${paymentMethod === "cash" ? "Cash" : "Visa"}`)}</dd>
+              <dd>{t(methodLabelKey(confirmed.paymentMethod))}</dd>
             </div>
           </dl>
           {pdfError === undefined ? null : (
@@ -1461,7 +1601,7 @@ function CreateDriverCollectionDialog({
                   </label>
                   <ul className="option-list">
                     {drivers
-                      .filter((option) => Number(option.pendingCollectionTotal) > 0)
+                      .filter((option) => option.pendingOrderCount > 0)
                       .map((option) => (
                       <li key={option.id}>
                         <button onClick={() => chooseDriver(option)} type="button">
@@ -1474,7 +1614,7 @@ function CreateDriverCollectionDialog({
                         </button>
                       </li>
                     ))}
-                    {drivers.filter((option) => Number(option.pendingCollectionTotal) > 0).length === 0 ? (
+                    {drivers.filter((option) => option.pendingOrderCount > 0).length === 0 ? (
                       <li className="empty-state">{t("operations.noDrivers")}</li>
                     ) : null}
                   </ul>
@@ -1493,51 +1633,25 @@ function CreateDriverCollectionDialog({
 
             {driver === undefined ? null : (
               <>
-                {/* Step 2 — Payment Method: Cash or Visa, immediately after Driver
-                  and before Expenses (§2). */}
+                {/* Step 2 — Payment Method, immediately after Driver and before
+                  Expenses (§2): the default for every Order not switched below. */}
                 <section className="workspace-step">
                   <h3>{t("operations.paymentMethod")}</h3>
                   <label className="field required-field">
-                    <span>{t("operations.paymentMethod")}</span>
+                    <span>{t("operations.collectionSplit.defaultMethod")}</span>
                     <select
                       onChange={(event) =>
-                        changePaymentMethod(event.target.value as "cash" | "visa")
+                        changeDefaultMethod(event.target.value as CollectionMethod)
                       }
-                      value={paymentMethod}
+                      value={defaultMethod}
                     >
                       <option value="cash">{t("operations.paymentMethodCash")}</option>
                       <option value="visa">{t("operations.paymentMethodVisa")}</option>
                     </select>
                   </label>
-                  {paymentMethod === "visa" ? (
-                    <>
-                      <label className="field required-field">
-                        <span>Bank Account</span>
-                        <select
-                          onChange={(event) => setSelectedBankAccountId(event.target.value)}
-                          value={selectedBankAccountId}
-                        >
-                          <option value="">{t("common.select")}</option>
-                          {bankAccounts.map((account) => (
-                            <option key={account.id} value={account.id}>
-                              {account.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="field">
-                        <span>Bank Reference (optional)</span>
-                        <input
-                          onChange={(event) => setBankReference(event.target.value)}
-                          placeholder="e.g., TRX123456, REF-2026-08-25-001"
-                          type="text"
-                          value={bankReference}
-                          maxLength={80}
-                        />
-                        <small className="field-hint">Optional: Transaction reference or ID. If provided, must be unique.</small>
-                      </label>
-                    </>
-                  ) : null}
+                  <small className="field-hint">
+                    {t("operations.collectionSplit.defaultMethodHint")}
+                  </small>
                 </section>
 
                 {/* Step 3 — Eligible Orders */}
@@ -1553,9 +1667,51 @@ function CreateDriverCollectionDialog({
                       count: selectionCount,
                     })}
                   </div>
-                  <div className="detail-line detail-line-total">
-                    <span>{t("operations.selectedCollections")}</span>
-                    <strong>{money(preview?.grossCollections ?? "0.00")}</strong>
+                  <dl className="reconciliation-summary" data-testid="collection-split-summary">
+                    <div className="detail-line">
+                      <dt>{t("operations.collectionSplit.cashOrders")}</dt>
+                      <dd>
+                        {t("operations.collectionSplit.countAmount", {
+                          amount: liveSplit.cashAmount,
+                          count: liveSplit.cashCount,
+                        })}
+                      </dd>
+                    </div>
+                    <div className="detail-line">
+                      <dt>{t("operations.collectionSplit.visaOrders")}</dt>
+                      <dd>
+                        {t("operations.collectionSplit.countAmount", {
+                          amount: liveSplit.visaAmount,
+                          count: liveSplit.visaCount,
+                        })}
+                      </dd>
+                    </div>
+                    <div className="detail-line">
+                      <dt>{t("operations.collectionSplit.nothingToCollect")}</dt>
+                      <dd>{liveSplit.zeroCount}</dd>
+                    </div>
+                    <div className="detail-line detail-line-total">
+                      <dt>{t("operations.selectedCollections")}</dt>
+                      <dd>
+                        <strong>{money(preview?.grossCollections ?? "0.00")}</strong>
+                      </dd>
+                    </div>
+                  </dl>
+                  <div className="heading-actions">
+                    <button
+                      disabled={selectedIds.size === 0}
+                      onClick={() => setOrderMethod(selectedIds, "cash")}
+                      type="button"
+                    >
+                      {t("operations.collectionSplit.setSelectedCash")}
+                    </button>
+                    <button
+                      disabled={selectedIds.size === 0}
+                      onClick={() => setOrderMethod(selectedIds, "visa")}
+                      type="button"
+                    >
+                      {t("operations.collectionSplit.setSelectedVisa")}
+                    </button>
                   </div>
                   {/* Ten columns overflow the modal width; scroll instead of clipping. */}
                   <div className="table-scroll-x eligible-collection-orders-table">
@@ -1584,7 +1740,9 @@ function CreateDriverCollectionDialog({
                         </tr>
                       </thead>
                       <tbody>
-                        {(ordersPage?.items ?? []).map((order) => (
+                        {(ordersPage?.items ?? []).map((order) => {
+                          const lineMethod = lineMethodOf(order.id);
+                          return (
                           <tr
                             className="selectable-row"
                             key={order.id}
@@ -1608,24 +1766,41 @@ function CreateDriverCollectionDialog({
                             <td>{order.serialNumber}</td>
                             <td>{order.orderNumber}</td>
                             <td>{order.referenceNumber ?? "—"}</td>
-                            <td>{order.deliveredAt ?? ""}</td>
+                            <td>{deliveredOn(order.deliveredAt, reportLanguage)}</td>
                             <td>{order.traderName}</td>
                             <td>{order.customerName}</td>
                             <td>{order.areaName}</td>
                             <td>{money(order.amountCollected)}</td>
-                            <td>
-                              {t(
-                                `operations.paymentMethod${paymentMethod === "cash" ? "Cash" : "Visa"}`,
+                            {/* Switching the method must not toggle the row. */}
+                            <td onClick={(event) => event.stopPropagation()}>
+                              {lineMethod === "none" ? (
+                                <span className="cell-secondary">
+                                  {t("operations.collectionSplit.nothingToCollect")}
+                                </span>
+                              ) : (
+                                <select
+                                  aria-label={t("operations.collectionSplit.rowMethod", {
+                                    order: order.orderNumber,
+                                  })}
+                                  onChange={(event) =>
+                                    setOrderMethod([order.id], event.target.value as CollectionMethod)
+                                  }
+                                  value={lineMethod}
+                                >
+                                  <option value="cash">{t("operations.paymentMethodCash")}</option>
+                                  <option value="visa">{t("operations.paymentMethodVisa")}</option>
+                                </select>
                               )}
                             </td>
                             <td>
                               <DriverCashStatusLabel value={order.cashStatus} />
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                         {(ordersPage?.items.length ?? 0) === 0 ? (
                           <tr>
-                            <td className="empty-state" colSpan={10}>
+                            <td className="empty-state" colSpan={11}>
                               {t("operations.noEligibleOrders")}
                             </td>
                           </tr>
@@ -1876,6 +2051,14 @@ function CreateDriverCollectionDialog({
                       <dd>{money(preview?.grossCollections)}</dd>
                     </div>
                     <div className="detail-line">
+                      <dt>{t("operations.collectionSplit.cashGross")}</dt>
+                      <dd>{money(preview?.cashGross ?? preview?.grossCollections)}</dd>
+                    </div>
+                    <div className="detail-line">
+                      <dt>{t("operations.collectionSplit.visaGross")}</dt>
+                      <dd>{money(preview?.visaGross ?? "0")}</dd>
+                    </div>
+                    <div className="detail-line">
                       <dt>{t("operations.expenses")}</dt>
                       <dd>{money(preview?.expenseTotal)}</dd>
                     </div>
@@ -1889,34 +2072,124 @@ function CreateDriverCollectionDialog({
                         <strong>{money(preview?.netAmountExpected)}</strong>
                       </dd>
                     </div>
-                    <div className="detail-line">
-                      <dt>
-                        <label htmlFor="actual-received">{t("operations.actualReceived")}</label>
-                      </dt>
-                      <dd>
-                        <input
-                          id="actual-received"
-                          inputMode="decimal"
-                          onChange={(event) => setActualReceived(event.target.value)}
-                          required
-                          step="0.01"
-                          type="number"
-                          value={actualReceived}
-                        />
-                      </dd>
-                    </div>
-                    <div className="detail-line">
-                      <dt>{t("operations.difference")}</dt>
-                      <dd className={Number(difference) === 0 ? undefined : "summary-invalid"}>
-                        <strong>{difference}</strong>
-                      </dd>
-                    </div>
                   </dl>
-                  {Number(difference) === 0 ? null : (
-                    <p className="field-error" role="alert">
-                      {t("operations.blockedDifference")}
-                    </p>
-                  )}
+                  <div
+                    className="collection-settlement"
+                    style={{
+                      display: "grid",
+                      gap: "1rem",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+                    }}
+                  >
+                    <section className="collection-settlement-cash">
+                      <h4>{t("operations.collectionSplit.cashSection")}</h4>
+                      <dl className="reconciliation-summary">
+                        <div className="detail-line detail-line-total">
+                          <dt>
+                            {companyPays
+                              ? t("operations.collectionSplit.companyPaysDriver")
+                              : t("operations.collectionSplit.cashNetExpected")}
+                          </dt>
+                          <dd>
+                            <strong>{money(cashDue)}</strong>
+                          </dd>
+                        </div>
+                      </dl>
+                      {companyPays ? (
+                        <div className="alert alert-warning" role="status">
+                          {t("operations.collectionSplit.companyPaysDriverHint", {
+                            amount: money(cashDue),
+                          })}
+                        </div>
+                      ) : null}
+                      {cashMoves ? (
+                        <dl className="reconciliation-summary">
+                          <div className="detail-line">
+                            <dt>
+                              <label htmlFor="actual-received">
+                                {companyPays
+                                  ? t("operations.collectionSplit.cashPaidToDriver")
+                                  : t("operations.actualReceived")}
+                              </label>
+                            </dt>
+                            <dd>
+                              <input
+                                id="actual-received"
+                                inputMode="decimal"
+                                onChange={(event) => setActualReceived(event.target.value)}
+                                required
+                                step="0.01"
+                                type="number"
+                                value={actualReceived}
+                              />
+                            </dd>
+                          </div>
+                          <div className="detail-line">
+                            <dt>{t("operations.difference")}</dt>
+                            <dd className={Number(difference) === 0 ? undefined : "summary-invalid"}>
+                              <strong>{difference}</strong>
+                            </dd>
+                          </div>
+                        </dl>
+                      ) : preview === undefined ? null : (
+                        <p className="field-hint">{t("operations.collectionSplit.noCashToHandOver")}</p>
+                      )}
+                      {cashMoves && Number(difference) !== 0 ? (
+                        <p className="field-error" role="alert">
+                          {companyPays
+                            ? t("operations.collectionSplit.payoutDifference", {
+                                amount: money(cashDue),
+                              })
+                            : t("operations.blockedDifference")}
+                        </p>
+                      ) : null}
+                    </section>
+                    {visaNeedsBank ? (
+                      <section className="collection-settlement-visa">
+                        <h4>{t("operations.collectionSplit.visaSection")}</h4>
+                        <dl className="reconciliation-summary">
+                          <div className="detail-line detail-line-total">
+                            <dt>{t("operations.collectionSplit.visaExpected")}</dt>
+                            <dd>
+                              <strong>{money(visaExpected)}</strong>
+                            </dd>
+                          </div>
+                        </dl>
+                        <label className="field required-field">
+                          <span>{t("operations.collectionSplit.bankAccount")}</span>
+                          <select
+                            onChange={(event) => setSelectedBankAccountId(event.target.value)}
+                            value={selectedBankAccountId}
+                          >
+                            <option value="">{t("common.select")}</option>
+                            {bankAccounts.map((account) => (
+                              <option key={account.id} value={account.id}>
+                                {account.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        {selectedBankAccountId === "" ? (
+                          <small className="field-hint">
+                            {t("operations.collectionSplit.bankAccountRequired")}
+                          </small>
+                        ) : null}
+                        <label className="field">
+                          <span>{t("operations.collectionSplit.bankReference")}</span>
+                          <input
+                            maxLength={80}
+                            onChange={(event) => setBankReference(event.target.value)}
+                            placeholder="TRX123456"
+                            type="text"
+                            value={bankReference}
+                          />
+                          <small className="field-hint">
+                            {t("operations.collectionSplit.bankReferenceHint")}
+                          </small>
+                        </label>
+                      </section>
+                    ) : null}
+                  </div>
                 </section>
               </>
             )}
@@ -2070,11 +2343,7 @@ export function DriverCollectionDetailDialog({
             <div className="detail-line">
               <dt>{t("operations.paymentMethod")}</dt>
               <dd>
-                {data.header.collectionPaymentMethod === null
-                  ? t("operations.paymentMethodNotAssigned")
-                  : t(
-                      `operations.paymentMethod${data.header.collectionPaymentMethod === "cash" ? "Cash" : "Visa"}`,
-                    )}
+                {t(methodLabelKey(data.header.collectionPaymentMethod))}
               </dd>
             </div>
             <div className="detail-line">
