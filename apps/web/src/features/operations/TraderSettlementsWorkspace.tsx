@@ -377,6 +377,12 @@ const filterKeys = Object.keys(emptyFilters);
 /** Sort keys the Trader Settlements endpoint accepts. */
 const sortKeys = new Set(["businessDate", "settlementNumber"]);
 
+/** A deduction total: "-18.00", or a plain "0.00" when nothing is deducted (never "-0.00"). */
+function deduction(value: string | number | undefined): string {
+  const formatted = money(value);
+  return Number(value ?? 0) > 0 ? `-${formatted}` : formatted;
+}
+
 function money(value: string | number | undefined): string {
   return formatMoneyValue(value);
 }
@@ -2875,7 +2881,7 @@ function NewSettlementDialog({
             </div>
             <div className="detail-line">
               <dt>{t("traderSettlements.companyFeeDeductions")}</dt>
-              <dd>-{money(confirmed.receivableOffsetAmount)}</dd>
+              <dd>{deduction(confirmed.receivableOffsetAmount)}</dd>
             </div>
             {safeMoneyValue(confirmed.creditAppliedAmount ?? 0) === 0 ? null : (
               <div className="detail-line">
@@ -3445,7 +3451,7 @@ function NewSettlementDialog({
                   <div className="eligible-orders-totals" role="status">
                     <span>
                       {t("traderSettlements.availableFeeDeductions")}
-                      <strong>-{money(listedReceivableTotal.toFixed(2))}</strong>
+                      <strong>{deduction(listedReceivableTotal.toFixed(2))}</strong>
                     </span>
                   </div>
                 )}
@@ -3802,7 +3808,7 @@ function NewSettlementDialog({
                     </div>
                     <div className="detail-line">
                       <dt>{t("traderSettlements.companyFeeDeductions")}</dt>
-                      <dd>-{money(receivableOffsetTotal)}</dd>
+                      <dd>{deduction(receivableOffsetTotal)}</dd>
                     </div>
                     {creditApplications.length === 0 ? null : (
                       <div className="detail-line">
@@ -4568,7 +4574,7 @@ export function SettlementDetailDialog({
             </div>
             <div className="detail-line">
               <dt>{t("traderSettlements.companyFeeDeductions")}</dt>
-              <dd>-{money(detail.summary.traderFeeDeductions)}</dd>
+              <dd>{deduction(detail.summary.traderFeeDeductions)}</dd>
             </div>
             {(detail.creditApplications ?? []).length === 0 ? null : (
               <div className="detail-line">
