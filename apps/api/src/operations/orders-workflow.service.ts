@@ -17,6 +17,7 @@ import { deliveryStatusFilterPredicate } from "./delivery-status-filter.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import { resolveOrderCancellationReason } from "./order-cancellation-reason.js";
 import { driverCashStatusAfterStatusChange } from "./driver-cash-status-rule.js";
+import { orderQuestionPredicate } from "./order-questions.js";
 import type {
   BulkAssignDriverDto,
   BulkChangeOrderStatusDto,
@@ -680,7 +681,10 @@ export class OrdersWorkflowService {
       return result.rows;
     }
     const search = input.search?.trim() || null;
-    const quickView = input.quickView ?? "active";
+    // A ready question answers across the whole Company, exactly as the list
+    // it was selected from (`OperationsService.orders`), so it replaces the tab.
+    const question = input.question ?? null;
+    const quickView = question !== null ? "all" : (input.quickView ?? "active");
     const workflowStep = input.workflowStep ?? null;
     const openTraderReceivablePredicate = sql`
       exists (
@@ -778,6 +782,7 @@ export class OrdersWorkflowService {
           or t.name_en ilike '%' || ${search} || '%')
         and ${deliveryStatusFilterPredicate(input.deliveryStatus)}
         and ${workflowStepPredicate}
+        and ${question === null ? sql`true` : orderQuestionPredicate(question)}
         and (${input.orderType ?? null}::text is null or o.order_type=${input.orderType ?? null})
         and (${excludeInternational} = false or o.order_type <> 'gcc_international')
         and (${input.cashStatus ?? null}::text is null or o.driver_reconciliation_status = ${input.cashStatus ?? null})

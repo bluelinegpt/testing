@@ -22,6 +22,7 @@ import { Transform, Type } from "class-transformer";
 import { OmitType } from "@nestjs/swagger";
 
 import { NormalizeUaeMobile } from "../shared/uae-mobile.js";
+import { ORDER_QUESTION_KEYS, type OrderQuestionKey } from "./order-questions.js";
 import {
   ORDER_CANCELLATION_REASONS,
   type OrderCancellationReason,
@@ -198,6 +199,12 @@ export class OrderSelectionDto {
   @IsOptional()
   @IsIn(orderWorkflowSteps)
   public readonly workflowStep?: (typeof orderWorkflowSteps)[number];
+
+  /** Orders ready question (`order-questions.ts`): "select all matching" of its answer. */
+  @IsOptional()
+  @IsIn(ORDER_QUESTION_KEYS)
+  public readonly question?: OrderQuestionKey;
+
   @IsOptional()
   @IsUUID()
   public readonly traderId?: string;

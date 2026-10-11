@@ -12698,3 +12698,48 @@ tr.row-highlighted {
   font-size: 1.05rem;
   font-weight: 800;
 }
+
+/* Orders ready questions (11 Oct 2026): one line of question chips with live
+   counts above the Orders list. */
+.order-questions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 4px;
+}
+.order-questions-title {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+  margin-inline-end: 4px;
+}
+.order-question {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 1px solid var(--border-color, #dce3ee);
+  border-radius: 999px;
+  background: var(--surface-color, #fff);
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.order-question:hover {
+  border-color: rgb(79 99 246 / 50%);
+}
+.order-question.active {
+  border-color: var(--primary-strong, #4f63f6);
+  background: var(--primary-subtle, #eef1ff);
+  color: var(--primary-strong, #4f63f6);
+}
+.order-question.is-empty {
+  opacity: 0.55;
+}
+.order-question-amount {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}

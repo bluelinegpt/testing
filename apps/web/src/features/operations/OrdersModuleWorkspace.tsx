@@ -169,6 +169,8 @@ interface OrderFilters {
   serialNumber: string;
   traderId: string;
   workflowStep: string;
+  /** Orders ready question key (`order-questions.ts`); empty when none. */
+  question: string;
 }
 
 interface SelectionPayload extends Partial<OrderFilters> {
@@ -198,6 +200,8 @@ const bulkSelectionFilterKeys = [
   "serialNumber",
   "traderId",
   "workflowStep",
+  // "Select all matching" of a ready question selects exactly its answer.
+  "question",
 ] as const satisfies readonly (keyof OrderFilters)[];
 
 type ManifestSelectionPayload = Partial<OrderFilters> & {
@@ -269,7 +273,30 @@ const initialFilters: OrderFilters = {
   serialNumber: "",
   traderId: "",
   workflowStep: "",
+  question: "",
 };
+
+/**
+ * Orders ready questions (11 Oct 2026). Same keys, same order and same
+ * grouping as `apps/api/src/operations/order-questions.ts`; the API is the
+ * truth for what each one matches.
+ */
+const orderQuestions = [
+  { grouping: null, key: "ready_to_close" },
+  { grouping: "driver", key: "collect_from_driver" },
+  { grouping: "trader", key: "pay_trader" },
+  { grouping: "trader", key: "confirm_trader_receipt" },
+  { grouping: "trader", key: "trader_owes_fees" },
+  { grouping: null, key: "no_driver" },
+  { grouping: "driver", key: "out_not_delivered" },
+  { grouping: null, key: "on_hold" },
+] as const satisfies readonly { grouping: OrdersGroupingDimension | null; key: string }[];
+
+interface OrderQuestionCount {
+  readonly amount: string | null;
+  readonly count: number;
+  readonly key: string;
+}
 
 /**
  * Filter names this screen puts in the URL.
@@ -382,6 +409,9 @@ export function OrdersModuleWorkspace({
   >([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [grouping, setGrouping] = useState<OrderGrouping>("");
+  const [questionCounts, setQuestionCounts] = useState<Readonly<Record<string, OrderQuestionCount>>>(
+    {},
+  );
   const persistenceKey =
     persistenceScope === undefined
       ? null
@@ -776,6 +806,35 @@ export function OrdersModuleWorkspace({
   const updateFilters = (change: Partial<OrderFilters>) =>
     setFilters((current) => ({ ...current, ...change }));
 
+  /* Ready-question counts, refreshed with every list load so a count never
+     lags behind an action the operator just took (closing, collecting...). */
+  useEffect(() => {
+    let active = true;
+    void api
+      .get<{ items: readonly OrderQuestionCount[] }>("operations/orders/questions")
+      .then((result) => {
+        if (!active) return;
+        setQuestionCounts(Object.fromEntries((result.items ?? []).map((item) => [item.key, item])));
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [api, data]);
+
+  /* One click answers the question: the list shows exactly its Orders, grouped
+     the way the next action works (per Driver to collect, per Trader to pay).
+     Clicking the active question again returns to the normal list. */
+  const selectQuestion = (question: (typeof orderQuestions)[number]) => {
+    if (filters.question === question.key) {
+      updateFilters({ question: "" });
+      setGrouping("");
+    } else {
+      updateFilters({ question: question.key });
+      setGrouping(question.grouping === null ? "" : [question.grouping]);
+    }
+  };
+
   // Filter -> box: Clear filters, or arriving on a URL that already carries a
   // term. Guarded on inequality so it cannot fight the user's typing.
   useEffect(() => {
@@ -834,6 +893,7 @@ export function OrdersModuleWorkspace({
 
   const selectQuickView = (view: QuickView) => {
     list.setFilters({
+      question: "",
       quickView: view,
       viewKey: "",
       cancellationReason: "",
@@ -859,6 +919,7 @@ export function OrdersModuleWorkspace({
   const selectMenuView = (view: OrderView) => {
     list.setFilters({
       ...menuViewFilters(view),
+      question: "",
       cancellationReason: "",
       businessDateFrom: "",
       businessDateTo: "",
@@ -1392,6 +1453,40 @@ export function OrdersModuleWorkspace({
                   ) : null}
                 </button>
               ))}
+        </div>
+        <div
+          aria-label={t("operations.questions.title")}
+          className="order-questions"
+          role="group"
+        >
+          <span className="order-questions-title">{t("operations.questions.title")}</span>
+          {orderQuestions.map((question) => {
+            const counted = questionCounts[question.key];
+            const selected = filters.question === question.key;
+            const classes = ["order-question"];
+            if (selected) classes.push("active");
+            if (counted !== undefined && counted.count === 0) classes.push("is-empty");
+            return (
+              <button
+                aria-pressed={selected}
+                className={classes.join(" ")}
+                key={question.key}
+                onClick={() => selectQuestion(question)}
+                title={t(`operations.questions.ask.${question.key}`)}
+                type="button"
+              >
+                {t(`operations.questions.label.${question.key}`)}
+                {counted === undefined ? null : (
+                  <span className="tab-count">{counted.count}</span>
+                )}
+                {counted?.amount === null || counted?.amount === undefined || counted.count === 0 ? null : (
+                  <span className="order-question-amount">
+                    {formatCurrency(counted.amount, "AED", locale)}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
         {false ? (
           <section className="card" aria-label={t("operations.quickView.accountant")}>

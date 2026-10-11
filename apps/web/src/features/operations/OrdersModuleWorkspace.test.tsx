@@ -1114,6 +1114,51 @@ describe("OrdersModuleWorkspace", () => {
     }));
   });
 
+  it("shows the ready questions with live counts and opens a question's Orders with one click", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path === "operations/orders/questions") {
+          return Promise.resolve({
+            items: [
+              { amount: null, count: 37, key: "ready_to_close" },
+              { amount: "4500.00", count: 45, key: "collect_from_driver" },
+              { amount: "3000.00", count: 30, key: "pay_trader" },
+              { amount: null, count: 0, key: "on_hold" },
+            ],
+          });
+        }
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({ filteredCount: 1, items: [order], page: 1, pageSize: 25, totalCount: 1 });
+        }
+        if (path.startsWith("configuration/areas")) return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        return Promise.resolve([]);
+      }),
+      post: vi.fn(),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
+    );
+    const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
+    const collect = await questions.findByRole("button", { name: /Ready to collect from driver/u });
+    await waitFor(() => expect(collect.textContent).toContain("45"));
+    expect(collect).toHaveAttribute("title", "Which orders are ready to collect from the driver?");
+    expect(questions.getByRole("button", { name: /On hold/u })).toHaveClass("is-empty");
+
+    fireEvent.click(collect);
+    await waitFor(() =>
+      expect(
+        api.get.mock.calls.some(
+          (call) => String(call[0]).startsWith("operations/orders?") && String(call[0]).includes("question=collect_from_driver"),
+        ),
+      ).toBe(true),
+    );
+    expect(collect).toHaveAttribute("aria-pressed", "true");
+
+    // Clicking the active question again returns to the normal list.
+    fireEvent.click(collect);
+    await waitFor(() => expect(collect).toHaveAttribute("aria-pressed", "false"));
+  });
+
   it("groups the selected-Orders actions: status, Driver, manifest, Trader reports, then copy / clear", async () => {
     const api = {
       get: vi.fn((path: string) => {
