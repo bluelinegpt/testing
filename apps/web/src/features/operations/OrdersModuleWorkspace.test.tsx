@@ -1613,8 +1613,9 @@ describe("OrdersModuleWorkspace", () => {
     fireEvent.click(await questions.findByRole("button", { name: /Paid, trader not confirmed/u }));
 
     // A closed International Order no longer shows its last carrier stage in
-    // place of the money step.
-    expect(screen.queryByText("In Transit")).not.toBeInTheDocument();
+    // place of the money step (the Carrier stage filter still lists it).
+    const row = (await screen.findByText("Serial Number: SER-000001")).closest("tr") as HTMLElement;
+    expect(within(row).queryByText("In Transit")).not.toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole("button", { name: "Confirm receipt for this trader" }));
     expect(onNavigate).toHaveBeenLastCalledWith(

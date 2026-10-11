@@ -309,7 +309,10 @@ const orderQuestions = [
  * stage must no longer replace it. ORD-000162 (11 Oct 2026): closed, carrier
  * stage still "In Transit", and its "Confirm receipt" step was hidden.
  */
-function inCarrierStages(order: { readonly deliveryStatus: string; readonly orderType: string }) {
+function inCarrierStages(order: {
+  readonly deliveryStatus: string;
+  readonly orderType?: string | null | undefined;
+}) {
   return (
     order.orderType === "gcc_international" &&
     !["delivered", "closed", "returned_to_trader", "cancelled"].includes(order.deliveryStatus)
