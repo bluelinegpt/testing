@@ -70,6 +70,12 @@ describe("Orders ready questions", () => {
     expect(text).not.toContain("customer_amount_due");
   });
 
+  it("traders owe fees lists only fees that can be collected now (delivered Orders)", () => {
+    const text = sqlOf("trader_owes_fees");
+    expect(text).toContain("o.delivered_at is not null");
+    expect(text).toContain("question_receivable.status in ('outstanding', 'partially_collected')");
+  });
+
   it("pay Trader waits for the Driver's cash and only for unpaid Traders", () => {
     const text = sqlOf("pay_trader");
     expect(text).toContain("o.driver_reconciliation_status in ('reconciled', 'not_applicable')");

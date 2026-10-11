@@ -16,6 +16,7 @@ import { OutsourcedDriverFeeService } from "../payroll/outsourced-driver-fee.ser
 import { deliveryStatusFilterPredicate } from "./delivery-status-filter.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import { resolveOrderCancellationReason } from "./order-cancellation-reason.js";
+import { cancelUncollectedOrderFeeReceivables } from "./order-fee-receivable-cancel.js";
 import { driverCashStatusAfterStatusChange } from "./driver-cash-status-rule.js";
 import { orderQuestionPredicate } from "./order-questions.js";
 import type {
@@ -629,6 +630,16 @@ export class OrdersWorkflowService {
         correlationId: input.correlationId,
         orderId: order.id,
         orderStatus: status,
+      });
+    }
+    if (status === "cancelled") {
+      // Same rule as the single-Order path (operations.service): cancelling
+      // the Order cancels its unpaid fee to the Trader (Aiman, 11 Oct 2026).
+      await cancelUncollectedOrderFeeReceivables(database, {
+        actorId: input.actorId,
+        companyId: input.companyId,
+        correlationId: input.correlationId,
+        orderId: order.id,
       });
     }
     if (status === "delivered") {

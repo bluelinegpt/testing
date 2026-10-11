@@ -31,6 +31,7 @@ import {
   type OrderQuestionKey,
 } from "./order-questions.js";
 import { resolveOrderCancellationReason } from "./order-cancellation-reason.js";
+import { cancelUncollectedOrderFeeReceivables } from "./order-fee-receivable-cancel.js";
 import { allocateAutomaticOrderSerial, nextAutomaticSerial } from "./order-serial-allocation.js";
 import { deriveOrderWorkflowGuidance } from "./order-workflow-guidance.js";
 import { driverWorkPredicate } from "./driver-work-visibility.js";
@@ -6454,6 +6455,16 @@ export class OperationsService {
           correlationId,
           orderId,
           orderStatus: status,
+        });
+      }
+      if (status === "cancelled") {
+        // Cancelling the Order cancels its unpaid fee to the Trader (Aiman,
+        // 11 Oct 2026); a fee already paid, fully or partly, is kept.
+        await cancelUncollectedOrderFeeReceivables(transaction, {
+          actorId: identity.identityId,
+          companyId,
+          correlationId,
+          orderId,
         });
       }
       if (status === "delivered") {

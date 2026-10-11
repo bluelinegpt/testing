@@ -105,7 +105,10 @@ const predicates: Readonly<Record<OrderQuestionKey, RawBuilder<boolean>>> = {
      and o.trader_settlement_status in ('unsettled', 'partially_settled'))
   `,
   ready_to_close: readyToClose,
-  trader_owes_fees: openTraderReceivable,
+  /* Only fees that can be collected now: the Order was delivered, the same
+     rule Collect from Trader applies (`receivableCollectableNow`, 9 Oct 2026).
+     A cancelled or returned Order never shows here with nothing to collect. */
+  trader_owes_fees: sql<boolean>`(o.delivered_at is not null and ${openTraderReceivable})`,
 };
 
 export function orderQuestionPredicate(key: OrderQuestionKey): RawBuilder<boolean> {
