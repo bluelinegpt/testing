@@ -20,6 +20,7 @@ import {
 } from "../infrastructure/database/transaction-manager.js";
 import type { IdentityContextAccessor } from "../security/identity-context.js";
 import type { TenantContextAccessor } from "../tenancy/tenant-context.js";
+import { CompanyOrderHealthService } from "./company-order-health.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import { OrderMaintenanceService } from "./order-maintenance.service.js";
 import { ReceivableOffsetReversalService } from "./receivable-offset-reversal.service.js";
@@ -360,6 +361,7 @@ function buildMaintenanceService(
     new SavepointTransactionManager(transaction) as unknown as KyselyTransactionManager,
     new OperationsHistoryWriter(),
     buildService(transaction, fixture, permissions),
+    new CompanyOrderHealthService(transaction as unknown as Kysely<DatabaseSchema>),
   );
 }
 
@@ -938,6 +940,7 @@ describe.skipIf(!runDatabaseTests)("Delete / Reset: forced failure before commit
           identity as unknown as IdentityContextAccessor,
           new FailingAuditWriter(),
         ),
+        new CompanyOrderHealthService(database),
       );
       await expect(
         maintenance.resetTraderReceivable(fixture.feeOrderId, "forced failure", "corr-rollback"),

@@ -67,6 +67,20 @@ export interface ReceivableOffsetState {
    * would leave AR overstated by exactly the amount being reversed, silently.
    */
   readonly settlementAccountingPosted: boolean;
+  /**
+   * Whether the General Ledger is involved at all, i.e. whether the
+   * `settlementAccountingPosted` precondition applies.
+   *
+   * False when the Company's GL Accounting is OFF, or when it is ON but the
+   * clearing Settlement was confirmed while it was OFF and has no Accounting
+   * Event. In both cases the offset was never posted to AR -- by design, not
+   * by failure -- so there is no AR residual to clear and the arithmetic
+   * above does not exist: the reversal is purely operational (Receivable
+   * reversed, Trader Credit issued, no Event, no Journal).
+   *
+   * Omitted means true: the certified Accounting-ON precondition applies.
+   */
+  readonly settlementAccountingRequired?: boolean;
 }
 
 export type ReversalRefusal =
@@ -169,7 +183,7 @@ export function refuseReversal(state: ReceivableOffsetState): ReversalRefusal | 
   if (state.settlementStatus !== "confirmed") {
     return "trader_settlement_not_confirmed";
   }
-  if (!state.settlementAccountingPosted) {
+  if (state.settlementAccountingRequired !== false && !state.settlementAccountingPosted) {
     // The compensating Credit debits AR to clear the residual the offset's AR
     // credit left behind. If that credit has not posted there is no residual,
     // and the debit would CREATE an AR balance against a reversed Receivable.

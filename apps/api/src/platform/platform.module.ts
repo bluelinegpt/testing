@@ -1,3 +1,4 @@
+import { AccountingModule } from "../accounting/accounting.module.js";
 import { Module } from "@nestjs/common";
 
 import { AccountingTemplateImporter } from "../accounting-template/accounting-template.importer.js";
@@ -57,6 +58,23 @@ import { PlatformRouteOptimizationController } from "./platform-route-optimizati
 import { RouteOptimizationAdminService } from "../route-planning/route-optimization-admin.service.js";
 import { PlatformAnnouncementController } from "./platform-announcement.controller.js";
 import { AnnouncementsService } from "../announcements/announcements.service.js";
+import { PlatformCompanyAccountingController } from "./platform-company-accounting.controller.js";
+import { PlatformRepairCenterController } from "./platform-repair-center.controller.js";
+import { CompanyDataResetController } from "./company-data-reset.controller.js";
+import { CompanyDataResetService } from "./company-data-reset.service.js";
+import { RepairAccountingRecoveryService } from "../operations/repair-accounting-recovery.service.js";
+import { RepairOrderingService } from "../operations/repair-ordering.service.js";
+import {
+  PlatformPayrollHealthService,
+  RepairPayrollService,
+} from "../operations/payroll-repair.service.js";
+import { PayrollOperationalRepository } from "../payroll/payroll-operational.repository.js";
+import { RepairAttemptRecorder } from "../operations/repair-attempt.recorder.js";
+import { RepairCenterOverviewService } from "../operations/repair-center-overview.service.js";
+import { RepairExecutionService } from "../operations/repair-execution.service.js";
+import { RepairHistoryService } from "../operations/repair-history.service.js";
+import { RepairPreviewService } from "../operations/repair-preview.service.js";
+import { OperationsModule } from "../operations/operations.module.js";
 import { PlatformCompanyWhatsAppService } from "./platform-company-whatsapp.service.js";
 import { CompanyWebsiteDomainService } from "./company-website-domain.service.js";
 import {
@@ -102,10 +120,14 @@ import { CompanyWebsiteAiSetupProvider } from "./company-website-ai-setup.provid
     PlatformCompanyWhatsAppController,
     PlatformRouteOptimizationController,
     PlatformAnnouncementController,
+    PlatformCompanyAccountingController,
+    PlatformRepairCenterController,
+    CompanyDataResetController,
     PublicCompanyWebsiteController,
   ],
   exports: [PlatformService, PlatformAuditService, PlatformCompanyService],
   imports: [
+    AccountingModule,
     AuthenticationModule,
     DemoRequestsModule,
     TraderApplicationsModule,
@@ -114,6 +136,8 @@ import { CompanyWebsiteAiSetupProvider } from "./company-website-ai-setup.provid
     SeoGuideModule,
     WebsiteCmsModule,
     AgentModule,
+    // Repair Center: re-uses OrderMaintenanceService (Verify First).
+    OperationsModule,
     FilesModule,
     UserAdministrationModule,
   ],
@@ -123,6 +147,7 @@ import { CompanyWebsiteAiSetupProvider } from "./company-website-ai-setup.provid
     PlatformAuditQueryService,
     PlatformCompanyService,
     PlatformCompanyResetService,
+    CompanyDataResetService,
     PlatformDashboardService,
     PlatformCompanyDeletionService,
     PlatformCompanyDeletionExecutionService,
@@ -144,6 +169,21 @@ import { CompanyWebsiteAiSetupProvider } from "./company-website-ai-setup.provid
     CompanyWebsiteAgentService,
     CompanyWebsiteAgentProvider,
     CompanyWebsiteAiSetupProvider,
+    // CompanyOrderHealthService comes from OperationsModule (Phase 3 Prompt 2:
+    // one instance, shared with Verify First).
+    RepairPreviewService,
+    RepairExecutionService,
+    RepairAccountingRecoveryService,
+    // Repair Center Phase 6: deterministic cross-domain repair ordering.
+    RepairOrderingService,
+    // Repair Center Phase 5: Payroll Health + Payroll repair (the Payroll
+    // domain's own stateless operational repository).
+    PlatformPayrollHealthService,
+    RepairPayrollService,
+    PayrollOperationalRepository,
+    RepairAttemptRecorder,
+    RepairHistoryService,
+    RepairCenterOverviewService,
   ],
 })
 export class PlatformModule {}

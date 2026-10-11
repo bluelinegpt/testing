@@ -101,6 +101,16 @@ const SHARED_PRESERVE = [
   "platform_website_navigation_items",
   "platform_website_contact_settings",
   "platform_website_revisions",
+  // 2026-10-05 review: `platform_workflow_test_steps` carries NO
+  // `company_id` (confirmed against `information_schema.columns`). It is a
+  // pure child of `platform_workflow_test_scenarios` (`scenario_id ... on
+  // delete cascade`), and the scenario is a direct, Company-owned table -- so
+  // the steps leave with their scenario. It is listed here only so the generic
+  // `where company_id` loop and the unknown-global-table scan skip it; see
+  // `COMPANY_DELETION_INDIRECT`. Before this entry it flowed in through the
+  // reset manifest's PRESERVE list and the deletion preview crashed counting
+  // it ("column company_id does not exist").
+  "platform_workflow_test_steps",
 ] as const;
 
 /** Tables added after the reset manifest's last business-data review. */
@@ -123,6 +133,14 @@ const NEW_DIRECT_TABLES = [
   "employee_variable_earning_payment_allocations",
   "employee_variable_earning_payments",
   "outsourced_driver_collection_earning_rules",
+  // 2026-10-05 review: `destination_countries` became Company-scoped
+  // (`company_id not null references companies on delete restrict`), but the
+  // reset manifest still lists it as a GLOBAL table, so it fell out of the
+  // deletion set and blocked every preview as an unclassified Company table.
+  // Its only inbound FK is `orders (destination_country_id, company_id)`
+  // `on delete restrict`, so the FK-derived order deletes Orders first. No
+  // trigger on it fires on DELETE.
+  "destination_countries",
   // 2026-08-12 review: `employee_driver_earning_periods` (a Driver-earning
   // calculation period for an Employee, direct `company_id restrict`) and
   // its pure allocation child `employee_driver_earning_period_delivery_
@@ -300,6 +318,11 @@ export const COMPANY_DELETION_INDIRECT = [
       "commerce_integration_credentials.connection_id -> commerce_integration_connections.id where connections.company_id = target",
   },
   {
+    table: "platform_workflow_test_steps",
+    ownership:
+      "platform_workflow_test_steps.scenario_id -> platform_workflow_test_scenarios.id (on delete cascade); scenarios are direct Company tables",
+  },
+  {
     table: "company_customer_quote_pricing_rules",
     ownership:
       "company_customer_quote_pricing_rules.pricing_profile_id -> company_customer_quote_pricing_profiles.id where profiles.company_id = target",
@@ -315,6 +338,15 @@ export const COMPANY_DELETION_CYCLE_BREAKS = CYCLE_BREAKS;
  * delete trigger is an unsupported blocker until this list is reviewed again.
  */
 export const COMPANY_DELETION_APPROVED_GUARDS = new Set([
+  // 2026-10-05 review: the Repair Center audit (Phase 2) is append-only for
+  // every normal operation. The reset manifest PRESERVES it, which (through
+  // the PRESERVE spread above) makes it a direct deletion table: a permanently
+  // deleted Company's repair audit goes with it, exactly as its
+  // `audit_events` (`audit_events_immutable`, below) already do. Both tables
+  // restrict the `companies` FK, so they cannot outlive the Company row.
+  // Disabled only inside the reviewed whole-Company deletion transaction.
+  "platform_repair_attempts_append_only",
+  "platform_repair_executions_append_only",
   "account_mappings_history_guard",
   "account_roles_active_user_guard",
   "accounting_batch_jobs_protect_delete",

@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import {
@@ -31,6 +31,9 @@ import { PlatformCompanyWebsiteController } from "./company-website.controller.j
 import { PlatformCompanyWhatsAppController } from "./platform-company-whatsapp.controller.js";
 import { PlatformAnnouncementController } from "./platform-announcement.controller.js";
 import { PlatformRouteOptimizationController } from "./platform-route-optimization.controller.js";
+import { PlatformCompanyAccountingController } from "./platform-company-accounting.controller.js";
+import { PlatformRepairCenterController } from "./platform-repair-center.controller.js";
+import { CompanyDataResetController } from "./company-data-reset.controller.js";
 
 /**
  * The Platform route inventory, enumerated rather than assumed.
@@ -66,6 +69,9 @@ const platformControllers = [
   PlatformCompanyWhatsAppController,
   PlatformAnnouncementController,
   PlatformRouteOptimizationController,
+  PlatformCompanyAccountingController,
+  PlatformRepairCenterController,
+  CompanyDataResetController,
 ];
 
 interface PlatformRoute {
@@ -158,6 +164,7 @@ describe("Platform route inventory", () => {
     const mutating = [
       "create",
       "update",
+      "applySetupTemplate",
       "updateShipmentPrefix",
       "activateShipmentSerial",
       "activate",
@@ -235,6 +242,9 @@ describe("Platform route inventory", () => {
       "removeDomain",
       "endNow", // Platform announcements: stop showing now.
       "cancel", // Platform announcements: cancel (kept for the record).
+      "executeRepair", // Repair Center: certified READY repair (Phase 2 Prompt 3).
+      "executeAccountingRecovery", // Repair Center: READY accounting recovery (Phase 2 Prompt 4).
+      "executePayrollRepair", // Repair Center: READY Payroll period repair (Phase 5 Prompt 1).
     ];
     const bad: string[] = [];
     for (const route of routes) {
@@ -250,8 +260,8 @@ describe("Platform route inventory", () => {
       const hasManage =
         route.method !== "settings" &&
         route.permissions.some((code) =>
-          [".manage", ".create", ".edit", ".publish", ".reply", ".takeover"].some((suffix) =>
-            code.endsWith(suffix),
+          [".manage", ".create", ".edit", ".publish", ".reply", ".takeover", ".execute"].some(
+            (suffix) => code.endsWith(suffix),
           ),
         );
       if (shouldManage !== hasManage) bad.push(`${route.controller}.${route.method}`);
@@ -273,7 +283,10 @@ describe("Platform route inventory", () => {
   });
 
   it("keeps dynamic Platform blog article routes away from static SEO routes", () => {
-    const source = readFileSync(resolve(process.cwd(), "src/platform/platform-blog.controller.ts"), "utf8");
+    const source = readFileSync(
+      resolve(process.cwd(), "src/platform/platform-blog.controller.ts"),
+      "utf8",
+    );
     const methods = ["readiness", "detail", "preview", "update", "status", "deleteArticle"];
     for (const method of methods) {
       const start = source.indexOf(`${method}(`);
@@ -300,6 +313,9 @@ describe("Platform route inventory", () => {
       "PlatformCompanyWebsiteController",
       "PlatformCompanyWhatsAppController",
       "PlatformRouteOptimizationController",
+      "PlatformCompanyAccountingController",
+      "PlatformRepairCenterController",
+      "CompanyDataResetController",
     ]);
     const bad: string[] = [];
     for (const route of routes) {
@@ -320,7 +336,13 @@ describe("Platform route inventory", () => {
                 ? "src/platform/platform-company-whatsapp.controller.ts"
                 : controller === "PlatformRouteOptimizationController"
                   ? "src/platform/platform-route-optimization.controller.ts"
-                  : "src/platform/platform-company.controller.ts",
+                  : controller === "PlatformCompanyAccountingController"
+                    ? "src/platform/platform-company-accounting.controller.ts"
+                    : controller === "PlatformRepairCenterController"
+                      ? "src/platform/platform-repair-center.controller.ts"
+                      : controller === "CompanyDataResetController"
+                        ? "src/platform/company-data-reset.controller.ts"
+                        : "src/platform/platform-company.controller.ts",
         ),
         "utf8",
       );
@@ -338,6 +360,84 @@ describe("Platform route inventory", () => {
         [".manage", ".delete", ".create"].some((suffix) => code.endsWith(suffix)),
       );
       expect(hasManagePermission).toBe(true);
+    }
+  });
+
+  it("keeps the Repair Center Company-scoped, reads read-only, and execution behind its own permission", () => {
+    const repair = routes.filter((route) => route.controller === "PlatformRepairCenterController");
+    expect(repair.map((route) => `${route.method}:${route.path}`).sort()).toEqual([
+      "accountingEventDetails:platform/companies/:companyId/repair-center/accounting/events/:eventId",
+      "accountingHealthEvents:platform/companies/:companyId/repair-center/accounting/health/events",
+      "accountingHealthIntegrity:platform/companies/:companyId/repair-center/accounting/health/integrity",
+      "accountingHealthSummary:platform/companies/:companyId/repair-center/accounting/health/summary",
+      "accountingRecoveryPreview:platform/companies/:companyId/repair-center/accounting/events/:eventId/repair-preview",
+      "executeAccountingRecovery:platform/companies/:companyId/repair-center/accounting/events/:eventId/execute",
+      "executePayrollRepair:platform/companies/:companyId/repair-center/payroll/periods/:periodId/execute",
+      "executeRepair:platform/companies/:companyId/repair-center/orders/:orderId/execute",
+      "orderFindings:platform/companies/:companyId/repair-center/orders/:orderId/findings",
+      "orderHealthList:platform/companies/:companyId/repair-center/health/orders",
+      "orderHealthSummary:platform/companies/:companyId/repair-center/health/orders/summary",
+      "overview:platform/companies/:companyId/repair-center/overview",
+      "payrollHealthFindings:platform/companies/:companyId/repair-center/payroll/health/findings",
+      "payrollHealthSummary:platform/companies/:companyId/repair-center/payroll/health/summary",
+      "payrollRepairPreview:platform/companies/:companyId/repair-center/payroll/periods/:periodId/repair-preview",
+      "repairHistory:platform/companies/:companyId/repair-center/history",
+      "repairHistoryRecord:platform/companies/:companyId/repair-center/history/:kind/:recordId",
+      "repairPreview:platform/companies/:companyId/repair-center/orders/:orderId/repair-preview",
+      "verifyOrder:platform/companies/:companyId/repair-center/orders/:orderId/verify",
+    ]);
+    for (const route of repair) {
+      expect(route.kinds).toContain("platform_administrator");
+      expect(route.permissions).toContain(PLATFORM_ACCESS);
+      expect(route.permissions).toContain("platform.companies.read");
+      expect(route.permissions).toContain("platform.companies.repair_center.read");
+      const writeCodes = route.permissions.filter(
+        (code) => !code.endsWith(".read") && code !== PLATFORM_ACCESS,
+      );
+      // Reads carry only read codes; the ONE execution route adds exactly the
+      // dedicated execute code (never a broader manage code).
+      expect(writeCodes).toEqual(
+        ["executeRepair", "executeAccountingRecovery", "executePayrollRepair"].includes(
+          route.method,
+        )
+          ? ["platform.companies.repair_center.execute"]
+          : [],
+      );
+    }
+    const source = readFileSync(
+      resolve(process.cwd(), "src/platform/platform-repair-center.controller.ts"),
+      "utf8",
+    );
+    for (const verb of ["@Put", "@Patch", "@Delete"]) expect(source).not.toContain(verb);
+    // Exactly six POSTs: three read-only PREVIEWS and three EXECUTE routes
+    // (order repair, accounting event recovery, Payroll period repair).
+    expect(source.match(/@Post\(/gu)).toHaveLength(6);
+    expect(source).toContain('@Post("orders/:orderId/repair-preview")');
+    expect(source).toContain('@Post("orders/:orderId/execute")');
+    expect(source).toContain('@Post("accounting/events/:eventId/repair-preview")');
+    expect(source).toContain('@Post("accounting/events/:eventId/execute")');
+    expect(source).toContain('@Post("payroll/periods/:periodId/repair-preview")');
+    expect(source).toContain('@Post("payroll/periods/:periodId/execute")');
+    expect(
+      repair
+        .filter((route) => route.path.includes("execute"))
+        .map((route) => route.method)
+        .sort(),
+    ).toEqual(["executeAccountingRecovery", "executePayrollRepair", "executeRepair"]);
+    for (const forbidden of [
+      "repair-execute",
+      "confirm",
+      "reset",
+      "reverse",
+      "reprocess",
+      "force",
+      "bulk",
+      "repair-all",
+    ]) {
+      expect(
+        repair.some((route) => route.path.toLowerCase().includes(forbidden)),
+        `no Repair Center route may contain "${forbidden}"`,
+      ).toBe(false);
     }
   });
 

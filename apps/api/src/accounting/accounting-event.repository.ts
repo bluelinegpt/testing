@@ -42,6 +42,50 @@ export class AccountingEventRepository {
     });
   }
 
+  /**
+   * The claim `next()` makes, for ONE named Event of ONE Company, on the
+   * caller's transaction (Phase 2 Prompt 4: Platform Repair Center recovery).
+   * Same selected record, same configuration gates (Accounting ON, automatic
+   * posting ON, area enabled), same status transition to 'processing'. It
+   * waits for (rather than skips) a lock: the caller already holds the Event
+   * row. Returns undefined when the Event is not claimable.
+   */
+  public async claimInTransaction(
+    transaction: Kysely<DatabaseSchema>,
+    companyId: string,
+    eventId: string,
+    workerId: string,
+  ): Promise<OperationalAccountingEventRecord | undefined> {
+    const result = await sql<OperationalAccountingEventRecord>`
+      select e.id,e.company_id as "companyId",e.event_type as "eventType",
+             e.event_version as "eventVersion",e.source_entity_type as "sourceEntityType",
+             e.source_entity_id as "sourceEntityId",e.source_reference as "sourceReference",
+             e.effective_accounting_date::text as "effectiveAccountingDate",
+             e.correlation_id as "correlationId",e.event_hash as "eventHash",
+             e.actor_id as "actorId",e.operational_area as "operationalArea",
+             e.reversal_of_event_id as "reversalOfEventId"
+        from accounting_events e
+        join accounting_configurations c on c.company_id=e.company_id
+       where e.id=${eventId}::uuid and e.company_id=${companyId}::uuid
+         and e.processing_status in ('received','retry_pending')
+         and coalesce(e.next_attempt_at,now())<=now()
+         and c.accounting_enabled and c.automatic_posting_enabled
+         and e.operational_area=any(c.automatic_posting_areas)
+         for update of e
+    `.execute(transaction);
+    const event = result.rows[0];
+    if (event === undefined) return undefined;
+    await sql`
+      update accounting_events
+         set processing_status='processing',attempt_count=attempt_count+1,
+             last_attempt_at=now(),processing_locked_at=now(),
+             processing_locked_by=${workerId},error_code=null,error_metadata=null,
+             safe_error_summary=null
+       where id=${event.id}::uuid and company_id=${event.companyId}::uuid
+    `.execute(transaction);
+    return event;
+  }
+
   public async recoverStaleLocks(): Promise<void> {
     await sql`
       update accounting_events

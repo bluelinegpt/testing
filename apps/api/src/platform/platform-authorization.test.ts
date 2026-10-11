@@ -86,9 +86,12 @@ describe("Platform permission catalogue", () => {
       "platform.blog.edit",
       "platform.blog.publish",
       "platform.blog.read",
+      "platform.companies.accounting_mode.manage",
       "platform.companies.delete",
       "platform.companies.manage",
       "platform.companies.read",
+      "platform.companies.repair_center.execute",
+      "platform.companies.repair_center.read",
       "platform.companies.reset",
       "platform.company_route_optimization.manage",
       "platform.company_websites.manage",
@@ -231,6 +234,27 @@ describe("Platform permission catalogue", () => {
       ),
       "utf8",
     );
+    const accountingModeMigration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../../database/migrations/20260983000000_platform_company_accounting_mode_permission.ts",
+      ),
+      "utf8",
+    );
+    const repairCenterMigration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../../database/migrations/20260985000000_platform_repair_center_read_permission.ts",
+      ),
+      "utf8",
+    );
+    const repairExecutionMigration = readFileSync(
+      resolve(
+        process.cwd(),
+        "../../database/migrations/20260986000000_platform_repair_center_execution.ts",
+      ),
+      "utf8",
+    );
     const migrations =
       foundationMigration +
       deletionMigration +
@@ -248,7 +272,10 @@ describe("Platform permission catalogue", () => {
       companyWebsiteMigration +
       companyWhatsappMigration +
       announcementsMigration +
-      routeOptimizationMigration;
+      routeOptimizationMigration +
+      accountingModeMigration +
+      repairCenterMigration +
+      repairExecutionMigration;
     for (const permission of PLATFORM_PERMISSIONS)
       expect(migrations).toContain(`'${permission.code}'`);
     expect(migrations).toContain(`'${PLATFORM_SUPER_ADMIN_ROLE_CODE}'`);

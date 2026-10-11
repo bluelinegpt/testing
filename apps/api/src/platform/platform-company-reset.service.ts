@@ -1,15 +1,9 @@
-import { spawn } from "node:child_process";
-import { mkdir } from "node:fs/promises";
-import { basename, resolve } from "node:path";
-
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import pg from "pg";
 
 import type { AppConfiguration } from "../configuration/environment.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
-import { redactSensitive } from "./platform-audit.service.js";
-import { runReset } from "./reset-company-test-data.engine.js";
 import {
   buildReports,
   computeBlockers,
@@ -18,34 +12,20 @@ import {
 import {
   getResetCompanyUserPlan,
   previewResetCompanyUsers,
-  removeResetCompanyUsers,
 } from "./reset-company-users.js";
 
 /**
- * Platform-portal front end for the Company test-data reset.
+ * LEGACY Company test-data reset -- READ-ONLY remainder (Company Data Reset,
+ * Prompt 3).
  *
- * The engine, manifest and their safety tests have existed since Prompt 2A as
- * a CLI-only tool; this service adds nothing to what a reset removes or
- * preserves — it only exposes the same engine over the Portal, with the same
- * order of protections the CLI enforces:
- *
- *   1. THE COMPANY'S OWN ENVIRONMENT IS THE DECISIVE GATE. A Company whose
- *      `environment` is 'production' is refused in the preview, refused again
- *      at execution, and re-checked INSIDE the execution transaction with the
- *      Company row locked, so a concurrent move-to-production cannot race a
- *      reset past the check. There is deliberately no bypass and no
- *      permission that overrides it: development, demo, sandbox and trial
- *      Companies can be reset for training as many times as needed, and a
- *      production Company can never be.
- *   2. Typed confirmation — `RESET <code>` exactly, same shape as Close and
- *      Permanent Delete.
- *   3. A pg_dump backup is written before any change; if pg_dump is not
- *      available the reset refuses. The API has no `--allow-no-backup`.
- *
- * A raw `pg` connection is used instead of Kysely because the engine is
- * written against `pg.PoolClient` — it suspends and restores triggers and
- * verifies preserved tables inside one transaction, and re-implementing that
- * against Kysely would mean a second copy of reviewed safety code.
+ * The legacy mutations (`execute` = whole-Company `runReset`, `executeUsers` =
+ * `removeResetCompanyUsers`) were retired in Prompt 2 (their routes answer
+ * 410 `company_reset_retired`) and REMOVED here in Prompt 3: every Company
+ * Data Reset mutation goes through `executeAndAuditCompanyDataReset`
+ * (company-data-reset.service.ts). What remains are the read-only legacy
+ * previews behind GET reset-preview / users-reset-eligible / POST
+ * users-reset-preview; each runs in a read-only transaction that is rolled
+ * back. Nothing in this service writes.
  */
 
 export interface CompanyResetTableCount {
@@ -90,46 +70,6 @@ export interface CompanyResetPreview {
     readonly sharedIdentity: boolean;
     readonly sharedReferences: readonly string[];
   }[];
-}
-
-export interface CompanyResetResult {
-  readonly company: { readonly id: string; readonly code: string; readonly name: string };
-  readonly removed: readonly CompanyResetTableCount[];
-  readonly totalRemoved: number;
-  readonly preservedVerified: number;
-  readonly backupFile: string;
-  readonly fiscalCalendar: {
-    readonly fiscalYearsPreserved: number;
-    readonly periodsPreserved: number;
-    readonly fiscalYearsOpened: number;
-    readonly periodsOpened: number;
-    readonly fiscalYearStatusesBefore: Readonly<Record<string, number>>;
-    readonly periodStatusesBefore: Readonly<Record<string, number>>;
-  };
-  readonly userCleanup: {
-    readonly companyUsersRemoved: number;
-    readonly employeesUnlinked: number;
-    readonly roleAssignmentsRemoved: number;
-    readonly businessAccessLinksRemoved: number;
-    readonly sessionsRevoked: number;
-    readonly passwordResetTokensRevoked: number;
-    readonly accountsDeleted: number;
-    readonly sharedIdentitiesPreserved: number;
-    readonly historyReferencedIdentitiesPreserved: number;
-    readonly retainedIdentities: readonly {
-      readonly accountId: string;
-      readonly accountKind: string;
-      readonly username: string;
-      readonly displayName: string;
-      readonly reason: "other_company_access" | "preserved_history";
-      readonly references: readonly {
-        readonly table: string;
-        readonly column: string;
-        readonly rows: number;
-        readonly onDelete: string;
-      }[];
-    }[];
-  };
 }
 
 export interface CompanyUsersResetPreview {
@@ -251,134 +191,6 @@ export class PlatformCompanyResetService {
     });
   }
 
-  public executeUsers(
-    companyId: string,
-    accountIds: readonly string[],
-    confirmation: string,
-    actor: { accountId: string; correlationId: string },
-  ): Promise<object> {
-    return this.withClient(async (client) => {
-      const company = await this.loadCompany(client, companyId);
-      this.refuseProduction(company);
-      if (confirmation !== `RESET USERS ${company.code}`) {
-        throw new ApplicationException("company_users_reset_confirmation_mismatch", `Type RESET USERS ${company.code} to confirm`, HttpStatus.BAD_REQUEST);
-      }
-      if (accountIds.length === 0 || new Set(accountIds).size !== accountIds.length) {
-        throw new ApplicationException("company_users_reset_selection_invalid", "Select one or more unique non-Admin users.", HttpStatus.BAD_REQUEST);
-      }
-
-      const backupFile = await this.takeBackup(companyId);
-      await client.query("begin");
-      try {
-        await client.query("select pg_advisory_xact_lock(hashtextextended('platform-company-reset', 0))");
-        await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [companyId]);
-        const locked = (await client.query<CompanyRow>(
-          "select id, code, name_en, status, environment from companies where id = $1 for update", [companyId],
-        )).rows[0];
-        if (locked === undefined) throw this.notFound();
-        this.refuseProduction(locked);
-        const selected = await client.query<{ id: string }>(
-          "select id from accounts where company_id = $1 and id = any($2::uuid[]) for update", [companyId, accountIds],
-        );
-        if (selected.rowCount !== accountIds.length) {
-          throw new ApplicationException("company_users_reset_selection_invalid", "One or more selected users no longer belong to this Company.", HttpStatus.CONFLICT);
-        }
-        const preview = await this.previewSelectedUsers(client, companyId, accountIds);
-        if (preview.adminUsersPreserved.length > 0) {
-          throw new ApplicationException("company_users_reset_admin_protected", "A selected user now has an Admin role. Refresh the list and select users again.", HttpStatus.CONFLICT);
-        }
-        const cleanup = await removeResetCompanyUsers(client, companyId, {
-          usersToRemove: preview.selectedUsers as Awaited<ReturnType<typeof getResetCompanyUserPlan>>["usersToRemove"],
-          adminUsersPreserved: [],
-        });
-        await this.auditUsersReset(client, { companyId, actorAccountId: actor.accountId, correlationId: actor.correlationId,
-          before: { selectedAccountIds: accountIds, selectedCount: accountIds.length },
-          after: { ...cleanup, backupFile: basename(backupFile) },
-        });
-        await client.query("commit");
-        return { company: { id: locked.id, code: locked.code, name: locked.name_en }, backupFile: basename(backupFile), selectedCount: accountIds.length, cleanup };
-      } catch (error) {
-        await client.query("rollback");
-        throw error;
-      }
-    });
-  }
-
-  public execute(
-    companyId: string,
-    confirmation: string,
-    actor: { accountId: string; correlationId: string },
-  ): Promise<CompanyResetResult> {
-    return this.withClient(async (client) => {
-      const company = await this.loadCompany(client, companyId);
-      this.refuseProduction(company);
-      if (confirmation !== `RESET ${company.code}`) {
-        throw new ApplicationException(
-          "company_reset_confirmation_mismatch",
-          `Type RESET ${company.code} to confirm`,
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
-      // The backup is written before the transaction opens: a dump taken
-      // inside it would see the data already gone.
-      const backupFile = await this.takeBackup(companyId);
-
-      await client.query("begin");
-      try {
-        await client.query(
-          "select pg_advisory_xact_lock(hashtextextended('platform-company-reset', 0))",
-        );
-        await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [companyId]);
-        // Re-read WITH the row locked: the pre-check above was advisory, this
-        // one is the guarantee. A move-to-production committed between the
-        // two is caught here.
-        const locked = (
-          await client.query<CompanyRow>(
-            "select id, code, name_en, status, environment from companies where id = $1 for update",
-            [companyId],
-          )
-        ).rows[0];
-        if (locked === undefined) {
-          throw this.notFound();
-        }
-        this.refuseProduction(locked);
-
-        const summary = await runReset(client, companyId, () => undefined);
-        const removed = summary.removed
-          .filter((entry) => entry.rows > 0)
-          .map((entry) => ({ table: entry.table, rows: entry.rows }));
-
-        await this.auditInResetTransaction(client, {
-          companyId,
-          actorAccountId: actor.accountId,
-          correlationId: actor.correlationId,
-          before: { environment: locked.environment, totalRows: summary.totalRemoved },
-          after: {
-            totalRemoved: summary.totalRemoved,
-            tablesCleared: removed.length,
-            backupFile: basename(backupFile),
-            fiscalCalendar: summary.fiscalCalendar,
-          },
-        });
-        await client.query("commit");
-
-        return {
-          company: { id: locked.id, code: locked.code, name: locked.name_en },
-          removed,
-          totalRemoved: summary.totalRemoved,
-          preservedVerified: summary.preservedVerified,
-          backupFile: basename(backupFile),
-          fiscalCalendar: summary.fiscalCalendar,
-          userCleanup: summary.userCleanup,
-        };
-      } catch (error) {
-        await client.query("rollback");
-        throw error;
-      }
-    });
-  }
-
   private identity(company: CompanyRow): CompanyResetPreview["company"] {
     return {
       id: company.id,
@@ -441,16 +253,6 @@ export class PlatformCompanyResetService {
     }
   }
 
-  private refuseProduction(company: CompanyRow): void {
-    if (company.environment === "production") {
-      throw new ApplicationException(
-        "company_reset_production_refused",
-        PRODUCTION_BLOCKER,
-        HttpStatus.CONFLICT,
-      );
-    }
-  }
-
   private async loadCompany(client: pg.PoolClient, companyId: string): Promise<CompanyRow> {
     const company = (
       await client.query<CompanyRow>(
@@ -462,75 +264,6 @@ export class PlatformCompanyResetService {
       throw this.notFound();
     }
     return company;
-  }
-
-  /**
-   * Same columns and markers as `PlatformAuditService.record`, written with
-   * the reset's own client so the audit row shares the reset transaction —
-   * if the reset rolls back, so does its audit entry, and the refusal paths
-   * above never reach this point.
-   */
-  private async auditInResetTransaction(
-    client: pg.PoolClient,
-    input: {
-      companyId: string;
-      actorAccountId: string;
-      correlationId: string;
-      before: Record<string, unknown>;
-      after: Record<string, unknown>;
-    },
-  ): Promise<void> {
-    await client.query(
-      `insert into audit_events (
-         company_id, actor_account_id, action, subject_type, subject_id,
-         before_data, after_data, correlation_id, actor_role, source, result, source_application
-       ) values ($1::uuid, $2::uuid, 'platform.company.data_reset', 'company', $1::text,
-                 $3::jsonb, $4::jsonb, $5, 'platform_administrator', 'platform_portal',
-                 'success', 'platform-web')`,
-      [
-        input.companyId,
-        input.actorAccountId,
-        JSON.stringify(redactSensitive(input.before)),
-        JSON.stringify(redactSensitive(input.after)),
-        input.correlationId,
-      ],
-    );
-  }
-
-  private async auditUsersReset(
-    client: pg.PoolClient,
-    input: { companyId: string; actorAccountId: string; correlationId: string; before: Record<string, unknown>; after: Record<string, unknown> },
-  ): Promise<void> {
-    await client.query(
-      `insert into audit_events (company_id, actor_account_id, action, subject_type, subject_id, before_data, after_data, correlation_id, actor_role, source, result, source_application)
-       values ($1::uuid, $2::uuid, 'platform.company.users_reset', 'company', $1::text, $3::jsonb, $4::jsonb, $5, 'platform_administrator', 'platform_portal', 'success', 'platform-web')`,
-      [input.companyId, input.actorAccountId, JSON.stringify(redactSensitive(input.before)), JSON.stringify(redactSensitive(input.after)), input.correlationId],
-    );
-  }
-
-  private async takeBackup(companyId: string): Promise<string> {
-    const settings = this.config.get("companyDeletion", { infer: true });
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const target = resolve(settings.backupRoot, `company-reset-${companyId}-${stamp}.dump`);
-    await mkdir(settings.backupRoot, { recursive: true });
-
-    const url = this.config.get("database.url", { infer: true });
-    const exitCode = await new Promise<number | null>((resolveExit) => {
-      const child = spawn("pg_dump", ["--format=custom", "--file", target, url], {
-        stdio: "ignore",
-        timeout: settings.timeoutMs,
-      });
-      child.on("error", () => resolveExit(null));
-      child.on("exit", (code) => resolveExit(code));
-    });
-    if (exitCode !== 0) {
-      throw new ApplicationException(
-        "company_reset_backup_failed",
-        "A verified pg_dump backup could not be taken; refusing to reset without one",
-        HttpStatus.CONFLICT,
-      );
-    }
-    return target;
   }
 
   private notFound(): ApplicationException {

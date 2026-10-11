@@ -56,6 +56,21 @@ export class AutomaticPostingService {
   ) {
     this.support.assertAnyPermission("accounting.view", "accounting.configuration.manage");
     const { companyId } = this.support.context();
+    return this.readinessForCompany(companyId, requestedAreas, activationDate, database);
+  }
+
+  /**
+   * The same per-area readiness evaluation, for ONE Company named explicitly
+   * by UUID. Read-only and permission-free: `readiness` above authorizes the
+   * Company session first; the Platform Accounting Mode operation authorizes
+   * with its own Platform permission before calling this.
+   */
+  public async readinessForCompany(
+    companyId: string,
+    requestedAreas: readonly string[] = accountingOperationalAreas,
+    activationDate = new Date().toISOString().slice(0, 10),
+    database: Kysely<DatabaseSchema> = this.database,
+  ) {
     const configuration = await sql<{
       accountingEnabled: boolean;
       baseCurrency: string;

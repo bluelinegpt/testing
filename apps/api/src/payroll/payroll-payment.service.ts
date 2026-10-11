@@ -9,6 +9,7 @@ import type { DatabaseSchema } from "../infrastructure/database/database.types.j
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import { BalanceEnforcementCoordinator } from "../accounting/balance-enforcement.coordinator.js";
 import type { BalanceEnforcementResult } from "../accounting/balance-enforcement.coordinator.js";
+import { isAccountingCaptureEnabled } from "../accounting/accounting-capture.js";
 import { PaymentFundingAccountService } from "../accounting/payment-funding-account.service.js";
 import { OperationsHistoryWriter } from "../operations/operations-history.writer.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
@@ -385,6 +386,31 @@ export class PayrollPaymentService {
       returning id
     `.execute(database);
     if (movement.rows[0] === undefined) {
+      // No `employee_payroll_paid` Event. With GL Accounting ON that is a
+      // capture failure and stays a hard error, exactly as before. With
+      // Accounting OFF it is the expected state: the payment is a valid
+      // operational record with no Event, and its cash trail is written
+      // without one -- marked as generated so the balance, which already
+      // counts the payment itself, does not count the trail again.
+      if (!(await isAccountingCaptureEnabled(database, input.companyId))) {
+        await sql`
+          insert into cash_bank_movements (
+            id,company_id,movement_number,movement_type,movement_date,accounting_date,
+            source_cash_account_id,amount,fee_amount,payment_method,reference_number,
+            description,status,correlation_id,idempotency_identity,accounting_event_id,
+            generated_by_source_type,
+            confirmed_by_account_id,confirmed_at,created_by_account_id,created_at
+          ) values (
+            ${randomUUID()}::uuid,${input.companyId}::uuid,${movementNumber},
+            'cash_withdrawal',${input.paymentDate}::date,${input.paymentDate}::date,
+            ${input.cashAccountId}::uuid,${input.amount}::numeric,0,'cash',${input.paymentNumber},
+            ${`Employee Payroll payment ${input.paymentNumber}`},'confirmed',${input.paymentId},
+            ${`payroll_payment:${input.paymentId}`},null,'payroll_payment',
+            ${input.actorId}::uuid,now(),${input.actorId}::uuid,now()
+          )
+        `.execute(database);
+        return;
+      }
       throw new ApplicationException(
         "payroll_cash_movement_not_created",
         "The Payroll payment Cash/Bank Movement could not be created",

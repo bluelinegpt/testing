@@ -8,9 +8,36 @@ import { ApplicationException } from "../presentation/errors/application.excepti
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
+import {
+  effectiveOffset,
+  effectiveOffsetTotal,
+  effectiveSettlement,
+} from "./effective-settlement-offsets.js";
+import {
+  CompanyOrderHealthService,
+  ORDER_HEALTH_REASONS,
+  type OrderHealthReasonCode,
+} from "./company-order-health.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import { ReceivableOffsetReversalService } from "./receivable-offset-reversal.service.js";
+import type {
+  FinancialVerificationClassification,
+  OrderFinancialHealth,
+} from "./order-financial-classification.js";
 import { calculateOrderFinancials, type VatPolicy } from "./order-financial-model.js";
+import type { CapabilityCode } from "./repair-capability.registry.js";
+import type { Repairability } from "./repair-center.model.js";
+import { loadOrderDependencyGraph } from "./repair-dependency-graph.js";
+import { previewTraderReceivableFinding } from "./repair-finding-preview.js";
+import {
+  hasNoFinancialDependencies,
+  receivableDependencyColumnsSql,
+  type TraderReceivableDependencies,
+} from "./trader-receivable-dependencies.js";
+import {
+  correlatedReceivableInputs,
+  receivableAnomalySql,
+} from "./trader-receivable-reconciliation.js";
 
 /**
  * Order Maintenance: diagnose one Order completely, in one request.
@@ -129,26 +156,12 @@ export interface OrderMaintenanceReport {
   readonly diagnostic: string;
 }
 
-/**
- * Every financial fact that can hang off a Trader Receivable. A Receivable may
- * be PHYSICALLY deleted only when every one of these is zero -- otherwise it
- * has financial history, and Delete / Reset must take the financial reversal
- * path, which preserves that history.
- */
-export interface TraderReceivableDependencies {
-  /** `trader_collection_allocations` -- physical Trader Collections. */
-  readonly collectionCount: number;
-  /** `trader_settlement_receivable_offsets` -- Settlement netting. */
-  readonly offsetCount: number;
-  /** `accounting_events` whose source is this Receivable. */
-  readonly accountingEventCount: number;
-  /** Journals sourced from, or journal lines sub-ledgered to, this Receivable. */
-  readonly journalCount: number;
-  /** `trader_credits` that name this Receivable (any status). */
-  readonly traderCreditCount: number;
-  /** `amount_collected` > 0: money has been applied to it by any route. */
-  readonly amountCollected: string;
-}
+// The financial-dependency rule lives in trader-receivable-dependencies.ts
+// (shared with the Repair Center); re-exported here for existing importers.
+export {
+  hasNoFinancialDependencies,
+  type TraderReceivableDependencies,
+} from "./trader-receivable-dependencies.js";
 
 export interface TraderReceivableResetPreview extends TraderReceivableDependencies {
   readonly receivableId: string;
@@ -167,38 +180,96 @@ export interface TraderReceivableResetPreview extends TraderReceivableDependenci
   readonly requiredPermission: "users_roles.manage" | "trader_receivables.reverse";
 }
 
-export type FinancialVerificationClassification =
-  | "HEALTHY_ACTIVE_RECEIVABLE"
-  | "OFFSET_SETTLED_WITHOUT_PHYSICAL_COLLECTION"
-  | "REVERSED_NEEDS_REPAIR"
-  | "ALREADY_PHYSICALLY_COLLECTED"
-  | "MISSING_RECEIVABLE"
-  | "NO_TRADER_RECEIVABLE_REQUIRED"
-  | "NEEDS_REVIEW";
+// The classification vocabulary lives in a dependency-free module so that
+// Company Health (which makes the decision) and Verify First (which reads it)
+// share it without an import cycle. Re-exported here for existing importers.
+export {
+  type FinancialVerificationClassification,
+  ORDER_FINANCIAL_HEALTH,
+  type OrderFinancialHealth,
+  orderFinancialHealth,
+} from "./order-financial-classification.js";
 
+/** One settlement offset of the Order's Receivables, effective or historical. */
+export interface FinancialVerificationOffset {
+  readonly settlementNumber: string;
+  readonly receivableNumber: string;
+  /** Status of the Receivable the offset cleared (e.g. `reversed`). */
+  readonly receivableStatus: string;
+  readonly amount: string;
+  /**
+   * True when the offset currently counts (its Settlement is confirmed, not a
+   * reversal and not reversed -- effective-settlement-offsets.ts). False for
+   * a HISTORICAL offset of a reversed Settlement: shown, never counted.
+   */
+  readonly effective: boolean;
+}
+
+/**
+ * Verify First (Repair Center Phase 3, Prompt 2: ONE FINANCIAL TRUTH).
+ *
+ * Every decision field below is READ from the shared evaluation
+ * (`CompanyOrderHealthService.orderEvaluation`, built on the receivable
+ * reconciliation of trader-receivable-reconciliation.ts) and the shared
+ * repairability rule (repair-finding-preview.ts). Verify First has no
+ * classification chain of its own, so it cannot disagree with Company / Order
+ * Health or the Repair Preview.
+ */
 export interface FinancialVerification {
+  /**
+   * The Trader receivable reason code -- the SAME code Company Health and the
+   * Repair Center use (`OrderHealthEvaluation.financialCode`), healthy or not.
+   */
+  readonly reasonCode: OrderHealthReasonCode;
+  /**
+   * `reasonCode` when the classification is RECEIVABLE_INCONSISTENT or
+   * NEEDS_REVIEW (the exact reconciliation finding), else null.
+   */
+  readonly anomalyCode: OrderHealthReasonCode | null;
   readonly classification: FinancialVerificationClassification;
+  /** The Trader receivable finding's health (see ORDER_FINANCIAL_HEALTH). */
+  readonly health: OrderFinancialHealth;
+  /** False exactly when `health` is HEALTHY: nothing to reset, repair or review. */
+  readonly actionRequired: boolean;
+  /**
+   * The Repair Center's repairability of the Trader receivable finding,
+   * computed by the same rule and the same capability preview as the Repair
+   * Preview: NOT_REQUIRED (healthy), READY, BLOCKED or MANUAL_REVIEW.
+   */
+  readonly repairability: Repairability;
+  /** The certified Repair Center capability for the finding, if any. */
+  readonly repairCapability: CapabilityCode | null;
+  /** The Order's overall Company Health (it may also carry accounting / Driver Cash findings). */
+  readonly orderHealth: OrderFinancialHealth;
+  /** Every non-healthy finding of the Order, most severe first (Company Health). */
+  readonly findingCodes: readonly OrderHealthReasonCode[];
   readonly reason: string;
   readonly order: Readonly<Record<string, string | null>>;
   readonly traderOwes: string;
   readonly receivables: readonly Readonly<Record<string, string | null>>[];
   readonly physicalCollectionAmount: string;
+  /**
+   * EFFECTIVE settlement offsets of the Order's CURRENT (not reversed, not
+   * cancelled) Receivables. Historical offsets are never counted, and the
+   * offset of a Receivable that was itself reversed (compensated by a Trader
+   * Credit) is listed in `settlementOffsets` but is not current state.
+   */
   readonly settlementOffsetAmount: string;
+  /** Settlements whose offsets are currently effective. */
   readonly settlementNumbers: readonly string[];
+  /** Offsets of reversed Settlements: history, not current financial state. */
+  readonly historicalSettlementOffsetAmount: string;
+  readonly historicalSettlementNumbers: readonly string[];
+  /** Every offset, effective and historical, flagged. */
+  readonly settlementOffsets: readonly FinancialVerificationOffset[];
   readonly journals: readonly Readonly<Record<string, string | null>>[];
-  readonly recommendedAction: "none" | "repair" | "reset_then_repair";
-}
-
-/** Zero financial dependencies of any kind -- the ONLY case a DELETE is allowed. */
-export function hasNoFinancialDependencies(row: TraderReceivableDependencies): boolean {
-  return (
-    row.collectionCount === 0 &&
-    row.offsetCount === 0 &&
-    row.accountingEventCount === 0 &&
-    row.journalCount === 0 &&
-    row.traderCreditCount === 0 &&
-    new Decimal(row.amountCollected).isZero()
-  );
+  /**
+   * The Company-side action: `repair` only for a missing / only-reversed
+   * receivable (MISSING_RECEIVABLE, REVERSED_NEEDS_REPAIR). Everything else is
+   * `none`. A receivable settled by an effective offset is HEALTHY and is
+   * NEVER reset (`reset_then_repair` was removed in Phase 3 Prompt 2).
+   */
+  readonly recommendedAction: "none" | "repair";
 }
 
 @Injectable()
@@ -210,6 +281,7 @@ export class OrderMaintenanceService {
     @Inject(KyselyTransactionManager) private readonly transactions: KyselyTransactionManager,
     @Inject(OperationsHistoryWriter) private readonly historyWriter: OperationsHistoryWriter,
     @Inject(ReceivableOffsetReversalService) private readonly offsetReversals: ReceivableOffsetReversalService,
+    @Inject(CompanyOrderHealthService) private readonly orderHealth: CompanyOrderHealthService,
   ) {}
 
   /**
@@ -228,20 +300,63 @@ export class OrderMaintenanceService {
     return this.classify(await this.resetRow(this.database, companyId, orderId, false));
   }
 
-  /** Read-only financial verification for one already company-scoped Order. */
+  /**
+   * The SAME Delete / Reset classification `receivableResetPreview` returns,
+   * for the Platform Repair Center's read-only repair preview. It takes the
+   * caller's (read-only) transaction and an explicit Company, and performs NO
+   * permission check of its own: it only reads, and it never authorizes the
+   * reset itself -- execution still goes through `resetTraderReceivable`,
+   * which demands the exact domain permission. Throws
+   * `trader_receivable_not_found` when the Order has no Receivable.
+   */
+  public async resetPlanFor(
+    database: Kysely<DatabaseSchema>,
+    companyId: string,
+    orderId: string,
+  ): Promise<TraderReceivableResetPreview> {
+    return this.classify(await this.resetRow(database, companyId, orderId, false));
+  }
+
+  /**
+   * Read-only financial verification for one already company-scoped Order.
+   *
+   * Phase 3 Prompt 2: the classification, reason code, health, action and
+   * repairability all come from the shared evaluation
+   * (`CompanyOrderHealthService.orderEvaluation`) and the shared repairability
+   * rule (`previewTraderReceivableFinding`). The queries below only gather the
+   * evidence shown to the administrator. Everything runs in ONE read-only
+   * transaction, so the evidence and the decision describe the same state.
+   */
   public async financialVerification(orderId: string): Promise<FinancialVerification> {
     const { companyId } = this.tenants.current();
+    return this.database.transaction().execute(async (db) => {
+      await sql`set transaction read only`.execute(db);
+      return this.verifyIn(db, companyId, orderId);
+    });
+  }
+
+  private async verifyIn(
+    db: Kysely<DatabaseSchema>,
+    companyId: string,
+    orderId: string,
+  ): Promise<FinancialVerification> {
     const orderResult = await sql<Record<string, string | null>>`
       select o.id::text as "orderId", o.order_number as "orderNumber",
              o.serial_number as "serialNumber", o.delivery_status as "deliveryStatus",
              o.service_fee::text as "serviceFee", o.payment_condition as "paymentCondition",
+             o.cod_amount::text as "codAmount", o.additional_fees::text as "additionalFees",
              o.trader_id::text as "traderId", t.name_en as trader,
              o.delivered_at::text as "deliveredAt"
         from orders o left join traders t on t.id=o.trader_id and t.company_id=o.company_id
        where o.company_id=${companyId}::uuid and o.id=${orderId}::uuid
-    `.execute(this.database);
+    `.execute(db);
     const order = orderResult.rows[0];
     if (!order) throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
+    // THE decision: the Company Health evaluation narrowed to this Order.
+    const evaluation = await this.orderHealth.orderEvaluation(db, companyId, orderId);
+    if (evaluation === undefined) {
+      throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
+    }
     const receivableResult = await sql<Record<string, string | null>>`
       select r.id::text as id, r.receivable_number as "receivableNumber",
              r.original_amount_due::text as amount, r.outstanding_amount::text as outstanding,
@@ -249,26 +364,56 @@ export class OrderMaintenanceService {
              coalesce((select sum(a.amount_allocated) from trader_collection_allocations a
                join trader_collections c on c.id=a.collection_id and c.company_id=a.company_id
               where a.company_id=r.company_id and a.receivable_id=r.id and c.status='confirmed'),0)::text as "physicalAmount",
-             coalesce((select sum(x.amount_allocated) from trader_settlement_receivable_offsets x
-               join trader_settlements s on s.id=x.settlement_id and s.company_id=x.company_id
-              where x.company_id=r.company_id and x.receivable_id=r.id and s.status='confirmed'),0)::text as "offsetAmount"
+             -- EFFECTIVE offsets only: SET-A -> SET-A reversal -> SET-B is one
+             -- settlement of this Receivable, not two. The single domain rule
+             -- lives in effective-settlement-offsets.ts.
+             ${effectiveOffsetTotal("r")}::text as "offsetAmount",
+             (select count(distinct x.settlement_id)::int from trader_settlement_receivable_offsets x
+               where x.company_id=r.company_id and x.receivable_id=r.id
+                 and ${effectiveOffset("x")})::text as "effectiveSettlementCount",
+             -- Evidence only: which receivable carries the shared
+             -- reconciliation finding (trader-receivable-reconciliation.ts).
+             ${receivableAnomalySql(correlatedReceivableInputs("r"))} as anomaly
         from trader_receivables r
        where r.company_id=${companyId}::uuid and r.source_type='service_charge'
          and r.source_reference=${order.orderNumber}
        order by r.created_at
-    `.execute(this.database);
+    `.execute(db);
     const receivables = receivableResult.rows;
-    const physical = receivables.reduce((sum, row) => sum + Number(row.physicalAmount ?? 0), 0);
-    const offset = receivables.reduce((sum, row) => sum + Number(row.offsetAmount ?? 0), 0);
-    const settlementResult = await sql<{ settlementNumber: string }>`
-      select distinct s.settlement_number as "settlementNumber"
+    const physical = receivables.reduce((sum, row) => sum.plus(row.physicalAmount ?? 0), new Decimal(0));
+    // Every offset of this Order's Receivables, flagged effective or
+    // historical. Historical offsets stay visible but are never counted.
+    const offsetResult = await sql<{
+      settlementNumber: string;
+      receivableNumber: string;
+      receivableStatus: string;
+      amount: string;
+      effective: boolean;
+    }>`
+      select s.settlement_number as "settlementNumber", r.receivable_number as "receivableNumber",
+             r.status as "receivableStatus",
+             x.amount_allocated::text as amount, ${effectiveSettlement("s")} as effective
         from trader_settlement_receivable_offsets x
         join trader_settlements s on s.id=x.settlement_id and s.company_id=x.company_id
-       where x.company_id=${companyId}::uuid and x.receivable_id in
-         (select id from trader_receivables where company_id=${companyId}::uuid and source_reference=${order.orderNumber})
+        join trader_receivables r on r.id=x.receivable_id and r.company_id=x.company_id
+       where x.company_id=${companyId}::uuid
+         and r.source_type='service_charge' and r.source_reference=${order.orderNumber}
          and s.status='confirmed'
-       order by s.settlement_number
-    `.execute(this.database);
+       order by s.settlement_number, r.receivable_number
+    `.execute(db);
+    const settlementOffsets: FinancialVerificationOffset[] = offsetResult.rows.map((row) => ({
+      amount: new Decimal(row.amount).toFixed(2),
+      effective: row.effective,
+      receivableNumber: row.receivableNumber,
+      receivableStatus: row.receivableStatus,
+      settlementNumber: row.settlementNumber,
+    }));
+    const distinctNumbers = (effective: boolean) => [
+      ...new Set(settlementOffsets.filter((x) => x.effective === effective).map((x) => x.settlementNumber)),
+    ];
+    const historicalOffset = settlementOffsets
+      .filter((x) => !x.effective)
+      .reduce((sum, x) => sum.plus(x.amount), new Decimal(0));
     const journals = await sql<Record<string, string | null>>`
       select distinct j.journal_number as "journalNumber", j.status,
              e.event_type as "eventType", r.receivable_number as "receivableNumber"
@@ -278,20 +423,116 @@ export class OrderMaintenanceService {
        where r.company_id=${companyId}::uuid and r.source_type='service_charge'
          and r.source_reference=${order.orderNumber}
        order by r.receivable_number, e.event_type
-    `.execute(this.database);
-    const owes = Number(order.serviceFee ?? 0) > 0 && order.paymentCondition === "customer_pays_cod_trader_pays_fee";
+    `.execute(db);
+    // Repairability: the Repair Preview's own rule and capability preview.
+    const reasonCode = evaluation.financialCode;
+    const graph = await loadOrderDependencyGraph(db, companyId, orderId);
+    if (graph === undefined) {
+      throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
+    }
+    const finding = await previewTraderReceivableFinding(
+      { companyId, db, evaluation, graph, maintenance: this, reversals: this.offsetReversals },
+      reasonCode,
+    );
+    const classification = evaluation.financialClassification;
+    const health = finding.health;
+    const traderOwes = evaluation.owes ? new Decimal(evaluation.traderDue) : new Decimal(0);
+    return {
+      actionRequired: health !== "HEALTHY",
+      anomalyCode:
+        classification === "RECEIVABLE_INCONSISTENT" || classification === "NEEDS_REVIEW" ? reasonCode : null,
+      classification,
+      findingCodes: evaluation.findingCodes,
+      health,
+      historicalSettlementNumbers: distinctNumbers(false),
+      historicalSettlementOffsetAmount: historicalOffset.toFixed(2),
+      journals: journals.rows,
+      order,
+      orderHealth: evaluation.health,
+      physicalCollectionAmount: physical.toFixed(2),
+      reason: this.verificationReason(reasonCode, receivables, traderOwes),
+      reasonCode,
+      receivables,
+      recommendedAction:
+        reasonCode === "MISSING_RECEIVABLE" || reasonCode === "REVERSED_NEEDS_REPAIR" ? "repair" : "none",
+      repairCapability: finding.capability?.capabilityCode ?? null,
+      repairability: finding.repairability,
+      settlementNumbers: distinctNumbers(true),
+      settlementOffsetAmount: new Decimal(evaluation.activeOffset).toFixed(2),
+      settlementOffsets,
+      traderOwes: traderOwes.toFixed(2),
+    };
+  }
+
+  /**
+   * The administrator sentence for the shared reason code, with this Order's
+   * evidence. Wording only: the code itself was decided by the evaluation.
+   */
+  private verificationReason(
+    reasonCode: OrderHealthReasonCode,
+    receivables: readonly Readonly<Record<string, string | null>>[],
+    traderOwes: Decimal,
+  ): string {
+    const flagged = receivables.find((row) => row.anomaly === reasonCode);
+    if (flagged !== undefined) return this.anomalyMessage(flagged);
     const active = receivables.filter((r) => r.status !== "reversed" && r.status !== "cancelled");
-    let classification: FinancialVerificationClassification;
-    let reason: string;
-    let recommendedAction: FinancialVerification["recommendedAction"] = "none";
-    if (!owes) { classification = "NO_TRADER_RECEIVABLE_REQUIRED"; reason = "The current order rules do not require a Trader receivable."; }
-    else if (active.some((r) => Number(r.physicalAmount ?? 0) >= Number(r.amount ?? 0))) { classification = "ALREADY_PHYSICALLY_COLLECTED"; reason = "Trader payment already physically collected."; }
-    else if (active.some((r) => Number(r.outstanding ?? 0) > 0)) { classification = "HEALTHY_ACTIVE_RECEIVABLE"; reason = "Receivable is active — Collect from Trader."; }
-    else if (active.length > 0 && offset > 0 && physical === 0) { classification = "OFFSET_SETTLED_WITHOUT_PHYSICAL_COLLECTION"; reason = "Receivable was settled by settlement offset without a physical Trader collection."; recommendedAction = "reset_then_repair"; }
-    else if (receivables.length > 0 && active.length === 0) { classification = "REVERSED_NEEDS_REPAIR"; reason = "Historical receivable is already reversed. Repair Trader Receivable is required."; recommendedAction = "repair"; }
-    else if (receivables.length === 0) { classification = "MISSING_RECEIVABLE"; reason = "Trader Receivable is missing."; recommendedAction = "repair"; }
-    else { classification = "NEEDS_REVIEW"; reason = "The receivable and clearing records are inconsistent."; }
-    return { classification, reason, order, traderOwes: Number(order.serviceFee ?? 0).toFixed(2), receivables, physicalCollectionAmount: physical.toFixed(2), settlementOffsetAmount: offset.toFixed(2), settlementNumbers: settlementResult.rows.map((r) => r.settlementNumber), journals: journals.rows, recommendedAction };
+    switch (reasonCode) {
+      case "NO_TRADER_RECEIVABLE_REQUIRED":
+        return "The current order rules do not require a Trader receivable.";
+      case "HEALTHY_ACTIVE_RECEIVABLE":
+        return "Receivable is active — Collect from Trader.";
+      case "ALREADY_PHYSICALLY_COLLECTED":
+        return "Trader payment already physically collected.";
+      case "SETTLED_BY_COLLECTION_AND_OFFSET":
+        return "Trader payment settled by a physical collection and a settlement offset. No action is required.";
+      case "OFFSET_SETTLED_WITHOUT_PHYSICAL_COLLECTION":
+        return "Receivable was settled by an effective settlement offset. A physical Trader collection is not required; no action is required.";
+      case "REVERSED_NEEDS_REPAIR":
+        return "Historical receivable is already reversed. Repair Trader Receivable is required.";
+      case "MISSING_RECEIVABLE":
+        return "Trader Receivable is missing.";
+      case "MULTIPLE_ACTIVE_RECEIVABLES":
+        return `The Order has ${active.length} active Trader receivables; only one is expected.`;
+      case "RECEIVABLE_NOT_REQUIRED_BUT_ACTIVE":
+        return "An active Trader receivable exists although the Order's COD already covers the fee.";
+      case "RECEIVABLE_AMOUNT_MISMATCH": {
+        const current = active[0];
+        return current === undefined
+          ? ORDER_HEALTH_REASONS[reasonCode].reason
+          : `${current.receivableNumber} is for AED ${new Decimal(current.amount ?? 0).toFixed(2)}, but the order requires AED ${traderOwes.toFixed(2)}.`;
+      }
+      default:
+        return ORDER_HEALTH_REASONS[reasonCode].reason;
+    }
+  }
+
+  /** Administrator sentence for a receivable reconciliation anomaly (Phase 3). */
+  private anomalyMessage(r: Readonly<Record<string, string | null>>): string {
+    const money = (value: string | number | null | undefined) => Number(value ?? 0).toFixed(2);
+    const due = Number(r.amount ?? 0);
+    const settled = Number(r.physicalAmount ?? 0) + Number(r.offsetAmount ?? 0);
+    switch (r.anomaly) {
+      case "MULTIPLE_EFFECTIVE_SETTLEMENTS":
+        return `${r.receivableNumber} is offset by more than one effective Settlement (AED ${money(r.offsetAmount)} against AED ${money(due)} due).`;
+      case "RECEIVABLE_OVER_COLLECTED":
+        return `${r.receivableNumber} has effective collections and offsets of AED ${money(settled)} against AED ${money(due)} due.`;
+      case "COLLECTION_ALLOCATION_MISMATCH":
+        return `${r.receivableNumber} has a Trader Collection allocation from another Trader or beyond the money that Collection received.`;
+      case "ORPHAN_COLLECTION_ALLOCATION":
+        return `${r.receivableNumber} is ${r.status ?? ""} but a confirmed Trader Collection is still allocated to it.`;
+      case "SETTLEMENT_OFFSET_MISMATCH":
+        return `${r.receivableNumber} has an effective settlement offset that does not match it (another Trader, a cancelled receivable, or a reversal without its compensating Trader Credit).`;
+      case "RECEIVABLE_COLLECTED_AMOUNT_MISMATCH":
+        return `${r.receivableNumber} records AED ${money(r.amountCollected)} collected, but its effective collections and offsets total AED ${money(settled)}.`;
+      case "RECEIVABLE_MARKED_COLLECTED_WITHOUT_EFFECTIVE_SETTLEMENT":
+        return `${r.receivableNumber} is marked collected, but effective collections and offsets total only AED ${money(settled)} of AED ${money(due)}.`;
+      case "FINANCIALLY_SETTLED_BUT_RECEIVABLE_STATE_OPEN":
+        return `${r.receivableNumber} is fully settled (AED ${money(settled)} of AED ${money(due)}) but is still ${r.status ?? ""}.`;
+      case "RECEIVABLE_PARTIAL_STATE_MISMATCH":
+        return `${r.receivableNumber} is ${r.status ?? ""}, but effective collections and offsets total AED ${money(settled)} of AED ${money(due)}.`;
+      default:
+        return "The receivable and clearing records are inconsistent.";
+    }
   }
 
   /**
@@ -385,23 +626,9 @@ export class OrderMaintenanceService {
     >`
       select r.id as "receivableId", r.receivable_number as "receivableNumber",
              r.status as "receivableStatus", r.original_amount_due::text as amount,
-             r.amount_collected::text as "amountCollected",
              o.id as "orderId", o.order_number as "orderNumber",
-             (select count(*)::int from trader_collection_allocations a
-               where a.company_id=r.company_id and a.receivable_id=r.id) as "collectionCount",
-             (select count(*)::int from trader_settlement_receivable_offsets x
-               where x.company_id=r.company_id and x.receivable_id=r.id) as "offsetCount",
-             (select count(*)::int from accounting_events e
-               where e.company_id=r.company_id and e.source_entity_type='trader_receivable'
-                 and e.source_entity_id=r.id) as "accountingEventCount",
-             (select count(*)::int from journal_entries j
-               where j.company_id=r.company_id
-                 and ((j.source_entity_type='trader_receivable' and j.source_entity_id=r.id)
-                   or exists(select 1 from journal_lines l
-                              where l.company_id=j.company_id and l.journal_entry_id=j.id
-                                and l.subledger_id=r.id))) as "journalCount",
-             (select count(*)::int from trader_credits c
-               where c.company_id=r.company_id and c.source_receivable_id=r.id) as "traderCreditCount"
+             -- THE dependency rule (trader-receivable-dependencies.ts).
+             ${receivableDependencyColumnsSql("r")}
         from trader_receivables r
         join orders o on o.company_id=r.company_id and o.order_number=r.source_reference
        where r.company_id=${companyId}::uuid and o.id=${orderId}::uuid
@@ -610,13 +837,17 @@ export class OrderMaintenanceService {
                   join trader_settlements s
                     on s.id = o.settlement_id and s.company_id = o.company_id
                  where o.receivable_id = r.id
-                   and o.company_id = r.company_id) as "clearedBySettlements",
+                   and o.company_id = r.company_id
+                   -- Effective offsets only: a reversed Settlement no longer
+                   -- clears the Receivable (effective-settlement-offsets.ts).
+                   and ${effectiveSettlement("s")}) as "clearedBySettlements",
                least(
                  (select min(s.confirmed_at)
                     from trader_settlement_receivable_offsets o
                     join trader_settlements s
                       on s.id = o.settlement_id and s.company_id = o.company_id
-                   where o.receivable_id = r.id and o.company_id = r.company_id),
+                   where o.receivable_id = r.id and o.company_id = r.company_id
+                     and ${effectiveSettlement("s")}),
                  (select min(c.created_at)
                     from trader_collection_allocations alloc
                     join trader_collections c

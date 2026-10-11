@@ -23,6 +23,8 @@ import { DashboardPage } from "./DashboardPage.js";
 import { DeploymentRegistryPage } from "./DeploymentRegistryPage.js";
 import { ErrorsPage } from "./ErrorsPage.js";
 import { IntegrityCheckPage } from "./IntegrityCheckPage.js";
+import { RepairCenterPage } from "./RepairCenterPage.js";
+import { CompanyDataResetPage } from "./CompanyDataResetPage.js";
 import { DemoRequestsPage } from "./DemoRequestsPage.js";
 import { TraderApplicationsPage } from "./TraderApplicationsPage.js";
 import { CustomerQuotesPage } from "./CustomerQuotesPage.js";
@@ -185,6 +187,20 @@ export function PlatformShell(): ReactElement {
                   element={<CompanyWebsitePreviewPage />}
                   path="/companies/:companyId/website/preview/:templateKey"
                 />
+                {/* Read-only Repair Center; the API enforces the same code. */}
+                {session.can("platform.companies.repair_center.read") ? (
+                  <Route
+                    element={<RepairCenterPage />}
+                    path="/companies/:companyId/repair-center"
+                  />
+                ) : null}
+                {/* Company Data Reset; the API enforces the same code. */}
+                {session.can("platform.companies.reset") ? (
+                  <Route
+                    element={<CompanyDataResetPage />}
+                    path="/companies/:companyId/data-reset"
+                  />
+                ) : null}
               </>
             ) : null}
             {session.can("platform.audit.read") ? (

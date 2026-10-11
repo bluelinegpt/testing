@@ -97,7 +97,12 @@ describe("permanent Company deletion manifest", () => {
     // `driver_route_stops` and `driver_route_actions` (PURGE, +5); Orders AI
     // `company_ai_settings` (PRESERVE, 2026-10-11, +1). All carry a direct
     // `company_id ... on delete restrict`.
-    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(177);
+    // 177 -> 179 (Repair Center checkpoint, 11 Oct 2026): the Repair Center
+    // audit tables `platform_repair_executions` / `platform_repair_attempts`
+    // and `destination_countries` (now Company-scoped) join the direct set;
+    // `platform_workflow_test_steps` leaves it (no `company_id`; cascades from
+    // its scenario). The live-schema certification proves the set.
+    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(179);
     expect(COMPANY_DELETION_MANIFEST_HASH).toMatch(/^[a-f0-9]{64}$/);
   });
 
@@ -114,6 +119,7 @@ describe("permanent Company deletion manifest", () => {
       "store_order_items",
       "store_order_idempotency_keys",
       "commerce_integration_credentials",
+      "platform_workflow_test_steps",
       "company_customer_quote_pricing_rules",
     ]);
   });

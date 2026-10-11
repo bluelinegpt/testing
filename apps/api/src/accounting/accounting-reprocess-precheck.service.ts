@@ -131,8 +131,22 @@ export class AccountingReprocessPrecheckService {
 
   public async precheck(eventId: string) {
     this.support.assertAnyPermission("accounting.post", "accounting.manage");
+    // Previously enforced implicitly by `reprocessingReadiness` -> `detail()`;
+    // kept explicit now that the core below takes no permission (Prompt 4).
+    this.support.assertPermission("accounting.view");
     const { companyId } = this.support.context();
+    return this.precheckFor(this.database, companyId, eventId);
+  }
 
+  /**
+   * The precheck itself for an explicit Company and connection, with NO
+   * permission assertion (Phase 2 Prompt 4). `precheck()` above is the
+   * Company-portal entry point; the Platform Repair Center's accounting
+   * adapter calls this under its own Platform authorization -- and, when
+   * executing, inside its own transaction so the checks see exactly the state
+   * the posting will use. Every check is unchanged.
+   */
+  public async precheckFor(database: Kysely<DatabaseSchema>, companyId: string, eventId: string) {
     const eventResult = await sql<EventRow>`
       select e.id, e.event_type as "eventType", e.event_version as "eventVersion",
              e.processing_status as "processingStatus",
@@ -147,7 +161,7 @@ export class AccountingReprocessPrecheckService {
         from accounting_events e
         left join journal_entries j on j.id = e.journal_id and j.company_id = e.company_id
        where e.id = ${eventId}::uuid and e.company_id = ${companyId}::uuid
-    `.execute(this.database);
+    `.execute(database);
     const event = eventResult.rows[0];
     // Another Company's Event and a nonexistent one give the same answer.
     if (event === undefined) {
@@ -162,7 +176,7 @@ export class AccountingReprocessPrecheckService {
     const warnings: Blocking[] = [];
 
     // Stored-state eligibility — the existing readiness service, wholesale.
-    const readiness = await this.events.reprocessingReadiness(eventId);
+    const readiness = await this.events.reprocessingReadinessFor(database, companyId, eventId);
     for (const code of readiness.blockers) {
       blockers.push({ code, message: this.describe(code) });
     }
@@ -177,7 +191,7 @@ export class AccountingReprocessPrecheckService {
          and event_type = ${event.eventType}
          and processing_status = 'posted'
        limit 1
-    `.execute(this.database);
+    `.execute(database);
     if (duplicate.rows[0] !== undefined) {
       blockers.push({
         code: "accounting_event_duplicate_posted",
@@ -193,7 +207,7 @@ export class AccountingReprocessPrecheckService {
          and status = 'posted'
          and (${event.journalId}::uuid is null or id <> ${event.journalId}::uuid)
        limit 1
-    `.execute(this.database);
+    `.execute(database);
     if (sourceJournal.rows[0] !== undefined) {
       blockers.push({
         code: "accounting_journal_exists_for_source",
@@ -225,7 +239,7 @@ export class AccountingReprocessPrecheckService {
             on journal.id=original.journal_id and journal.company_id=original.company_id
          where original.id=${event.reversalOfEventId ?? "00000000-0000-0000-0000-000000000000"}::uuid
            and original.company_id=${companyId}::uuid
-      `.execute(this.database);
+      `.execute(database);
       const original = originalResult.rows[0];
       if (original === undefined) {
         blockers.push({
@@ -252,7 +266,7 @@ export class AccountingReprocessPrecheckService {
              and reversal_of_id=${original.journalId ?? "00000000-0000-0000-0000-000000000000"}::uuid
              and status in ('approved','posted')
            limit 1
-        `.execute(this.database);
+        `.execute(database);
         if (alreadyReversed.rows[0] !== undefined) {
           blockers.push({
             code: "accounting_event_original_already_reversed",
@@ -278,7 +292,7 @@ export class AccountingReprocessPrecheckService {
              where line.company_id=${companyId}::uuid
                and line.journal_entry_id=${original.journalId}::uuid
              order by line.line_number
-          `.execute(this.database);
+          `.execute(database);
           const journalDebit = originalLines.rows
             .filter((line) => line.entryIntent === "debit")
             .reduce((sum, line) => sum.plus(line.amount), new Decimal(0));
@@ -289,7 +303,7 @@ export class AccountingReprocessPrecheckService {
             select coalesce(sum(debit),0)::text as total
               from journal_lines
              where company_id=${companyId}::uuid and journal_entry_id=${original.journalId}::uuid
-          `.execute(this.database);
+          `.execute(database);
           const debit = new Decimal(debitResult.rows[0]?.total ?? "0");
           if (!debit.greaterThan(0) || !journalDebit.equals(journalCredit)) {
             blockers.push({
@@ -312,7 +326,12 @@ export class AccountingReprocessPrecheckService {
           }));
         }
         if (original.accountingDate !== null) {
-          period = await this.periodFor(companyId, event.effectiveAccountingDate ?? original.accountingDate, blockers);
+          period = await this.periodFor(
+            database,
+            companyId,
+            event.effectiveAccountingDate ?? original.accountingDate,
+            blockers,
+          );
         } else {
           blockers.push({
             code: "accounting_event_accounting_date_missing",
@@ -339,7 +358,7 @@ export class AccountingReprocessPrecheckService {
         sourceEntityType: event.sourceEntityType,
         sourceReference: event.sourceReference,
       };
-      facts = await this.attempt(blockers, () => this.sources.load(this.database, record));
+      facts = await this.attempt(blockers, () => this.sources.load(database, record));
       if (facts !== undefined) {
         if (facts.components.length === 0) {
           // The loader dropped every component as zero: nothing to post. For
@@ -368,14 +387,14 @@ export class AccountingReprocessPrecheckService {
                 "The Event's stored Accounting Date differs from the source; posting uses the source date",
             });
           }
-          period = await this.periodFor(companyId, facts.accountingDate, blockers);
+          period = await this.periodFor(database, companyId, facts.accountingDate, blockers);
           if (facts.components.length > 0) {
             lines = (await this.attempt(blockers, () =>
-              this.mappings.resolve(this.database, companyId, facts!.accountingDate, facts!.components),
+              this.mappings.resolve(database, companyId, facts!.accountingDate, facts!.components),
             )) ?? [];
           }
         }
-        await this.compareStoredComponents(companyId, eventId, facts, warnings);
+        await this.compareStoredComponents(database, companyId, eventId, facts, warnings);
       }
     }
 
@@ -462,6 +481,7 @@ export class AccountingReprocessPrecheckService {
 
   /** The posting pipeline's period test, without its locks. */
   private async periodFor(
+    database: Kysely<DatabaseSchema>,
     companyId: string,
     accountingDate: string,
     blockers: Blocking[],
@@ -477,7 +497,7 @@ export class AccountingReprocessPrecheckService {
         join fiscal_years y on y.id = p.fiscal_year_id and y.company_id = p.company_id
        where p.company_id = ${companyId}::uuid
          and ${accountingDate}::date between p.period_start and p.period_end
-    `.execute(this.database);
+    `.execute(database);
     if (result.rows.length !== 1) {
       blockers.push({
         code: "accounting_event_fiscal_period_not_found",
@@ -513,6 +533,7 @@ export class AccountingReprocessPrecheckService {
    * reviewed are not the figures that would post.
    */
   private async compareStoredComponents(
+    database: Kysely<DatabaseSchema>,
     companyId: string,
     eventId: string,
     facts: OperationalJournalFacts,
@@ -524,7 +545,7 @@ export class AccountingReprocessPrecheckService {
         from accounting_event_components
        where company_id = ${companyId}::uuid and accounting_event_id = ${eventId}::uuid
        group by mapping_key, entry_intent
-    `.execute(this.database);
+    `.execute(database);
     // An Event that never validated stored no components; there is nothing to
     // have drifted from.
     if (stored.rows.length === 0) return;

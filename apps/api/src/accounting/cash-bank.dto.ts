@@ -65,8 +65,14 @@ export class CashAccountMutationDto {
   @MaxLength(300)
   public readonly locationOrCustodian?: string;
 
+  /**
+   * Required whenever the Company's GL Accounting is ON (enforced by the
+   * service and by the database). Optional for an Accounting-OFF Company,
+   * whose drawers need no Chart of Accounts.
+   */
+  @IsOptional()
   @IsUUID()
-  public readonly linkedGlAccountId!: string;
+  public readonly linkedGlAccountId?: string;
 
   @IsDateString()
   public readonly effectiveFrom!: string;
@@ -125,8 +131,15 @@ export class BankAccountMutationDto {
   @IsIn(bankAccountTypes)
   public readonly accountType!: (typeof bankAccountTypes)[number];
 
+  /**
+   * Required whenever the Company's GL Accounting is ON (enforced by the
+   * service). Optional for an Accounting-OFF Company: a bank account takes
+   * part in operational finance without a Chart of Accounts, and a GL-less
+   * active bank account blocks enabling GL Accounting until it is linked.
+   */
+  @IsOptional()
   @IsUUID()
-  public readonly linkedGlAccountId!: string;
+  public readonly linkedGlAccountId?: string;
 
   @IsDateString()
   public readonly effectiveFrom!: string;

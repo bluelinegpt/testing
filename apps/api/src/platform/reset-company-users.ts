@@ -79,7 +79,10 @@ export async function previewResetCompanyUsers(
       });
       continue;
     }
-    const inspection = await inspectResetCompanyUserAccount(client, companyId, user.accountId);
+    // A Users Only preview runs in a read-only transaction. It needs the
+    // current references, but no lock: execution rechecks Admin/access state
+    // under write locks immediately before mutation.
+    const inspection = await inspectResetCompanyUserAccount(client, companyId, user.accountId, false);
     if (!inspection.exists || inspection.isAdmin) {
       throw new Error(inspection.isAdmin
         ? "Admin users cannot be selected for Users Only Reset."
@@ -367,6 +370,15 @@ export async function getResetCompanyUserPlan(
   };
 }
 
+/**
+ * @deprecated LEGACY users-only remover (Company Data Reset, Prompt 3).
+ * UNREACHABLE from every HTTP route and CLI (users-reset-execute is retired,
+ * 410). Its only callers are the deprecated `runReset` engine and the legacy
+ * database tests. User removal for a Company Data Reset is planned and
+ * executed by the plan-based engine (DELETE_SELECTED_USERS /
+ * DELETE_ALL_ELIGIBLE_USERS). `company-data-reset.bypass-certification.test.ts`
+ * fails if any other production source calls it.
+ */
 export async function removeResetCompanyUsers(
   client: pg.PoolClient,
   companyId: string,

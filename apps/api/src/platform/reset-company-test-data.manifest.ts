@@ -316,6 +316,15 @@ export const PRESERVE_TABLES = new Set([
      rationale as audit_events: a training reset must not erase the record of
      what crashed. */
   "client_error_reports",
+  /* Platform Repair Center execution audit (Phase 2 Prompt 3): append-only
+     record of each certified repair a Platform administrator executed. Same
+     rationale as audit_events: a training reset must not erase who repaired
+     what. It has no FK to orders, so it never blocks an Order's removal. */
+  "platform_repair_executions",
+  /* Platform Repair Center attempt audit (Phase 2 Prompt 5): append-only
+     record of refused / failed / replayed repair attempts. Same rationale;
+     no FK to orders or accounting events, so it never blocks their removal. */
+  "platform_repair_attempts",
   /* Platform bookkeeping for permanent Company deletions. Keyed by snapshot
      columns, owned by the Platform, and never part of a Company's own data. */
   "platform_company_deletion_backups",
@@ -689,7 +698,7 @@ const MODULE_RULES: { module: string; tables?: string[]; prefixes?: string[] }[]
     prefixes: ["closing_"],
     tables: ["accounting_periods", "fiscal_years", "accounting_zero_opening_confirmations"],
   },
-  { module: "Audit", tables: ["audit_events", "balance_override_audits"] },
+  { module: "Audit", tables: ["audit_events", "balance_override_audits", "platform_repair_executions", "platform_repair_attempts"] },
   {
     module: "Communication / notifications",
     prefixes: ["conversation", "communication_"],
@@ -704,6 +713,11 @@ const MODULE_RULES: { module: string; tables?: string[]; prefixes?: string[] }[]
     module: "Business masters",
     prefixes: ["employee", "driver_documents", "trader_bank", "trader_service"],
     tables: ["traders", "drivers", "customers", "customer_addresses", "vehicles"],
+  },
+  {
+    module: "Route planning",
+    prefixes: ["driver_route_"],
+    tables: ["company_route_optimization_usage"],
   },
   {
     module: "Orders",

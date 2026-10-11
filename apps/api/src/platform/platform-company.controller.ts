@@ -5,6 +5,7 @@ import {
   Get,
   Headers,
   HttpCode,
+  HttpStatus,
   Inject,
   Param,
   Patch,
@@ -17,6 +18,7 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { Request } from "express";
 
+import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { RequestSecurityContextStore } from "../security/request-security-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
@@ -32,14 +34,13 @@ import {
 // Runtime class values are required for Nest validation metadata.
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import {
+  ApplySetupTemplateDto,
   CompanyListQueryDto,
   CloseCompanyDto,
   CreateCompanyDeletionBackupDto,
   PermanentDeleteCompanyDto,
   CreateCompanyDto,
   LifecycleActionDto,
-  ResetCompanyDataDto,
-  ResetCompanyUsersDataDto,
   ResetCompanyUsersPreviewDto,
   SuspendCompanyDto,
   UpdateCompanyOrdersAiDto,
@@ -53,6 +54,19 @@ import { PlatformCompanyDeletionService } from "./platform-company-deletion.serv
 import { PlatformCompanyDeletionBackupService } from "./platform-company-deletion-backup.service.js";
 import { PlatformCompanyDeletionExecutionService } from "./platform-company-deletion-execution.service.js";
 import { PlatformTargetCompanyGuard } from "./platform-target-company.guard.js";
+
+/**
+ * The legacy Company reset mutations are retired: 410 Gone, zero mutation,
+ * pointing at the single plan-based Company Data Reset workflow.
+ */
+export function retiredCompanyReset(companyId: string, route: string): ApplicationException {
+  return new ApplicationException(
+    "company_reset_retired",
+    `${route} is retired and changes nothing. Use POST /platform/companies/${companyId}/data-reset/preview, ` +
+      `then POST /platform/companies/${companyId}/data-reset/execute with the previewed planVersion and an explicit userMode.`,
+    HttpStatus.GONE,
+  );
+}
 
 /**
  * Company routes that are not scoped to one Company.
@@ -179,6 +193,36 @@ export class PlatformTargetCompanyController {
   @Get("accounting-setup")
   public accountingSetup(@Param("companyId") companyId: string): Promise<object> {
     return this.companies.accountingSetup(companyId);
+  }
+
+  /**
+   * Applies the setup template to a draft Company created without one (the
+   * only way such a Company can become ready to activate without recreating
+   * it). Same permission as creating a Company.
+   */
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Apply an approved setup template to a draft Company created without one" })
+  @RequirePlatformPermissions(PLATFORM_COMPANIES_MANAGE)
+  @HttpCode(200)
+  @Post("accounting-setup/apply")
+  public applySetupTemplate(
+    @Param("companyId") companyId: string,
+    @Body() input: ApplySetupTemplateDto,
+    @Req() request: Request,
+  ): Promise<object> {
+    return this.companies.applySetupTemplate(
+      companyId,
+      {
+        templateCode: input.accountingTemplateCode,
+        templateVersion: input.accountingTemplateVersion,
+        businessDayStart: input.businessDayStart,
+      },
+      {
+        ...this.actor(request),
+        ip: request.ip,
+        userAgent: request.headers["user-agent"],
+      },
+    );
   }
 
   /**
@@ -365,17 +409,19 @@ export class PlatformTargetCompanyController {
     return this.reset.preview(companyId);
   }
 
+  /**
+   * RETIRED (Company Data Reset, Prompt 2). This legacy whole-Company reset
+   * reset users implicitly and bypassed the plan-based engine. It is kept only
+   * so old clients get an explicit answer: it changes NOTHING, whatever the
+   * body, and points to the plan-based workflow
+   * (`data-reset/preview` -> `data-reset/execute`, explicit user mode).
+   */
   @ApiBearerAuth()
-  @ApiOperation({ summary: "Reset a development or demo Company's transactional data" })
+  @ApiOperation({ summary: "RETIRED -- use data-reset/preview then data-reset/execute (no mutation)" })
   @RequirePlatformPermissions(PLATFORM_COMPANIES_RESET)
-  @HttpCode(200)
   @Post("reset-execute")
-  public resetExecute(
-    @Param("companyId") companyId: string,
-    @Body() input: ResetCompanyDataDto,
-    @Req() request: Request,
-  ): Promise<object> {
-    return this.reset.execute(companyId, input.confirmation, this.actor(request));
+  public resetExecute(@Param("companyId") companyId: string): never {
+    throw retiredCompanyReset(companyId, "reset-execute");
   }
 
   @ApiBearerAuth()
@@ -398,17 +444,19 @@ export class PlatformTargetCompanyController {
     return this.reset.previewUsers(companyId, input.accountIds);
   }
 
+  /**
+   * RETIRED (Company Data Reset, Prompt 2). Deleting a selection of Company
+   * users under the Company reset permission IS a Company Data Reset (the
+   * USERS_WORKFORCE preset with DELETE_SELECTED_USERS), so it now goes through
+   * the plan-based engine only. Changes NOTHING. Ordinary one-user
+   * administration (deactivate / delete one Company user) is unaffected.
+   */
   @ApiBearerAuth()
-  @ApiOperation({ summary: "Reset only the selected non-Admin Company accounts" })
+  @ApiOperation({ summary: "RETIRED -- use data-reset with USERS_WORKFORCE + DELETE_SELECTED_USERS (no mutation)" })
   @RequirePlatformPermissions(PLATFORM_COMPANIES_RESET)
-  @HttpCode(200)
   @Post("users-reset-execute")
-  public usersResetExecute(
-    @Param("companyId") companyId: string,
-    @Body() input: ResetCompanyUsersDataDto,
-    @Req() request: Request,
-  ): Promise<object> {
-    return this.reset.executeUsers(companyId, input.accountIds, input.confirmation, this.actor(request));
+  public usersResetExecute(@Param("companyId") companyId: string): never {
+    throw retiredCompanyReset(companyId, "users-reset-execute");
   }
 
   /**

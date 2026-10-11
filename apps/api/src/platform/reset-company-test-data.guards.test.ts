@@ -124,6 +124,8 @@ describe("manifest invariants", () => {
       "accounting_configurations",
       "audit_events",
       "balance_override_audits",
+      "platform_repair_executions",
+      "platform_repair_attempts",
       "trader_commerce_profiles",
       "kysely_migration",
     ];

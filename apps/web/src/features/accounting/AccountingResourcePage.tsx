@@ -913,15 +913,6 @@ function manualJournalAccountOptions(
         "is_posting",
       );
       const isActive = recordBoolean(account, "isActive", "is_active", "active", "enabled");
-      const isControl = recordBoolean(
-        account,
-        "isControlAccount",
-        "is_control_account",
-        "controlAccount",
-        "control",
-        "isControl",
-        "is_control",
-      );
       const isSummary = recordBoolean(
         account,
         "isSummaryAccount",
@@ -1995,8 +1986,8 @@ function ManualJournalEditor({
     setFormError("");
     // Reset the editor only when the selected Journal changes. Account options load
     // asynchronously; tying this reset to accountOptions can wipe user-entered lines
-    // right after the selector data arrives.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // right after the selector data arrives. (The react-hooks lint plugin is
+    // not configured for this package, so no disable directive is needed.)
   }, [initialRecord]);
 
   // The editor renders BELOW the list on the same page, so opening it (Create
@@ -3452,6 +3443,22 @@ export function AccountingResourcePage({
     section === "expenses" &&
     Array.isArray(accountingPreview.data?.issues) &&
     accountingPreview.data.issues.length > 0;
+  // GL Accounting mode, read only while a Cash or Bank account is being
+  // created or edited: with Accounting OFF neither needs a GL account (the API
+  // accepts none for an OFF Company and refuses a GL-less one for an ON
+  // Company), so the form must not demand one. Until the mode is known the
+  // field stays required -- the Accounting-ON behaviour -- so nothing is
+  // relaxed on a slow or failed read.
+  const financialAccountSection = section === "cash-accounts" || section === "bank-accounts";
+  const glAccountConfiguration = useAccountingResource<AccountingRecord | undefined>(
+    accountingQueryKey(companyId, `${section}:configuration`, { creating, editingDetail, section }),
+    (signal) =>
+      financialAccountSection && (creating || editingDetail)
+        ? client.configuration(signal)
+        : Promise.resolve(undefined),
+  );
+  const cashAccountGlOptional =
+    financialAccountSection && glAccountConfiguration.data?.accountingEnabled === false;
   const createFields = useMemo<readonly FieldDefinition[]>(() => {
     const fields = definition?.createFields ?? [];
     // Category and payee-type fields hold IDs/enum codes, never free text: as
@@ -3515,6 +3522,21 @@ export function AccountingResourcePage({
       field.name === "linkedGlAccountId"
         ? {
             ...field,
+            ...(cashAccountGlOptional
+              ? {
+                  helperText:
+                    section === "bank-accounts"
+                      ? t("accounting.bankAccounts.glOptionalWhenAccountingOff", {
+                          defaultValue:
+                            "GL Accounting is OFF for this Company, so a GL account is optional. Assign one before enabling GL Accounting: an active Bank account without a GL account blocks enabling.",
+                        })
+                      : t("accounting.cashAccounts.glOptionalWhenAccountingOff", {
+                          defaultValue:
+                            "GL Accounting is OFF for this Company, so a GL account is optional. Assign one before enabling GL Accounting: an active Cash account without a GL account blocks enabling.",
+                        }),
+                  required: false,
+                }
+              : {}),
             emptyText: openingBalanceAccounts.loading
               ? t("common.loading", { defaultValue: "Loading..." })
               : t("accounting.emptyCompatibleAccounts", {
@@ -3531,6 +3553,7 @@ export function AccountingResourcePage({
         : field,
     );
   }, [
+    cashAccountGlOptional,
     definition?.createFields,
     expenseCategoryOptions.data,
     permissionSet.manage,

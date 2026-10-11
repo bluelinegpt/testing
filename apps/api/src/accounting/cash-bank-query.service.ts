@@ -13,6 +13,10 @@ import type {
   CashBankListQueryDto,
   CashBankMovementPreviewQueryDto,
 } from "./cash-bank.dto.js";
+import {
+  countsInOperationalBalance,
+  reversalCountsInOperationalBalance,
+} from "./cash-trail-classification.js";
 import { GeneralExpenseQueryService } from "./general-expense-query.service.js";
 
 /**
@@ -612,6 +616,15 @@ export class CashBankQueryService {
    * carries counts only: an amount total per account is exactly the guess the
    * null column exists to refuse.
    */
+  /*
+   * Which Movements count is decided by `countsInOperationalBalance`
+   * (cash-trail-classification.ts). Accounting-ON rows keep the original rule
+   * (an Event-linked trail is excluded). Accounting-OFF rows: a trail of a
+   * payment this query already counts from its own table is excluded; a
+   * Collection / Driver Cash trail -- the only record of that cash arriving --
+   * counts once, until its source is reversed. Legacy OFF rows are classified
+   * at query time; no row is rewritten.
+   */
   public async balances(database: Kysely<DatabaseSchema> = this.database) {
     this.support.assertPermission("accounting.view");
     const { companyId } = this.support.context();
@@ -620,39 +633,39 @@ export class CashBankQueryService {
         select source_cash_account_id as id,'cash'::text as kind,-amount-fee_amount as value
           from cash_bank_movements m where company_id=${companyId}::uuid
            and status in('confirmed','reversed') and reversal_of_movement_id is null
-           and not exists(select 1 from accounting_events e where e.id=m.accounting_event_id
-             and e.company_id=m.company_id and e.source_entity_type<>'cash_bank_movement')
+           and ${countsInOperationalBalance("m")}
         union all select destination_cash_account_id,'cash',amount
           from cash_bank_movements m where company_id=${companyId}::uuid
            and status in('confirmed','reversed') and reversal_of_movement_id is null
-           and not exists(select 1 from accounting_events e where e.id=m.accounting_event_id
-             and e.company_id=m.company_id and e.source_entity_type<>'cash_bank_movement')
+           and ${countsInOperationalBalance("m")}
         union all select source_bank_account_id,'bank',-amount-fee_amount
           from cash_bank_movements m where company_id=${companyId}::uuid
            and status in('confirmed','reversed') and reversal_of_movement_id is null
-           and not exists(select 1 from accounting_events e where e.id=m.accounting_event_id
-             and e.company_id=m.company_id and e.source_entity_type<>'cash_bank_movement')
+           and ${countsInOperationalBalance("m")}
         union all select destination_bank_account_id,'bank',amount
           from cash_bank_movements m where company_id=${companyId}::uuid
            and status in('confirmed','reversed') and reversal_of_movement_id is null
-           and not exists(select 1 from accounting_events e where e.id=m.accounting_event_id
-             and e.company_id=m.company_id and e.source_entity_type<>'cash_bank_movement')
+           and ${countsInOperationalBalance("m")}
         union all select o.source_cash_account_id,'cash',o.amount+o.fee_amount
           from cash_bank_movements r join cash_bank_movements o
             on o.id=r.reversal_of_movement_id and o.company_id=r.company_id
          where r.company_id=${companyId}::uuid and r.status='confirmed'
+           and ${reversalCountsInOperationalBalance("o")}
         union all select o.destination_cash_account_id,'cash',-o.amount
           from cash_bank_movements r join cash_bank_movements o
             on o.id=r.reversal_of_movement_id and o.company_id=r.company_id
          where r.company_id=${companyId}::uuid and r.status='confirmed'
+           and ${reversalCountsInOperationalBalance("o")}
         union all select o.source_bank_account_id,'bank',o.amount+o.fee_amount
           from cash_bank_movements r join cash_bank_movements o
             on o.id=r.reversal_of_movement_id and o.company_id=r.company_id
          where r.company_id=${companyId}::uuid and r.status='confirmed'
+           and ${reversalCountsInOperationalBalance("o")}
         union all select o.destination_bank_account_id,'bank',-o.amount
           from cash_bank_movements r join cash_bank_movements o
             on o.id=r.reversal_of_movement_id and o.company_id=r.company_id
          where r.company_id=${companyId}::uuid and r.status='confirmed'
+           and ${reversalCountsInOperationalBalance("o")}
         -- Payroll payments. Cash only by table CHECK, and a reversal flips the
         -- row's own status in place rather than writing a counter-row, so
         -- status='confirmed' both includes the live ones and excludes the

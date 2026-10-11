@@ -90,6 +90,9 @@ describe("Platform Company route protection", () => {
         "reactivate",
         "close",
         "moveToProduction",
+        // 2026-10-05: setup template applied after creation (writes the
+        // Company's whole setup), same permission as creating the Company.
+        "applySetupTemplate",
       ].includes(route.method);
       const hasManage = permissions.includes("platform.companies.manage");
       if (mutating !== hasManage) wrong.push(`${route.controller}.${route.method} (${method})`);

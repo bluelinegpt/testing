@@ -6,6 +6,7 @@ import { type Kysely, sql } from "kysely";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import type { AccountingEventType } from "./accounting.constants.js";
+import { isAccountingCaptureEnabled, wasAccountingEnabledAt } from "./accounting-capture.js";
 
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
@@ -31,12 +32,22 @@ export class GeneralExpenseAccountingEventWriter {
       readonly description: string;
       readonly eventType: AccountingEventType;
       readonly metadata: Readonly<Record<string, unknown>>;
-      readonly reversalOfEventId?: string;
+      /**
+       * The original Event a reversal points at. `null` means the original
+       * was recorded while GL Accounting was OFF (see `originalEventId`):
+       * there is nothing to reverse in the ledger, so no Event is written.
+       */
+      readonly reversalOfEventId?: string | null;
       readonly sourceEntityId: string;
       readonly sourceEntityType: "general_expense" | "general_expense_payment";
       readonly sourceReference: string;
     },
-  ): Promise<string> {
+  ): Promise<string | null> {
+    // GL Accounting OFF: the operational record stands on its own and no
+    // Event is captured -- the same gate, and the same per-Company lock, the
+    // operational capture triggers use. ON: unchanged below.
+    if (input.reversalOfEventId === null) return null;
+    if (!(await isAccountingCaptureEnabled(database, input.companyId))) return null;
     const identity = {
       accountingDate: input.accountingDate,
       eventType: input.eventType,
@@ -100,7 +111,7 @@ export class GeneralExpenseAccountingEventWriter {
       readonly sourceEntityId: string;
       readonly sourceEntityType: "general_expense" | "general_expense_payment";
     },
-  ): Promise<string> {
+  ): Promise<string | null> {
     const result = await sql<{ id: string }>`
       select id from accounting_events
        where company_id=${input.companyId}::uuid
@@ -111,13 +122,34 @@ export class GeneralExpenseAccountingEventWriter {
        for share
     `.execute(database);
     const id = result.rows[0]?.id;
-    if (id === undefined) {
-      throw new ApplicationException(
-        "accounting_general_expense_original_event_missing",
-        "The original General Expense Accounting Event was not found",
-        HttpStatus.CONFLICT,
-      );
+    if (id !== undefined) return id;
+    // No original Event. That is only an accounting failure if the original
+    // was recorded while GL Accounting was ON. Recorded while OFF -- or being
+    // reversed while OFF -- it is a valid operational record with nothing in
+    // the ledger to reverse, so the caller writes no reversal Event.
+    if (!(await isAccountingCaptureEnabled(database, input.companyId))) return null;
+    const recorded = await sql<{ recordedAt: string | null }>`
+      select ${
+        input.sourceEntityType === "general_expense" ? sql`approved_at` : sql`confirmed_at`
+      }::text as "recordedAt"
+        from ${
+          input.sourceEntityType === "general_expense"
+            ? sql`general_expenses`
+            : sql`general_expense_payments`
+        }
+       where id=${input.sourceEntityId}::uuid and company_id=${input.companyId}::uuid
+    `.execute(database);
+    const recordedAt = recorded.rows[0]?.recordedAt ?? null;
+    if (
+      recordedAt !== null &&
+      !(await wasAccountingEnabledAt(database, input.companyId, recordedAt))
+    ) {
+      return null;
     }
-    return id;
+    throw new ApplicationException(
+      "accounting_general_expense_original_event_missing",
+      "The original General Expense Accounting Event was not found",
+      HttpStatus.CONFLICT,
+    );
   }
 }

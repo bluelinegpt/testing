@@ -626,7 +626,7 @@ describe.skipIf(!runDatabaseTests)("reset execution engine against a real databa
     }
   }, 120_000);
 
-  it("lists a previously reset disabled employee identity with the exact history retention reason", async () => {
+  it("previews only Mahmoud's previously reset disabled identity in a read-only transaction", async () => {
     const client = await pool.connect();
     await client.query("begin");
     try {
@@ -634,10 +634,10 @@ describe.skipIf(!runDatabaseTests)("reset execution engine against a real databa
       const beta = await seedCompany(client, "PRIOR-RESET-OTHER");
       await client.query("set constraints all immediate");
       const employeeId = randomUUID();
-      const username = `9715${alpha.company.slice(0, 6)}001`;
+      const username = "971521937766";
       const accountId = randomUUID();
       await client.query(
-        "insert into employees (id, company_id, employee_number, name_en, mobile_number) values ($1,$2,'EMP-000015','Mohamed',$3)",
+        "insert into employees (id, company_id, employee_number, name_en, mobile_number) values ($1,$2,'EMP-000015','Mahmoud',$3)",
         [employeeId, alpha.company, username],
       );
       await client.query(
@@ -656,10 +656,11 @@ describe.skipIf(!runDatabaseTests)("reset execution engine against a real databa
         [alpha.company, alpha.adminAccount, JSON.stringify({ retainedIdentities: [{ accountId, reason: "preserved_history", references: [{ table: "audit_events", column: "actor_account_id", rows: 1, onDelete: "RESTRICT" }] }] }), `prior-reset-${alpha.company}`],
       );
 
+      await client.query("set transaction read only");
       const plan = await getResetCompanyUserPlan(client, alpha.company);
       const mohamed = plan.usersToRemove.find((user) => user.accountId === accountId);
       expect(mohamed).toMatchObject({
-        displayName: "Mohamed",
+        displayName: "Mahmoud",
         status: "disabled",
         retentionReason: expect.stringContaining("audit_events.actor_account_id"),
         retentionReferences: [{ table: "audit_events", column: "actor_account_id", rows: 1, onDelete: "RESTRICT" }],

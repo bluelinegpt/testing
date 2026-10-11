@@ -9,6 +9,7 @@ import type { DatabaseSchema } from "../infrastructure/database/database.types.j
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import type { AccountingEventType, CashBankMovementType } from "./accounting.constants.js";
+import { isAccountingCaptureEnabled, wasAccountingEnabledAt } from "./accounting-capture.js";
 import { AccountingOperationSupport } from "./accounting-operation.support.js";
 import { BalanceEnforcementCoordinator } from "./balance-enforcement.coordinator.js";
 import type { BalanceEnforcementResult } from "./balance-enforcement.coordinator.js";
@@ -92,7 +93,7 @@ export class CashBankManagementService {
              c.effective_to::text as "effectiveTo",c.description,
              c.is_active as "isActive",c.version::text
         from company_cash_accounts c
-        join chart_of_accounts a on a.id=c.linked_gl_account_id and a.company_id=c.company_id
+        left join chart_of_accounts a on a.id=c.linked_gl_account_id and a.company_id=c.company_id
        where c.company_id=${companyId}::uuid and (${activeOnly}::boolean=false or c.is_active)
        order by c.is_active desc,c.cash_account_code
     `.execute(this.database);
@@ -146,7 +147,7 @@ export class CashBankManagementService {
       });
       if (replay.replayResponse !== undefined) return replay.replayResponse;
       const { actorId, companyId } = this.support.context();
-      await this.assertLinkedGl(transaction, input.linkedGlAccountId, "cash", input.effectiveFrom);
+      await this.assertCashAccountGl(transaction, input.linkedGlAccountId, input.effectiveFrom);
       const inserted = await sql<{ id: string }>`
         insert into company_cash_accounts(
           company_id,cash_account_code,cash_account_name,cash_account_name_ar,
@@ -155,7 +156,7 @@ export class CashBankManagementService {
         ) values(
           ${companyId}::uuid,${input.code.trim()},${input.name.trim()},
           ${nonempty(input.nameAr)},${input.type},${input.branchId ?? null}::uuid,
-          ${nonempty(input.locationOrCustodian)},${input.linkedGlAccountId}::uuid,
+          ${nonempty(input.locationOrCustodian)},${input.linkedGlAccountId ?? null}::uuid,
           ${input.effectiveFrom}::date,${input.effectiveTo ?? null}::date,
           ${nonempty(input.description)},${actorId}::uuid
         ) returning id
@@ -187,13 +188,13 @@ export class CashBankManagementService {
       });
       if (replay.replayResponse !== undefined) return replay.replayResponse;
       const { actorId, companyId } = this.support.context();
-      await this.assertLinkedGl(transaction, input.linkedGlAccountId, "cash", input.effectiveFrom);
+      await this.assertCashAccountGl(transaction, input.linkedGlAccountId, input.effectiveFrom);
       const updated = await sql<{ id: string; version: string }>`
         update company_cash_accounts set
           cash_account_name=${input.name.trim()},cash_account_name_ar=${nonempty(input.nameAr)},
           cash_account_type=${input.type},branch_id=${input.branchId ?? null}::uuid,
           location_or_custodian=${nonempty(input.locationOrCustodian)},
-          linked_gl_account_id=${input.linkedGlAccountId}::uuid,
+          linked_gl_account_id=${input.linkedGlAccountId ?? null}::uuid,
           effective_from=${input.effectiveFrom}::date,effective_to=${input.effectiveTo ?? null}::date,
           description=${nonempty(input.description)},updated_by_account_id=${actorId}::uuid,
           updated_at=now(),version=version+1
@@ -226,7 +227,7 @@ export class CashBankManagementService {
       });
       if (replay.replayResponse !== undefined) return replay.replayResponse;
       const { actorId, companyId } = this.support.context();
-      await this.assertLinkedGl(transaction, input.linkedGlAccountId, "bank", input.effectiveFrom);
+      await this.assertBankAccountGl(transaction, input.linkedGlAccountId, input.effectiveFrom);
       const inserted = await sql<{ id: string }>`
         insert into company_bank_accounts(
           company_id,bank_account_code,account_name,bank_name,branch_name,
@@ -240,7 +241,7 @@ export class CashBankManagementService {
           ${input.accountNumber ? `***${input.accountNumber.slice(-4)}` : null},
           ${input.iban?.trim().toUpperCase() || null},
           ${input.swiftCode?.trim().toUpperCase() || null},${input.accountType},
-          ${input.linkedGlAccountId}::uuid,${input.effectiveFrom}::date,
+          ${input.linkedGlAccountId ?? null}::uuid,${input.effectiveFrom}::date,
           ${input.effectiveTo ?? null}::date,${nonempty(input.description)},
           ${actorId}::uuid
         ) returning id
@@ -272,7 +273,7 @@ export class CashBankManagementService {
       });
       if (replay.replayResponse !== undefined) return replay.replayResponse;
       const { actorId, companyId } = this.support.context();
-      await this.assertLinkedGl(transaction, input.linkedGlAccountId, "bank", input.effectiveFrom);
+      await this.assertBankAccountGl(transaction, input.linkedGlAccountId, input.effectiveFrom);
       const hasAccountNumber = Object.prototype.hasOwnProperty.call(input, "accountNumber");
       const accountNumber = nonempty(input.accountNumber);
       const accountNumberMasked = accountNumber === null ? null : `***${accountNumber.slice(-4)}`;
@@ -286,7 +287,7 @@ export class CashBankManagementService {
           account_number_masked=case when ${hasAccountNumber} then ${accountNumberMasked} else account_number_masked end,
           iban=case when ${hasIban} then ${iban} else iban end,
           swift_code=${input.swiftCode?.trim().toUpperCase() || null},
-          account_type=${input.accountType},linked_gl_account_id=${input.linkedGlAccountId}::uuid,
+          account_type=${input.accountType},linked_gl_account_id=${input.linkedGlAccountId ?? null}::uuid,
           effective_from=${input.effectiveFrom}::date,effective_to=${input.effectiveTo ?? null}::date,
           description=${nonempty(input.description)},updated_by_account_id=${actorId}::uuid,
           updated_at=now(),version=version+1
@@ -548,7 +549,14 @@ export class CashBankManagementService {
         this.conflict("accounting_cash_bank_movement_not_confirmable");
       await this.enforceConfirmationSegregation(transaction, movement.createdBy);
       await this.lockFinancialAccounts(transaction, movement);
-      const issues = await this.validationIssues(transaction, movement);
+      // GL Accounting ON: unchanged -- open period, classification mapping and
+      // an Accounting Event are all required. OFF: the Movement is an
+      // operational cash record only; none of those apply.
+      const ledger = await isAccountingCaptureEnabled(
+        transaction,
+        this.support.context().companyId,
+      );
+      const issues = await this.validationIssues(transaction, movement, ledger);
       if (issues.length > 0) {
         throw new ApplicationException(
           "accounting_cash_bank_movement_invalid",
@@ -573,12 +581,9 @@ export class CashBankManagementService {
         balanceOverrideReason,
       );
       const { actorId, companyId } = this.support.context();
-      const eventId = await this.enqueueEvent(
-        transaction,
-        movement,
-        actorId,
-        idempotencyKey ?? movementId,
-      );
+      const eventId = ledger
+        ? await this.enqueueEvent(transaction, movement, actorId, idempotencyKey ?? movementId)
+        : null;
       const snapshot = await this.movementSnapshot(transaction, movement);
       await sql`
         update cash_bank_movements set status='confirmed',
@@ -686,7 +691,11 @@ export class CashBankManagementService {
       if (original.status !== "confirmed")
         this.conflict("accounting_cash_bank_movement_not_reversible");
       await this.enforceMovementReversalSegregation(transaction, original);
-      await this.assertOpenPeriod(transaction, reversalDate);
+      const ledger = await isAccountingCaptureEnabled(
+        transaction,
+        this.support.context().companyId,
+      );
+      if (ledger) await this.assertOpenPeriod(transaction, reversalDate);
       await this.lockFinancialAccounts(transaction, original);
       const { actorId, companyId } = this.support.context();
       const reversed = this.reverseShape(original);
@@ -708,20 +717,12 @@ export class CashBankManagementService {
         status: "confirmed",
       };
       await this.assertSourceBalance(transaction, reversalRecord);
-      const originalEvent = await sql<{ id: string }>`
-        select id from accounting_events
-         where id=${await this.originalEventId(transaction, original)}::uuid
-           and company_id=${companyId}::uuid for update
-      `.execute(transaction);
-      if (originalEvent.rows[0] === undefined)
-        this.conflict("accounting_cash_bank_original_event_missing");
-      const reversalEventId = await this.enqueueEvent(
-        transaction,
-        reversalRecord,
-        actorId,
-        idempotencyKey ?? reversalId,
-        originalEvent.rows[0]!.id,
-      );
+      const reversalEventId = ledger
+        ? await this.reversalEvent(transaction, original, reversalRecord, actorId, {
+            correlationId: idempotencyKey ?? reversalId,
+            companyId,
+          })
+        : null;
       await sql`
         insert into cash_bank_movements(
           id,company_id,movement_number,movement_type,movement_date,accounting_date,
@@ -796,6 +797,45 @@ export class CashBankManagementService {
       });
       return response;
     });
+  }
+
+  /**
+   * A Cash account's GL link: required, and validated as before, whenever GL
+   * Accounting is ON. With Accounting OFF a drawer may exist without one
+   * (the database itself refuses a GL-less drawer for an ON Company); a GL
+   * account that IS supplied is still validated.
+   */
+  private async assertCashAccountGl(
+    database: Kysely<DatabaseSchema>,
+    accountId: string | undefined,
+    effectiveDate: string,
+  ) {
+    if (accountId !== undefined) {
+      await this.assertLinkedGl(database, accountId, "cash", effectiveDate);
+      return;
+    }
+    if (await isAccountingCaptureEnabled(database, this.support.context().companyId)) {
+      this.conflict("accounting_cash_bank_linked_gl_invalid");
+    }
+  }
+
+  /**
+   * The bank-account twin of `assertCashAccountGl`: a GL account, when given,
+   * must be a valid bank posting account; none at all is accepted only while
+   * the Company's GL Accounting is OFF.
+   */
+  private async assertBankAccountGl(
+    database: Kysely<DatabaseSchema>,
+    accountId: string | undefined,
+    effectiveDate: string,
+  ) {
+    if (accountId !== undefined) {
+      await this.assertLinkedGl(database, accountId, "bank", effectiveDate);
+      return;
+    }
+    if (await isAccountingCaptureEnabled(database, this.support.context().companyId)) {
+      this.conflict("accounting_cash_bank_linked_gl_invalid");
+    }
   }
 
   private async assertLinkedGl(
@@ -935,19 +975,27 @@ export class CashBankManagementService {
     }
   }
 
-  private async validationIssues(database: Kysely<DatabaseSchema>, movement: MovementRecord) {
+  private async validationIssues(
+    database: Kysely<DatabaseSchema>,
+    movement: MovementRecord,
+    ledger = true,
+  ) {
     const { companyId } = this.support.context();
     const issues: string[] = [];
     if (movement.status !== "draft") issues.push("movement_not_draft");
     if (!this.validMovementStructure(movement)) issues.push("invalid_source_destination_structure");
-    const period = await sql<{ count: string }>`
-      select count(*)::text as count from accounting_periods p
-      join fiscal_years y on y.id=p.fiscal_year_id and y.company_id=p.company_id
-      where p.company_id=${companyId}::uuid
-       and ${movement.accountingDate}::date between p.period_start and p.period_end
-       and p.status in('open','reopened') and y.status in('open','reopened')
-    `.execute(database);
-    if (period.rows[0]?.count !== "1") issues.push("period_unavailable");
+    // The open fiscal period and the classification mapping exist for the
+    // Journal. With GL Accounting OFF (`ledger` false) there is none.
+    if (ledger) {
+      const period = await sql<{ count: string }>`
+        select count(*)::text as count from accounting_periods p
+        join fiscal_years y on y.id=p.fiscal_year_id and y.company_id=p.company_id
+        where p.company_id=${companyId}::uuid
+         and ${movement.accountingDate}::date between p.period_start and p.period_end
+         and p.status in('open','reopened') and y.status in('open','reopened')
+      `.execute(database);
+      if (period.rows[0]?.count !== "1") issues.push("period_unavailable");
+    }
     const accounts = await sql<{ invalid: string }>`
       select count(*)::text as invalid from (
         select id,is_active,effective_from,effective_to,currency from company_cash_accounts
@@ -967,7 +1015,11 @@ export class CashBankManagementService {
     `.execute(database);
     if (accounts.rows[0]?.invalid !== "0")
       issues.push("account_inactive_or_outside_effective_dates");
-    if (!movement.movementType.includes("_to_") && movement.movementType !== "opening_balance") {
+    if (
+      ledger &&
+      !movement.movementType.includes("_to_") &&
+      movement.movementType !== "opening_balance"
+    ) {
       const mapping = await sql<{ count: string }>`
         select count(*)::text as count from account_mappings
          where company_id=${companyId}::uuid and is_active
@@ -1215,6 +1267,54 @@ export class CashBankManagementService {
       where m.id=${movement.id}::uuid and m.company_id=${companyId}::uuid
     `.execute(database);
     return result.rows[0] ?? {};
+  }
+
+  /**
+   * The reversal Event, with GL Accounting ON. Unchanged for a Movement that
+   * was confirmed while Accounting was ON: its original Event must exist.
+   * A Movement confirmed while Accounting was OFF never had one, so there is
+   * nothing in the ledger to reverse and no reversal Event is written --
+   * that is not an accounting failure.
+   */
+  private async reversalEvent(
+    database: Kysely<DatabaseSchema>,
+    original: MovementRecord,
+    reversalRecord: MovementRecord,
+    actorId: string,
+    options: { companyId: string; correlationId: string },
+  ): Promise<string | null> {
+    const confirmed = await sql<{ confirmedAt: string | null; hasEvent: boolean }>`
+      select m.confirmed_at::text as "confirmedAt",
+             exists(select 1 from accounting_events e
+                     where e.company_id=m.company_id and e.source_entity_type='cash_bank_movement'
+                       and e.source_entity_id=m.id
+                       and e.event_type<>'cash_bank_movement_reversed') as "hasEvent"
+        from cash_bank_movements m
+       where m.id=${original.id}::uuid and m.company_id=${options.companyId}::uuid
+    `.execute(database);
+    const state = confirmed.rows[0];
+    if (
+      state !== undefined &&
+      !state.hasEvent &&
+      state.confirmedAt !== null &&
+      !(await wasAccountingEnabledAt(database, options.companyId, state.confirmedAt))
+    ) {
+      return null;
+    }
+    const originalEvent = await sql<{ id: string }>`
+      select id from accounting_events
+       where id=${await this.originalEventId(database, original)}::uuid
+         and company_id=${options.companyId}::uuid for update
+    `.execute(database);
+    if (originalEvent.rows[0] === undefined)
+      this.conflict("accounting_cash_bank_original_event_missing");
+    return this.enqueueEvent(
+      database,
+      reversalRecord,
+      actorId,
+      options.correlationId,
+      originalEvent.rows[0]!.id,
+    );
   }
 
   private async originalEventId(database: Kysely<DatabaseSchema>, movement: MovementRecord) {

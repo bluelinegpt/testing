@@ -101,6 +101,22 @@ export const PLATFORM_ANNOUNCEMENTS_MANAGE = "platform.announcements.manage";
 // switch. Seeded by 20261010200200. Reading follows platform.companies.read.
 export const PLATFORM_COMPANY_ROUTE_OPTIMIZATION_MANAGE =
   "platform.company_route_optimization.manage";
+// Switch TawseelHub GL Accounting ON or OFF for ONE selected Company. Seeded by
+// its own migration (20260983000000) and enforced by
+// PlatformCompanyAccountingController; the readiness and unresolved-work
+// checks live in CompanyAccountingModeService and cannot be bypassed by
+// holding this code. Company roles can never hold it (the `platform.` prefix).
+export const PLATFORM_COMPANIES_ACCOUNTING_MODE_MANAGE =
+  "platform.companies.accounting_mode.manage";
+// Read-only Repair Center of ONE selected Company (Company Order Health and
+// Verify First drill-down). Seeded by 20260985000000 onto the Platform super
+// administrator role only. Deliberately READ: no repair, reset, reversal or
+// reprocess permission is seeded until that behaviour exists.
+export const PLATFORM_REPAIR_CENTER_READ = "platform.companies.repair_center.read";
+// Repair Center EXECUTION of a certified, READY repair (Phase 2 Prompt 3).
+// Separate from READ: reading health / previews never grants execution.
+// Seeded by 20260986000000 onto the Platform super administrator role only.
+export const PLATFORM_REPAIR_CENTER_EXECUTE = "platform.companies.repair_center.execute";
 
 /**
  * The Phase 1 permission set, in the order the seed migration writes them.
@@ -203,6 +219,18 @@ export const PLATFORM_PERMISSIONS: readonly { code: string; description: string 
   {
     code: PLATFORM_COMPANY_ROUTE_OPTIMIZATION_MANAGE,
     description: "Enable and configure Driver route optimization for a Company",
+  },
+  {
+    code: PLATFORM_COMPANIES_ACCOUNTING_MODE_MANAGE,
+    description: "Enable or disable GL Accounting for a selected Company",
+  },
+  {
+    code: PLATFORM_REPAIR_CENTER_READ,
+    description: "View a selected Company's Repair Center health checks (read-only)",
+  },
+  {
+    code: PLATFORM_REPAIR_CENTER_EXECUTE,
+    description: "Execute a certified, READY Repair Center repair for a selected Company",
   },
 ];
 

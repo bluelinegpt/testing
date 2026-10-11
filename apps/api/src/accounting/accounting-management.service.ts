@@ -22,6 +22,65 @@ function rethrowAccounting(error: unknown): never {
   return mapAccountingDatabaseError(error);
 }
 
+/**
+ * Manual Accounting readiness for ONE Company, named explicitly by UUID.
+ *
+ * This is the exact check `AccountingManagementService.readiness` has always
+ * run, lifted out unchanged so the Platform Accounting Mode operation can
+ * evaluate a target Company without a Company session. It reads only; it has
+ * no permission check of its own -- every caller authorizes first.
+ */
+export async function evaluateManualAccountingReadiness(
+  db: Kysely<DatabaseSchema>,
+  companyId: string,
+) {
+  const result = await sql<{
+    activePostingAccounts: number;
+    configurationExists: boolean;
+    currencyValid: boolean;
+    invalidSystemAssignments: number;
+    openPeriods: number;
+    validFiscalYears: number;
+  }>`
+    select
+      exists(select 1 from accounting_configurations where company_id=${companyId}::uuid)
+        as "configurationExists",
+      exists(select 1 from accounting_configurations
+              where company_id=${companyId}::uuid and base_currency='AED')
+        as "currencyValid",
+      (select count(*)::int from fiscal_years
+        where company_id=${companyId}::uuid and status in ('open','reopened'))
+        as "validFiscalYears",
+      (select count(*)::int from accounting_periods
+        where company_id=${companyId}::uuid and status in ('open','reopened'))
+        as "openPeriods",
+      (select count(*)::int from chart_of_accounts
+        where company_id=${companyId}::uuid and is_active and is_posting_account)
+        as "activePostingAccounts",
+      (select count(*)::int
+         from chart_of_accounts a
+        where a.company_id=${companyId}::uuid and a.is_system_account
+          and (not a.is_active or not a.is_posting_account))
+        as "invalidSystemAssignments"
+  `.execute(db);
+  const state = result.rows[0]!;
+  const missingRequirements: string[] = [];
+  if (!state.configurationExists) missingRequirements.push("accounting_configuration");
+  if (!state.currencyValid) missingRequirements.push("aed_configuration");
+  if (state.validFiscalYears < 1) missingRequirements.push("open_fiscal_year");
+  if (state.openPeriods < 1) missingRequirements.push("open_fiscal_period");
+  if (state.activePostingAccounts < 2) missingRequirements.push("two_posting_accounts");
+  if (state.invalidSystemAssignments > 0) missingRequirements.push("valid_system_accounts");
+  return {
+    ...state,
+    automaticPostingEnabled: false,
+    missingRequirements,
+    ready: missingRequirements.length === 0,
+    status: missingRequirements.length === 0 ? "ready" : "not_ready",
+    warnings: ["Automatic operational posting remains disabled"],
+  };
+}
+
 @Injectable()
 export class AccountingManagementService {
   public constructor(
@@ -281,6 +340,27 @@ export class AccountingManagementService {
         if (reservation.replayResponse !== undefined) return reservation.replayResponse;
         const { actorId, companyId } = this.support.context();
         await this.lockAccountConfigurationScope(transaction, companyId);
+        if (input.accountingEnabled === false) {
+          // Switching GL Accounting OFF is no longer a side effect of a
+          // generic configuration save. It must go through the controlled
+          // operation (`CompanyAccountingModeService.disable`), which refuses
+          // while Accounting Events are pending, failed or in flight -- this
+          // path used to flip the flag with none of those checks. Sending
+          // `false` for a Company that is already OFF stays a harmless no-op.
+          const current = await sql<{ accountingEnabled: boolean }>`
+            select accounting_enabled as "accountingEnabled"
+              from accounting_configurations
+             where company_id = ${companyId}::uuid
+             for update
+          `.execute(transaction);
+          if (current.rows[0]?.accountingEnabled === true) {
+            throw new ApplicationException(
+              "accounting_disable_requires_controlled_operation",
+              "Accounting can only be disabled through the controlled Accounting Mode operation",
+              HttpStatus.CONFLICT,
+            );
+          }
+        }
         const payload = JSON.stringify(input);
         const result = await sql<Record<string, unknown>>`
           update accounting_configurations c
@@ -406,53 +486,7 @@ export class AccountingManagementService {
 
   public async readiness(database?: Kysely<DatabaseSchema>) {
     const { companyId } = this.support.context();
-    const work = async (db: Kysely<DatabaseSchema>) => {
-      const result = await sql<{
-        activePostingAccounts: number;
-        configurationExists: boolean;
-        currencyValid: boolean;
-        invalidSystemAssignments: number;
-        openPeriods: number;
-        validFiscalYears: number;
-      }>`
-        select
-          exists(select 1 from accounting_configurations where company_id=${companyId}::uuid)
-            as "configurationExists",
-          exists(select 1 from accounting_configurations
-                  where company_id=${companyId}::uuid and base_currency='AED')
-            as "currencyValid",
-          (select count(*)::int from fiscal_years
-            where company_id=${companyId}::uuid and status in ('open','reopened'))
-            as "validFiscalYears",
-          (select count(*)::int from accounting_periods
-            where company_id=${companyId}::uuid and status in ('open','reopened'))
-            as "openPeriods",
-          (select count(*)::int from chart_of_accounts
-            where company_id=${companyId}::uuid and is_active and is_posting_account)
-            as "activePostingAccounts",
-          (select count(*)::int
-             from chart_of_accounts a
-            where a.company_id=${companyId}::uuid and a.is_system_account
-              and (not a.is_active or not a.is_posting_account))
-            as "invalidSystemAssignments"
-      `.execute(db);
-      const state = result.rows[0]!;
-      const missingRequirements: string[] = [];
-      if (!state.configurationExists) missingRequirements.push("accounting_configuration");
-      if (!state.currencyValid) missingRequirements.push("aed_configuration");
-      if (state.validFiscalYears < 1) missingRequirements.push("open_fiscal_year");
-      if (state.openPeriods < 1) missingRequirements.push("open_fiscal_period");
-      if (state.activePostingAccounts < 2) missingRequirements.push("two_posting_accounts");
-      if (state.invalidSystemAssignments > 0) missingRequirements.push("valid_system_accounts");
-      return {
-        ...state,
-        automaticPostingEnabled: false,
-        missingRequirements,
-        ready: missingRequirements.length === 0,
-        status: missingRequirements.length === 0 ? "ready" : "not_ready",
-        warnings: ["Automatic operational posting remains disabled"],
-      };
-    };
+    const work = (db: Kysely<DatabaseSchema>) => evaluateManualAccountingReadiness(db, companyId);
     if (database !== undefined) return work(database);
     return this.transactions.execute(work);
   }

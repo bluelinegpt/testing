@@ -15,6 +15,7 @@ import type {
   FundingAccountDeduction,
 } from "./balance-enforcement.coordinator.js";
 import { CashBankManagementService } from "./cash-bank-management.service.js";
+import { isAccountingCaptureEnabled } from "./accounting-capture.js";
 import { GeneralExpenseAccountingEventWriter } from "./general-expense-accounting-event.writer.js";
 import type {
   CreateGeneralExpensePaymentDto,
@@ -351,8 +352,12 @@ export class GeneralExpensePaymentService {
       `.execute(transaction);
       const paid = new Decimal(expense.paidAmount).minus(payment.amount);
       if (paid.isNegative()) this.conflict("accounting_general_expense_payment_balance_conflict");
-      const approvedAmount = paid.plus(expense.outstandingAmount);
-      const outstanding = approvedAmount.minus(paid);
+      // The reversed amount becomes outstanding again (the mirror of payment,
+      // which subtracts it). Previously `approved = paid AFTER reversal +
+      // outstanding` understated the approved amount by the reversed payment,
+      // so reversing the payment of a fully paid Expense always violated
+      // general_expenses_amounts_check (outstanding = approved - paid).
+      const outstanding = new Decimal(expense.outstandingAmount).plus(payment.amount);
       const expenseStatus = paid.isZero() ? "approved" : "partially_paid";
       await sql`
         update general_expenses
@@ -427,7 +432,8 @@ export class GeneralExpensePaymentService {
     database: Kysely<DatabaseSchema>,
     options: {
       readonly accountingDate: string;
-      readonly accountingEventId: string;
+      /** Null with GL Accounting OFF: no Event owns the payment. */
+      readonly accountingEventId: string | null;
       readonly paymentDate: string;
       readonly paymentNumber: string;
       readonly paymentRows: CreateGeneralExpensePaymentDto["rows"];
@@ -474,6 +480,7 @@ export class GeneralExpensePaymentService {
           correlation_id,
           idempotency_identity,
           accounting_event_id,
+          generated_by_source_type,
           confirmed_by_account_id,
           confirmed_at,
           created_by_account_id,
@@ -498,6 +505,9 @@ export class GeneralExpensePaymentService {
           ${movementId},
           ${`general_expense_payment:${options.paymentNumber}:${rowIndex + 1}`},
           ${options.accountingEventId}::uuid,
+          -- GL Accounting OFF: no owning Event, so the trail is marked as
+          -- generated (migration 20260984000000). ON rows are unchanged.
+          ${options.accountingEventId === null ? "general_expense_payment" : null},
           ${actorId}::uuid,
           now(),
           ${actorId}::uuid,
@@ -533,6 +543,10 @@ export class GeneralExpensePaymentService {
       // workflow that funds a payment.
       const funding = await this.fundingAccounts.resolve(row.companyCashAccountId!, "cash");
       if (funding.linkedGlAccountId === null) {
+        // A drawer without a GL account is valid only while GL Accounting is
+        // OFF (the database refuses one for an ON Company). The row then
+        // records the drawer alone.
+        if (!(await isAccountingCaptureEnabled(database, companyId))) return null;
         this.conflict("accounting_general_expense_cash_account_invalid");
       }
       // The GL account behind the drawer must still be postable today: the same

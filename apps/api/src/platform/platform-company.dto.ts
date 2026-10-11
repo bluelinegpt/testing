@@ -177,6 +177,30 @@ export class CreateCompanyDto {
 }
 
 /**
+ * Apply an approved setup template to a draft Company created without one.
+ * Chosen by CODE and VERSION from the server's registry, exactly as at
+ * creation; there is no field for template content.
+ */
+export class ApplySetupTemplateDto {
+  @Transform(trim)
+  @IsString()
+  @Length(1, 64)
+  public accountingTemplateCode!: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  public accountingTemplateVersion?: number;
+
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: "businessDayStart must be HH:MM" })
+  public businessDayStart?: string;
+}
+
+/**
  * Profile edit.
  *
  * `code`, `subdomain` and `environment` are absent by design. Each is either a

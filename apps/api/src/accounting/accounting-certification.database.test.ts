@@ -23,11 +23,17 @@ import { AccountingReportService } from "./accounting-report.service.js";
 import { AccountingDashboardService } from "./accounting-dashboard.service.js";
 import { AccountingReprocessPrecheckService } from "./accounting-reprocess-precheck.service.js";
 import { CashBankQueryService } from "./cash-bank-query.service.js";
+import { CashBankManagementService } from "./cash-bank-management.service.js";
+import { OperationalJournalPostingService } from "./operational-journal-posting.service.js";
+import { OperationalSourceLoader } from "./operational-source.loader.js";
+import { BalanceControlService } from "./balance-control.service.js";
+import { BalanceEnforcementCoordinator } from "./balance-enforcement.coordinator.js";
+import { FundingAccountLockService } from "./funding-account-lock.service.js";
+import { FundingAccountBalanceService } from "./funding-account-balance.service.js";
 import { DailyCashActivityService } from "./daily-cash-activity.service.js";
 import { GeneralExpenseQueryService } from "./general-expense-query.service.js";
 import { PaymentPositionService } from "./payment-position.service.js";
 import { BusinessDayService } from "../company-configuration/business-day.service.js";
-import { OperationalSourceLoader } from "./operational-source.loader.js";
 
 /**
  * Runtime certification for the four features Prompt 14C found had no
@@ -70,6 +76,7 @@ interface Fixture {
   readonly actorId: string;
   readonly areaId: string;
   readonly cashGl: string;
+  readonly cashAccountId: string;
   readonly companyId: string;
   readonly deliveredOrderId: string;
   readonly driverId: string;
@@ -117,6 +124,7 @@ async function seed(transaction: Transaction<DatabaseSchema>): Promise<Fixture> 
   const actorId = randomUUID();
   const otherActorId = randomUUID();
   const cashGl = randomUUID();
+  const cashAccountId = randomUUID();
   const revenueGl = randomUUID();
   const payableGl = randomUUID();
   const receivableGl = randomUUID();
@@ -140,7 +148,7 @@ async function seed(transaction: Transaction<DatabaseSchema>): Promise<Fixture> 
     await sql`insert into companies(id,code,subdomain,name_en,status,activated_at)
       values(${id}::uuid,${code},${label},'Certification Test','active',now())`.execute(
       transaction,
-    );
+  );
   }
   await sql`insert into accounts(id,company_id,account_kind,username,password_hash) values
     (${actorId}::uuid,${companyId}::uuid,'company_user',${`cert.a.${actorId}`},'x'),
@@ -154,7 +162,7 @@ async function seed(transaction: Transaction<DatabaseSchema>): Promise<Fixture> 
   await sql`insert into accounting_configurations(
       company_id, accounting_enabled, automatic_posting_enabled, automatic_posting_areas,
       automatic_posting_enabled_by_account_id, automatic_posting_enabled_at
-    ) values(${companyId}::uuid, true, true, array['orders','outsourced_driver_fees'],
+    ) values(${companyId}::uuid, true, true, array['orders','outsourced_driver_fees','cash_bank_management'],
       ${actorId}::uuid, now())
     on conflict (company_id) do update set accounting_enabled=true`.execute(transaction);
 
@@ -169,6 +177,11 @@ async function seed(transaction: Transaction<DatabaseSchema>): Promise<Fixture> 
       (${vatGl}::uuid,${companyId}::uuid,'2100','Output VAT','liability','vat_payable','credit',true,true)`.execute(
     transaction,
   );
+  await sql`insert into company_cash_accounts(
+      id,company_id,cash_account_code,cash_account_name,cash_account_type,
+      linked_gl_account_id,effective_from,created_by_account_id
+    ) values(${cashAccountId}::uuid,${companyId}::uuid,'MAIN-CASH','Certification cash',
+      'main_cash',${cashGl}::uuid,'2020-01-01'::date,${actorId}::uuid)`.execute(transaction);
   // Account mappings for every component a delivered Order posts. The recovery
   // classifier asks the same effective-dated question the mapping resolver
   // asks, so an Order with no mappings is correctly `invalid_source_data` —
@@ -181,13 +194,18 @@ async function seed(transaction: Transaction<DatabaseSchema>): Promise<Fixture> 
     ["output_vat", receivableGl, vatGl],
     ["outsourced_driver_fee_expense", expenseGl, payableGl],
     ["outsourced_driver_payable", expenseGl, payableGl],
-  ] as const) {
+    ] as const) {
     await sql`insert into account_mappings(
         company_id, mapping_key, debit_account_id, credit_account_id, payable_account_id,
         expense_account_id, vat_account_id, effective_from, is_active
       ) values(${companyId}::uuid, ${key}, ${debit}::uuid, ${credit}::uuid, ${credit}::uuid,
         ${debit}::uuid, ${credit}::uuid, '2020-01-01'::date, true)`.execute(transaction);
   }
+  await sql`insert into account_mappings(
+      company_id, mapping_key, debit_account_id, credit_account_id,
+      effective_from, is_active
+    ) values(${companyId}::uuid, 'cash_bank_deposit_owner_contribution', ${cashGl}::uuid,
+      ${revenueGl}::uuid, '2020-01-01'::date, true)`.execute(transaction);
 
   await sql`insert into fiscal_years(
       id,company_id,fiscal_year_code,name,start_date,end_date,status,created_by_account_id
@@ -257,6 +275,7 @@ async function seed(transaction: Transaction<DatabaseSchema>): Promise<Fixture> 
     actorId,
     areaId,
     cashGl,
+    cashAccountId,
     companyId,
     deliveredOrderId,
     driverId,
@@ -349,6 +368,24 @@ function buildServices(
   );
   const expenses = new GeneralExpenseQueryService(database, support);
   const cashBank = new CashBankQueryService(database, support, expenses);
+  const balanceControl = new BalanceControlService(database, manager, tenants, identities);
+  const balanceEnforcement = new BalanceEnforcementCoordinator(
+    new FundingAccountLockService(tenants),
+    new FundingAccountBalanceService(cashBank, tenants),
+    balanceControl,
+    tenants,
+  );
+  const cashBankManagement = new CashBankManagementService(
+    database,
+    manager,
+    support,
+    balanceEnforcement,
+  );
+  const journalPosting = new OperationalJournalPostingService(
+    new AccountMappingResolver(),
+    new OperationalSourceLoader(),
+    history,
+  );
   const positions = new PaymentPositionService(database, tenants);
   // The REAL Business Day service, not a stub: Daily Cash Activity resolves
   // its window through it on every call, and a stub would leave that path
@@ -367,6 +404,8 @@ function buildServices(
     batches,
     businessDays,
     cashBank,
+    cashBankManagement,
+    journalPosting,
     dailyCash,
     dashboard,
     identity,
@@ -381,8 +420,22 @@ function buildServices(
 async function inRolledBackTransaction(
   work: (transaction: Transaction<DatabaseSchema>) => Promise<void>,
 ): Promise<void> {
-  loadEnvironment({ path: resolve(process.cwd(), "../../.env") });
-  const pool = new Pool({ connectionString: configuration().database.url, max: 1 });
+  const databaseUrl = process.env.BLUELINE_DISABLE_DOTENV === "1"
+    ? process.env.DATABASE_URL
+    : (loadEnvironment({ path: resolve(process.cwd(), "../../.env") }), configuration().database.url);
+  if (!databaseUrl) {
+    throw new Error("DATABASE_URL is required when dotenv loading is disabled");
+  }
+  const parsedUrl = new URL(databaseUrl);
+  if (
+    process.env.BLUELINE_DISABLE_DOTENV === "1" &&
+    (parsedUrl.hostname !== "127.0.0.1" ||
+      parsedUrl.port !== "55432" ||
+      parsedUrl.pathname !== "/blueline_stage2_international_20260930")
+  ) {
+    throw new Error("Accounting certification tests require the verified disposable database");
+  }
+  const pool = new Pool({ connectionString: databaseUrl, max: 1 });
   const database = new Kysely<DatabaseSchema>({ dialect: new PostgresDialect({ pool }) });
   const marker = new Error("rollback accounting certification test");
   try {
@@ -1506,6 +1559,95 @@ describe.skipIf(!runDatabaseTests)("Accounting Dashboard and Profit and Loss agr
       const { dashboard } = buildServices(transaction, fixture.companyId, fixture.actorId);
       const summary = await dashboard.summary({});
       expect(Number(summary.sections.incomeAndExpense.expenses)).toBeLessThan(9999);
+    });
+  });
+});
+
+describe.skipIf(!runDatabaseTests)("Cash/Bank management public transaction path", () => {
+  it("creates and confirms an accounting-enabled cash inflow with persisted effects", async () => {
+    await inRolledBackTransaction(async (transaction) => {
+      const fixture = await seed(transaction);
+      const { cashBankManagement, journalPosting } = buildServices(
+        transaction,
+        fixture.companyId,
+        fixture.actorId,
+        ["accounting.view", "accounting.post", "accounting.manage", "accounting.approve"],
+      );
+      const before = await sql<{
+        movements: number; events: number; audits: number; journals: number; journalLines: number;
+        debit: string; credit: string; balance: string;
+      }>`
+        select
+          (select count(*)::int from cash_bank_movements where company_id=${fixture.companyId}::uuid) as movements,
+          (select count(*)::int from accounting_events where company_id=${fixture.companyId}::uuid) as events,
+          (select count(*)::int from audit_events where company_id=${fixture.companyId}::uuid) as audits,
+          (select count(*)::int from journal_entries where company_id=${fixture.companyId}::uuid) as journals,
+          (select count(*)::int from journal_lines where company_id=${fixture.companyId}::uuid) as "journalLines",
+          (select coalesce(sum(debit),0)::text from journal_lines where company_id=${fixture.companyId}::uuid) as debit,
+          (select coalesce(sum(credit),0)::text from journal_lines where company_id=${fixture.companyId}::uuid) as credit,
+          (select coalesce(sum(jl.debit-jl.credit),0)::text from journal_lines jl where jl.company_id=${fixture.companyId}::uuid and jl.account_id=${fixture.cashGl}::uuid) as balance
+      `.execute(transaction);
+      const key = `cert-cash-inflow-${randomUUID()}`;
+      const created = await cashBankManagement.createMovement({
+        movementType: "cash_deposit",
+        movementDate: "2026-01-10",
+        accountingDate: "2026-01-10",
+        destinationCashAccountId: fixture.cashAccountId,
+        amount: "25.00",
+        feeAmount: "0.00",
+        classificationMappingKey: "cash_bank_deposit_owner_contribution",
+        referenceNumber: key,
+        description: "Certification cash inflow",
+      }, key) as { readonly id: string; readonly status: string } | null;
+      expect(created).not.toBeNull();
+      expect(created!.status).toBe("draft");
+      const confirmed = await cashBankManagement.confirmMovement(
+        created!.id,
+        "Certification confirmation",
+        `${key}-confirm`,
+      ) as { readonly status: string } | null;
+      expect(confirmed).not.toBeNull();
+      expect(confirmed!.status).toBe("confirmed");
+      const event = await sql<{
+        id: string; companyId: string; eventType: string; eventVersion: number;
+        sourceEntityType: string; sourceEntityId: string; sourceReference: string;
+        effectiveAccountingDate: string; eventHash: string | null; correlationId: string;
+        actorId: string; operationalArea: string; reversalOfEventId: string | null;
+      }>`
+        select id,company_id as "companyId",event_type as "eventType",event_version as "eventVersion",
+               source_entity_type as "sourceEntityType",source_entity_id as "sourceEntityId",
+               source_reference as "sourceReference",effective_accounting_date::text as "effectiveAccountingDate",
+               event_hash as "eventHash",correlation_id as "correlationId",actor_id as "actorId",
+               operational_area as "operationalArea",reversal_of_event_id as "reversalOfEventId"
+          from accounting_events where source_entity_id=${created!.id}::uuid
+          order by created_at desc limit 1
+      `.execute(transaction);
+      expect(event.rows[0]).toBeDefined();
+      await journalPosting.process(
+        transaction,
+        event.rows[0]! as unknown as Parameters<typeof journalPosting.process>[1],
+      );
+      const after = await sql<{
+        movements: number; events: number; audits: number; journals: number; journalLines: number;
+        debit: string; credit: string; balance: string;
+      }>`
+        select
+          (select count(*)::int from cash_bank_movements where company_id=${fixture.companyId}::uuid) as movements,
+          (select count(*)::int from accounting_events where company_id=${fixture.companyId}::uuid) as events,
+          (select count(*)::int from audit_events where company_id=${fixture.companyId}::uuid) as audits,
+          (select count(*)::int from journal_entries where company_id=${fixture.companyId}::uuid) as journals,
+          (select count(*)::int from journal_lines where company_id=${fixture.companyId}::uuid) as "journalLines",
+          (select coalesce(sum(debit),0)::text from journal_lines where company_id=${fixture.companyId}::uuid) as debit,
+          (select coalesce(sum(credit),0)::text from journal_lines where company_id=${fixture.companyId}::uuid) as credit,
+          (select coalesce(sum(jl.debit-jl.credit),0)::text from journal_lines jl where jl.company_id=${fixture.companyId}::uuid and jl.account_id=${fixture.cashGl}::uuid) as balance
+      `.execute(transaction);
+      expect(Number(after.rows[0]!.movements)).toBe(Number(before.rows[0]!.movements) + 1);
+      expect(Number(after.rows[0]!.events)).toBe(Number(before.rows[0]!.events) + 1);
+      expect(Number(after.rows[0]!.audits)).toBeGreaterThan(Number(before.rows[0]!.audits));
+      expect(Number(after.rows[0]!.journals)).toBe(Number(before.rows[0]!.journals) + 1);
+      expect(Number(after.rows[0]!.journalLines)).toBe(Number(before.rows[0]!.journalLines) + 2);
+      expect(Number(after.rows[0]!.debit)).toBe(Number(after.rows[0]!.credit));
+      expect(Number(after.rows[0]!.balance) - Number(before.rows[0]!.balance)).toBe(25);
     });
   });
 });

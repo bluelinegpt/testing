@@ -290,6 +290,25 @@ export class AccountingTemplateImporter {
     const slots = template.accountingConfiguration.defaultAccountKeys;
 
     // -----------------------------------------------------------------
+    // GL ACCOUNTING IS NEVER SWITCHED ON BY AN IMPORT
+    // -----------------------------------------------------------------
+    //
+    // TawseelHub Accounting is optional per Company, and a NEW Company starts
+    // with it OFF. The template still lays down the complete setup (chart of
+    // accounts, mappings, fiscal calendar, default account slots), so the
+    // Company is ready the moment someone deliberately enables Accounting --
+    // through the readiness-checked Platform operation
+    // (`CompanyAccountingModeService.enable`) or the Company's own
+    // readiness-checked Manual Accounting activation.
+    //
+    // The approved template files still carry `accountingEnabled: true`; they
+    // are checksum-pinned in the registry and are deliberately not edited.
+    // That default is simply no longer honoured at creation time. This only
+    // affects Companies created from now on: no existing Company's
+    // configuration row is read or written by this code path.
+    const accountingEnabledAtCreation = false;
+
+    // -----------------------------------------------------------------
     // AUTOMATIC POSTING IS NEVER ENABLED BY AN IMPORT
     // -----------------------------------------------------------------
     //
@@ -345,7 +364,7 @@ export class AccountingTemplateImporter {
         fiscal_year_start_month, default_accounting_method, segregation_policy,
         automatic_posting_areas, created_by_account_id${extraColumns}
       ) values (
-        ${input.companyId}::uuid, ${defaults.accountingEnabled}, false,
+        ${input.companyId}::uuid, ${accountingEnabledAtCreation}, false,
         ${input.baseCurrency}, ${defaults.fiscalYearStartMonth},
         ${defaults.defaultAccountingMethod}, ${defaults.segregationPolicy},
         ${[...defaults.automaticPostingAreas]}::text[], ${platformCreator}${extraValues}

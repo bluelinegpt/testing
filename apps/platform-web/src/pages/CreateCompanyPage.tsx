@@ -312,9 +312,16 @@ export function CreateCompanyPage(): ReactElement {
             </select>
           </label>
           <small className="platform-muted" id="template-hint">
-            Applies the Chart of Accounts, mappings and configuration. No balances or transactions
+            Applies the Chart of Accounts, mappings and configuration, plus the default Cash and Bank
+            accounts, Areas and fiscal calendar. GL Accounting stays OFF. No balances or transactions
             are created.
           </small>
+          {form.template === "" ? (
+            <p className="platform-warning" data-testid="no-template-warning" role="status">
+              Without a setup template the Company has no Cash account, Areas or fiscal calendar and
+              cannot be activated until one is applied from its Configuration &amp; Accounting tab.
+            </p>
+          ) : null}
         </div>
 
         <h3>Contact</h3>

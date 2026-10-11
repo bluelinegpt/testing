@@ -2,12 +2,14 @@ import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { Decimal } from "decimal.js";
 import { type Kysely, sql, type Transaction } from "kysely";
 
+import { isAccountingCaptureEnabled } from "../accounting/accounting-capture.js";
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
+import { effectiveSettlement } from "./effective-settlement-offsets.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import {
   planCompensationPosting,
@@ -119,6 +121,12 @@ export interface ReceivableOffsetReversalResult {
 }
 
 interface OffsetRow extends ReceivableOffsetState {
+  /** The clearing Settlement has a `trader_settlement_confirmed` Event. */
+  readonly settlementHasAccountingEvent: boolean;
+  /** The clearing Settlement was confirmed while GL Accounting was ON. */
+  readonly settlementConfirmedWhileAccountingOn: boolean;
+  /** The Receivable has a recognition Event to reverse. */
+  readonly receivableRecognitionEventExists: boolean;
   readonly receivableId: string;
   readonly receivableNumber: string;
   readonly traderId: string;
@@ -147,10 +155,42 @@ export class ReceivableOffsetReversalService {
   public async preview(receivableId: string): Promise<ReceivableOffsetReversalPreview> {
     this.assertPermission(false);
     const { companyId } = this.tenants.current();
-    const row = await this.load(this.database, companyId, receivableId, false);
+    const captureEnabled = await isAccountingCaptureEnabled(this.database, companyId);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { creditAccountingCaptured, ...preview } = await this.inspect(
+      this.database,
+      companyId,
+      receivableId,
+      captureEnabled,
+    );
+    return preview;
+  }
+
+  /**
+   * The preview's body, for the Platform Repair Center's read-only repair
+   * plan: the caller supplies its (read-only) transaction, the explicit
+   * Company and the Company's Accounting mode -- read with a plain SELECT,
+   * because `accounting_capture_enabled()` takes a FOR KEY SHARE lock that a
+   * read-only transaction cannot. No permission check: it only reads, and
+   * execution still requires `trader_receivables.reverse` in `execute`.
+   * `creditAccountingCaptured` says whether the compensating Credit's own
+   * Accounting Event would be enqueued (the same rule `executeInTransaction`
+   * applies).
+   */
+  public async inspect(
+    database: Kysely<DatabaseSchema>,
+    companyId: string,
+    receivableId: string,
+    captureEnabled: boolean,
+  ): Promise<ReceivableOffsetReversalPreview & { readonly creditAccountingCaptured: boolean }> {
+    const row = this.withAccountingMode(
+      await this.load(database, companyId, receivableId, false),
+      captureEnabled,
+    );
     const refusal = refuseReversal(row);
     const plan = planReversal(row);
     return {
+      creditAccountingCaptured: row.settlementAccountingRequired === true,
       amount: new Decimal(row.offsetAmount).toFixed(2),
       blockedReason: refusal === null ? null : this.describe(refusal),
       blockedReasonCode: refusal,
@@ -165,7 +205,7 @@ export class ReceivableOffsetReversalService {
       physicalCollectionCount: row.physicalCollectionCount,
       receivableId: row.receivableId,
       receivableNumber: row.receivableNumber,
-      recognitionJournalWillBeReversed: true,
+      recognitionJournalWillBeReversed: captureEnabled && row.receivableRecognitionEventExists,
       settlementId: row.settlementId,
       settlementNumber: row.settlementNumber,
       settlementOffsetCount: row.settlementOffsetCount,
@@ -205,7 +245,14 @@ export class ReceivableOffsetReversalService {
     }
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
-    const row = await this.load(transaction, companyId, receivableId, true);
+    // Read through the same gate every capture uses. While ON it holds the
+    // Company's configuration row (FOR KEY SHARE) until commit, so a
+    // concurrent controlled disable waits for this reversal.
+    const captureEnabled = await isAccountingCaptureEnabled(transaction, companyId);
+    const row = this.withAccountingMode(
+      await this.load(transaction, companyId, receivableId, true),
+      captureEnabled,
+    );
 
       // A retry on an already-reversed Receivable is a no-op, not an error:
       // the caller asked for a state that already holds. The live Credit is
@@ -300,7 +347,14 @@ export class ReceivableOffsetReversalService {
       // database already does, and it attributed the reversal to the Order
       // rather than the Receivable, so the two events would have reversed
       // different Journals.
-    await this.enqueueCreditPosting(transaction, companyId, creditId, creditNumber);
+    // The Credit's Journal clears the AR residual the offset's posted
+    // Journal left. With no GL involvement (Accounting OFF, or an
+    // Accounting-OFF-era Settlement that never posted an offset) there is
+    // no residual, and a Journal would CREATE an AR balance -- so the
+    // Credit stays purely operational: no Event, no Journal.
+    if (row.settlementAccountingRequired === true) {
+      await this.enqueueCreditPosting(transaction, companyId, creditId, creditNumber);
+    }
 
       // `orders.trader_settlement_status` is deliberately NOT written here.
       // It is a pure function of the Order's payable TO the Trader
@@ -319,6 +373,7 @@ export class ReceivableOffsetReversalService {
         action: "trader_receivable.reverse_offset",
         actorId: identity.identityId,
         after: {
+          accountingCaptured: row.settlementAccountingRequired === true,
           cashMovement: "0.00",
           creditAmount: plan.creditAmount,
           creditNumber,
@@ -410,6 +465,21 @@ export class ReceivableOffsetReversalService {
   }
 
   /**
+   * Whether the General Ledger is involved in this reversal: GL Accounting is
+   * ON now AND the clearing Settlement belongs to the ledger (it has an
+   * Accounting Event, or was confirmed while Accounting was ON). Only then
+   * does the certified `settlementAccountingPosted` precondition apply.
+   */
+  private withAccountingMode(row: OffsetRow, captureEnabled: boolean): OffsetRow {
+    return {
+      ...row,
+      settlementAccountingRequired:
+        captureEnabled &&
+        (row.settlementHasAccountingEvent || row.settlementConfirmedWhileAccountingOn),
+    };
+  }
+
+  /**
    * The Receivable, its single offset, the clearing Settlement and the Order.
    *
    * `forUpdate` locks the Receivable and the Order when executing. The
@@ -449,7 +519,21 @@ export class ReceivableOffsetReversalService {
                        and posted.source_entity_id = s.id
                        and posted.event_type = 'trader_settlement_confirmed'
                        and posted.processing_status = 'posted')
-               as "settlementAccountingPosted"
+               as "settlementAccountingPosted",
+             exists(select 1 from accounting_events captured
+                     where captured.company_id = s.company_id
+                       and captured.source_entity_type = 'trader_settlement'
+                       and captured.source_entity_id = s.id
+                       and captured.event_type = 'trader_settlement_confirmed')
+               as "settlementHasAccountingEvent",
+             coalesce(accounting_enabled_at(s.company_id, coalesce(s.confirmed_at, s.created_at)), false)
+               as "settlementConfirmedWhileAccountingOn",
+             exists(select 1 from accounting_events recognised
+                     where recognised.company_id = r.company_id
+                       and recognised.source_entity_type = 'trader_receivable'
+                       and recognised.source_entity_id = r.id
+                       and recognised.event_type = 'trader_receivable_recognized')
+               as "receivableRecognitionEventExists"
         from trader_receivables r
         join trader_settlement_receivable_offsets x
           on x.company_id = r.company_id and x.receivable_id = r.id
@@ -460,7 +544,10 @@ export class ReceivableOffsetReversalService {
        where r.company_id = ${companyId}::uuid
          and r.id = ${receivableId}::uuid
          and r.source_type = 'service_charge'
-       order by x.created_at desc
+       -- The EFFECTIVE offset first: after SET-A -> reversal -> SET-B the
+       -- Receivable is cleared by SET-B, whatever the creation order of the
+       -- historical rows (effective-settlement-offsets.ts).
+       order by ${effectiveSettlement("s")} desc, x.created_at desc
        limit 1
        ${forUpdate ? sql`for update of r, o` : sql``}
     `.execute(database);

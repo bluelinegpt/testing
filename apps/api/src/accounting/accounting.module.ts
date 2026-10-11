@@ -25,6 +25,7 @@ import { ManualJournalService } from "./manual-journal.service.js";
 import { OpeningBalanceController } from "./opening-balance.controller.js";
 import { OpeningBalanceService } from "./opening-balance.service.js";
 import { AutomaticPostingService } from "./automatic-posting.service.js";
+import { CompanyAccountingModeService } from "./company-accounting-mode.service.js";
 import { OperationalJournalPostingService } from "./operational-journal-posting.service.js";
 import { OperationalSourceLoader } from "./operational-source.loader.js";
 import { GeneralExpenseController } from "./general-expense.controller.js";
@@ -44,6 +45,8 @@ import { AccountingDashboardController } from "./accounting-dashboard.controller
 import { AccountingDashboardService } from "./accounting-dashboard.service.js";
 import { AccountingRecoveryController } from "./accounting-recovery.controller.js";
 import { AccountingRecoveryService } from "./accounting-recovery.service.js";
+import { PlatformAccountingHealthService } from "./platform-accounting-health.service.js";
+import { PlatformAccountingRepairAdapter } from "./platform-accounting-repair.adapter.js";
 import { AccountingReprocessPrecheckService } from "./accounting-reprocess-precheck.service.js";
 import { AccountingClosingReadinessService } from "./accounting-closing-readiness.service.js";
 import { AccountingClosingService } from "./accounting-closing.service.js";
@@ -94,18 +97,23 @@ import { AccountingSetupService } from "./accounting-setup.service.js";
     AccountingQueryService,
     AccountingEventQueryService,
     AutomaticPostingService,
+    CompanyAccountingModeService,
     FiscalCalendarService,
     ManualJournalService,
     OpeningBalanceService,
     CashBankManagementService,
     CashBankQueryService,
     AccountingReportService,
+    PlatformAccountingRepairAdapter,
+    PlatformAccountingHealthService,
   ],
   providers: [
     AccountingBatchService,
     AccountingDashboardService,
     AccountingRecoveryService,
     AccountingReprocessPrecheckService,
+    PlatformAccountingRepairAdapter,
+    PlatformAccountingHealthService,
     AccountingClosingReadinessService,
     AccountingClosingService,
     AccountingYearEndService,
@@ -124,6 +132,7 @@ import { AccountingSetupService } from "./accounting-setup.service.js";
     AccountingFoundationService,
     AccountingManagementService,
     AutomaticPostingService,
+    CompanyAccountingModeService,
     AccountingOperationSupport,
     AccountingQueryService,
     FiscalCalendarService,

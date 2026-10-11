@@ -377,7 +377,15 @@ export class PlatformCompanyService {
       item("timezone", "Timezone", true, settings.timezone !== null),
       item("currency", "Currency", true, settings.currency !== null),
       item("language", "Default language", true, settings.language !== null),
-      item("accountingSetup", "Accounting setup", true, company.accountingSetupStatus === "ready"),
+      item(
+        "accountingSetup",
+        "Accounting setup",
+        true,
+        company.accountingSetupStatus === "ready",
+        // A Company created with "None" has no setup at all (no Cash account,
+        // Areas, expense types or fiscal calendar). Say how to fix it.
+        "No setup template applied - apply one under Configuration & Accounting",
+      ),
       item(
         "companyAdmin",
         "Company Administrator",
@@ -428,7 +436,9 @@ export class PlatformCompanyService {
       canActivate: company.status === "draft" && blocking.length === 0,
       blockedBy: blocking.map((entry) => entry.key),
       nextStep:
-        invitedAdmins === 0
+        company.accountingSetupStatus !== "ready"
+          ? "Apply a setup template"
+          : invitedAdmins === 0
           ? "Create Company Administrator"
           : credentialReadyAdmins === 0
             ? "Waiting for the administrator to set a password"
@@ -657,6 +667,121 @@ export class PlatformCompanyService {
       });
     } catch (error) {
       await this.recordCreationFailure(input, actor, error);
+      throw this.translate(error);
+    }
+  }
+
+  /**
+   * Applies an approved setup template to a draft Company created without one.
+   *
+   * A Company created with template "None" can never reach readiness: the
+   * template is what lays down its Chart of Accounts, the accounting
+   * configuration (left OFF -- an import never enables GL Accounting), the
+   * default Cash and Bank accounts, expense and allowance types, reference
+   * prefixes, Delivery Areas, the business day and the fiscal calendar. Until
+   * now it could only be applied at creation, so such a Company could only be
+   * recreated.
+   *
+   * Exactly the creation-time import, in one transaction, and only for a
+   * DRAFT Company that has none of that setup yet: it never merges into, or
+   * overwrites, configuration somebody already entered.
+   */
+  public async applySetupTemplate(
+    companyId: string,
+    input: { templateCode: string; templateVersion?: number | undefined; businessDayStart?: string | undefined },
+    actor: { accountId: string; correlationId: string; ip?: string | undefined; userAgent?: string | undefined },
+  ): Promise<Record<string, unknown>> {
+    try {
+      return await this.transactions.execute(async (transaction) => {
+        const company = (
+          await sql<{ status: string; setupStatus: string; baseCurrency: string | null }>`
+            select c.status, c.accounting_setup_status as "setupStatus", s.base_currency as "baseCurrency"
+              from companies c left join company_settings s on s.company_id = c.id
+             where c.id = ${companyId}::uuid
+             for update of c
+          `.execute(transaction)
+        ).rows[0];
+        if (company === undefined) throw this.notFound();
+        if (company.status !== "draft") {
+          throw new ApplicationException(
+            "company_setup_template_draft_only",
+            "A setup template can only be applied to a draft Company",
+            HttpStatus.CONFLICT,
+          );
+        }
+        if (company.setupStatus === "ready") {
+          throw new ApplicationException(
+            "company_setup_already_applied",
+            "This Company already has its setup template",
+            HttpStatus.CONFLICT,
+          );
+        }
+        if (company.baseCurrency === null) {
+          throw new ApplicationException(
+            "company_settings_missing",
+            "The Company has no base currency; complete its profile first",
+            HttpStatus.CONFLICT,
+          );
+        }
+        const existing = (
+          await sql<Record<string, string>>`
+            select
+              (select count(*)::text from chart_of_accounts where company_id = ${companyId}::uuid) as "Chart of Accounts",
+              (select count(*)::text from accounting_configurations where company_id = ${companyId}::uuid) as "Accounting configuration",
+              (select count(*)::text from company_cash_accounts where company_id = ${companyId}::uuid) as "Cash accounts",
+              (select count(*)::text from company_bank_accounts where company_id = ${companyId}::uuid) as "Bank accounts",
+              (select count(*)::text from areas where company_id = ${companyId}::uuid) as "Areas",
+              (select count(*)::text from expense_types where company_id = ${companyId}::uuid) as "Expense types",
+              (select count(*)::text from general_expense_categories where company_id = ${companyId}::uuid) as "General expense categories",
+              (select count(*)::text from allowance_types where company_id = ${companyId}::uuid) as "Allowance types",
+              (select count(*)::text from company_business_day_configurations where company_id = ${companyId}::uuid) as "Business day",
+              (select count(*)::text from fiscal_years where company_id = ${companyId}::uuid) as "Fiscal years"
+          `.execute(transaction)
+        ).rows[0]!;
+        const present = Object.entries(existing)
+          .filter(([, count]) => Number(count) > 0)
+          .map(([name]) => name);
+        if (present.length > 0) {
+          throw new ApplicationException(
+            "company_setup_conflict",
+            `The Company already has setup that a template would duplicate: ${present.join(", ")}`,
+            HttpStatus.CONFLICT,
+          );
+        }
+
+        const applied = await this.importer.apply(transaction, {
+          companyId,
+          templateCode: input.templateCode,
+          templateVersion: input.templateVersion ?? latestTemplateVersion[input.templateCode] ?? 1,
+          actorAccountId: actor.accountId,
+          effectiveFrom: new Date().toISOString().slice(0, 10),
+          baseCurrency: company.baseCurrency,
+          businessDayStart: input.businessDayStart,
+        });
+        await sql`
+          update companies
+             set accounting_setup_status = 'ready',
+                 accounting_template_code = ${applied.templateCode},
+                 accounting_template_version = ${applied.templateVersion},
+                 accounting_template_sha256 = ${applied.templateSha256},
+                 accounting_setup_applied_at = now(),
+                 accounting_setup_applied_by_account_id = ${actor.accountId}::uuid,
+                 updated_at = now(), version = version + 1
+           where id = ${companyId}::uuid
+        `.execute(transaction);
+        await this.auditInTransaction(transaction, {
+          action: "platform.company.accounting_setup_applied",
+          companyId,
+          actorAccountId: actor.accountId,
+          before: { accountingSetupStatus: company.setupStatus },
+          after: { ...applied, appliedAfterCreation: true } as Record<string, unknown>,
+          correlationId: actor.correlationId,
+          ip: actor.ip,
+          userAgent: actor.userAgent,
+        });
+        return { companyId, accountingSetup: applied };
+      });
+    } catch (error) {
       throw this.translate(error);
     }
   }

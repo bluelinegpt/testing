@@ -745,117 +745,6 @@ export interface CompanyDeletionBackup {
   readonly verifiedAt: string;
 }
 
-export interface CompanyResetTableCount {
-  readonly table: string;
-  readonly rows: number;
-}
-
-export interface CompanyResetUser {
-  readonly accountId: string;
-  readonly accountKind: string;
-  readonly username: string;
-  readonly displayName: string;
-  readonly status: string;
-  readonly retentionReason: string | null;
-  readonly retentionReferences: readonly { readonly table: string; readonly column: string; readonly rows: number; readonly onDelete: string }[];
-  readonly sharedIdentity: boolean;
-  readonly sharedReferences: readonly string[];
-}
-
-export interface CompanyResetPreview {
-  readonly company: {
-    readonly id: string;
-    readonly code: string;
-    readonly name: string;
-    readonly status: string;
-    readonly environment: string;
-  };
-  readonly eligible: boolean;
-  readonly blockers: readonly string[];
-  readonly confirmation: string;
-  readonly tables: readonly CompanyResetTableCount[];
-  readonly totalRows: number;
-  readonly fiscalCalendar: {
-    readonly fiscalYearsPreserved: number;
-    readonly periodsPreserved: number;
-    readonly fiscalYearsToOpen: number;
-    readonly periodsToOpen: number;
-    readonly fiscalYearStatuses: Readonly<Record<string, number>>;
-    readonly periodStatuses: Readonly<Record<string, number>>;
-  };
-  readonly usersToRemove: readonly CompanyResetUser[];
-  readonly adminUsersPreserved: readonly CompanyResetUser[];
-}
-
-export interface CompanyResetResult {
-  readonly company: { readonly id: string; readonly code: string; readonly name: string };
-  readonly removed: readonly CompanyResetTableCount[];
-  readonly totalRemoved: number;
-  readonly preservedVerified: number;
-  readonly backupFile: string;
-  readonly fiscalCalendar: {
-    readonly fiscalYearsPreserved: number;
-    readonly periodsPreserved: number;
-    readonly fiscalYearsOpened: number;
-    readonly periodsOpened: number;
-    readonly fiscalYearStatusesBefore: Readonly<Record<string, number>>;
-    readonly periodStatusesBefore: Readonly<Record<string, number>>;
-  };
-  readonly userCleanup: {
-    readonly companyUsersRemoved: number;
-    readonly employeesUnlinked: number;
-    readonly roleAssignmentsRemoved: number;
-    readonly businessAccessLinksRemoved: number;
-    readonly sessionsRevoked: number;
-    readonly passwordResetTokensRevoked: number;
-    readonly accountsDeleted: number;
-    readonly sharedIdentitiesPreserved: number;
-    readonly historyReferencedIdentitiesPreserved: number;
-    readonly retainedIdentities: readonly {
-      readonly accountId: string;
-      readonly accountKind: string;
-      readonly username: string;
-      readonly displayName: string;
-      readonly reason: "other_company_access" | "preserved_history";
-      readonly references: readonly {
-        readonly table: string;
-        readonly column: string;
-        readonly rows: number;
-        readonly onDelete: string;
-      }[];
-    }[];
-  };
-}
-
-export interface CompanyUsersResetPreview {
-  readonly company: { readonly id: string; readonly code: string; readonly name: string; readonly environment: string };
-  readonly eligible: boolean;
-  readonly blockers: readonly string[];
-  readonly confirmation: string;
-  readonly selectedUsers: readonly CompanyResetUser[];
-  readonly accountsToDelete: readonly CompanyResetUser[];
-  readonly identitiesRetained: readonly (CompanyResetUser & {
-    readonly reason: "other_company_access" | "preserved_history";
-    readonly references: readonly { readonly table: string; readonly column: string; readonly rows: number; readonly onDelete: string }[];
-  })[];
-  readonly adminUsersPreserved: readonly CompanyResetUser[];
-}
-
-export interface CompanyUsersResetEligible {
-  readonly company: CompanyUsersResetPreview["company"];
-  readonly eligible: boolean;
-  readonly blockers: readonly string[];
-  readonly usersToRemove: readonly CompanyResetUser[];
-  readonly adminUsersPreserved: readonly CompanyResetUser[];
-}
-
-export interface CompanyUsersResetResult {
-  readonly company: { readonly id: string; readonly code: string; readonly name: string };
-  readonly backupFile: string;
-  readonly selectedCount: number;
-  readonly cleanup: CompanyResetResult["userCleanup"];
-}
-
 export interface AccountingSetupSummary {
   readonly status: string;
   readonly templateCode: string | null;
@@ -1276,6 +1165,946 @@ export interface SaveAnnouncementPayload {
   readonly companyIds: readonly string[];
 }
 
+// ---------------------------------------------------------------------------
+// Repair Center (read-only) -- Company Order Health
+// ---------------------------------------------------------------------------
+
+export type OrderHealth = "HEALTHY" | "ISSUE" | "REVIEW";
+export type OrderHealthFilter = "attention" | "issue" | "review" | "healthy" | "all";
+export type OrderHealthDateScope = "today" | "last7" | "last30" | "custom" | "all";
+
+export interface OrderHealthScope {
+  readonly scope: OrderHealthDateScope;
+  readonly dateFrom: string | null;
+  readonly dateTo: string | null;
+  readonly today: string;
+  readonly timezone: string;
+  readonly dateBasis: "order_date";
+}
+
+export interface OrderHealthScopeQuery {
+  readonly scope?: OrderHealthDateScope;
+  readonly dateFrom?: string;
+  readonly dateTo?: string;
+}
+
+export interface OrderHealthListQuery extends OrderHealthScopeQuery {
+  readonly health?: OrderHealthFilter;
+  readonly search?: string;
+  readonly deliveryStatus?: string;
+  readonly reasonCode?: string;
+  readonly page?: number;
+  readonly pageSize?: number;
+}
+
+export interface CompanyOrderHealthSummary {
+  readonly company: {
+    readonly id: string;
+    readonly code: string;
+    readonly nameEn: string;
+    readonly status: string;
+    readonly environment: string | null;
+  };
+  readonly accountingMode: { readonly enabled: boolean };
+  readonly generatedAt: string;
+  readonly scope: OrderHealthScope;
+  readonly companyHealth: OrderHealth;
+  readonly totalOrders: number;
+  readonly healthyOrders: number;
+  readonly issueOrders: number;
+  readonly reviewOrders: number;
+  readonly byReason: readonly {
+    readonly reasonCode: string;
+    readonly health: OrderHealth;
+    readonly reason: string;
+    readonly orders: number;
+  }[];
+}
+
+export interface OrderHealthRow {
+  readonly orderId: string;
+  readonly orderNumber: string;
+  readonly orderDate: string;
+  readonly deliveryStatus: string;
+  readonly health: OrderHealth;
+  readonly classification: string;
+  readonly reasonCode: string;
+  readonly reason: string;
+  readonly recommendedAction: string;
+  readonly additionalReasonCodes: readonly string[];
+}
+
+export interface CompanyOrderHealthPage {
+  readonly generatedAt: string;
+  readonly scope: OrderHealthScope;
+  readonly page: number;
+  readonly pageSize: number;
+  readonly total: number;
+  readonly items: readonly OrderHealthRow[];
+}
+
+/** Verify First, as returned by the API (read-only drill-down). */
+export interface OrderVerification {
+  readonly classification: string;
+  readonly health: OrderHealth;
+  readonly reason: string;
+  readonly order: Readonly<Record<string, string | null>>;
+  readonly traderOwes: string;
+  readonly physicalCollectionAmount: string;
+  readonly settlementOffsetAmount: string;
+  readonly historicalSettlementOffsetAmount: string;
+  readonly settlementNumbers: readonly string[];
+  readonly historicalSettlementNumbers: readonly string[];
+  readonly receivables: readonly Readonly<Record<string, string | null>>[];
+  readonly settlementOffsets: readonly {
+    readonly settlementNumber: string;
+    readonly receivableNumber: string;
+    readonly receivableStatus: string;
+    readonly amount: string;
+    readonly effective: boolean;
+  }[];
+  readonly recommendedAction: string;
+}
+
+// Repair Center (read-only) -- Finding Details + Repair Plan Preview.
+// Previews never execute anything. `execution.available` is true only for a
+// READY finding of an executable certified capability (advisory: the server
+// re-proves everything when Execute Repair is requested).
+export type Repairability = "NOT_REQUIRED" | "READY" | "BLOCKED" | "MANUAL_REVIEW";
+
+export interface RepairIssue {
+  readonly code: string;
+  readonly message: string;
+}
+
+export interface RepairFinding {
+  readonly findingId: string;
+  readonly companyId: string;
+  readonly orderId: string;
+  readonly domain: string;
+  readonly entityType: string;
+  readonly entityId: string;
+  readonly entityNumber: string;
+  readonly health: OrderHealth;
+  readonly severity: "none" | "medium" | "high";
+  readonly reasonCode: string;
+  readonly title: string;
+  readonly summary: string;
+  readonly detectedState: string;
+  readonly expectedState: string;
+  readonly recommendedAction: string;
+  readonly repairCapability: string | null;
+  readonly repairability: Repairability;
+  readonly blockers: readonly RepairIssue[];
+  readonly warnings: readonly RepairIssue[];
+  readonly evidence: Readonly<Record<string, string | number | boolean | null>>;
+  /** Phase 3 Prompt 3: present for a Trader-financial MANUAL_REVIEW finding. */
+  readonly manualReview?: ManualReviewExplanation | null;
+  readonly detectedAt: string;
+}
+
+/** Why a finding needs a person, with the financial comparison (Phase 3 Prompt 3). */
+export interface ManualReviewExplanation {
+  readonly headline: string;
+  readonly reason: string;
+  readonly whyAutomaticRepairIsUnavailable: readonly string[];
+  readonly financialComparison: {
+    readonly traderOwes: string;
+    readonly currentReceivables: number;
+    readonly historicalReceivables: number;
+    readonly effectivePhysicalCollections: string;
+    readonly effectiveSettlementOffsets: string;
+    readonly receivables: readonly {
+      readonly receivableNumber: string;
+      readonly status: string;
+      readonly current: boolean;
+      readonly amountDue: string;
+      readonly recordedCollected: string;
+      readonly effectivePhysicalCollections: string;
+      readonly effectiveSettlementOffsets: string;
+      readonly effectiveSettled: string;
+      readonly unexplainedDifference: string;
+    }[];
+  };
+  readonly affectedRecords: {
+    readonly collections: readonly {
+      readonly collectionNumber: string;
+      readonly receivableNumber: string;
+      readonly collectionStatus: string;
+      readonly current: boolean;
+      readonly sameTraderAsReceivable: boolean;
+      readonly allocatedToReceivable: string;
+      readonly collectionAmountReceived: string;
+      readonly collectionAllocatedTotal: string;
+    }[];
+    readonly settlements: readonly {
+      readonly settlementNumber: string;
+      readonly receivableNumber: string;
+      readonly settlementStatus: string;
+      readonly effective: boolean;
+      readonly reversedBySettlementNumber: string | null;
+      readonly sameTraderAsReceivable: boolean;
+      readonly offsetAmount: string;
+    }[];
+    readonly credits: readonly {
+      readonly creditNumber: string;
+      readonly receivableNumber: string | null;
+      readonly status: string;
+      readonly amount: string;
+    }[];
+  };
+}
+
+export interface RepairDependencyNode {
+  readonly entityType: string;
+  readonly entityId: string;
+  readonly entityNumber: string | null;
+  readonly status: string;
+  readonly amount: string | null;
+  readonly relation: string;
+}
+
+export interface RepairDependencies {
+  readonly current: readonly RepairDependencyNode[];
+  readonly historical: readonly RepairDependencyNode[];
+}
+
+export interface OrderRepairFindings {
+  readonly companyId: string;
+  readonly orderId: string;
+  readonly orderNumber: string;
+  readonly deliveryStatus: string;
+  readonly health: OrderHealth;
+  readonly accountingMode: { readonly enabled: boolean };
+  readonly findings: readonly RepairFinding[];
+  readonly dependencies: RepairDependencies;
+  readonly previewVersion: string;
+  readonly generatedAt: string;
+}
+
+export interface RepairProposedChange {
+  readonly entityType: string;
+  readonly action: "create" | "update" | "delete" | "none";
+  readonly entityNumber: string | null;
+  readonly description: string;
+  readonly details: Readonly<Record<string, string | number | boolean | null>>;
+}
+
+export interface RepairPreservedRecord {
+  readonly entityType: string;
+  readonly entityNumber: string | null;
+  readonly description: string;
+}
+
+export interface RepairRequiredInput {
+  readonly name: string;
+  readonly required: boolean;
+  readonly description: string;
+}
+
+export interface RepairPlanPreview {
+  readonly companyId: string;
+  readonly orderId: string;
+  readonly orderNumber: string;
+  readonly finding: RepairFinding;
+  readonly otherFindings: readonly RepairFinding[];
+  readonly repairability: Repairability;
+  readonly proposedRepair: {
+    readonly capabilityCode: string;
+    readonly title: string;
+    readonly explanation: string;
+    readonly executionHandler: string;
+    readonly candidateOnly: boolean;
+  } | null;
+  readonly currentState: Readonly<Record<string, string | number | boolean | null>>;
+  readonly proposedChanges: readonly RepairProposedChange[];
+  readonly preservedHistory: readonly RepairPreservedRecord[];
+  readonly dependencies: RepairDependencies;
+  readonly blockers: readonly RepairIssue[];
+  readonly warnings: readonly RepairIssue[];
+  readonly requiredInputs: readonly RepairRequiredInput[];
+  readonly requiredPermission: string | null;
+  readonly idempotencyKeyBasis: string | null;
+  readonly accountingMode: { readonly enabled: boolean };
+  readonly previewVersion: string;
+  readonly execution: {
+    readonly available: boolean;
+    readonly reason: string;
+    readonly requiredPlatformPermission: string;
+  };
+  readonly generatedAt: string;
+}
+
+/** Execute Repair request: only WHICH finding/capability, never data. */
+export interface RepairExecutionRequest {
+  readonly findingId: string;
+  readonly capabilityCode: string;
+  readonly previewVersion: string;
+  readonly reason: string;
+  readonly inputs?: Readonly<Record<string, string>>;
+  readonly idempotencyKey: string;
+}
+
+export interface RepairExecutionResult {
+  readonly repairExecutionId: string;
+  readonly auditId: string;
+  readonly companyId: string;
+  readonly orderId: string;
+  readonly orderNumber: string;
+  readonly findingId: string;
+  readonly reasonCode: string;
+  readonly capabilityCode: string;
+  readonly status: "succeeded";
+  readonly beforeHealth: OrderHealth;
+  readonly afterHealth: OrderHealth;
+  readonly beforeClassification: string;
+  readonly afterClassification: string;
+  readonly beforePreviewVersion: string;
+  readonly afterPreviewVersion: string;
+  readonly executedAt: string;
+  readonly replayed: boolean;
+  readonly nextRecommendedAction: string;
+}
+
+// Repair Center -- Accounting Health + accounting recovery (Prompt 4).
+export type AccountingTriage = "NOT_REQUIRED" | "READY_CANDIDATE" | "BLOCKED" | "MANUAL_REVIEW";
+export type AccountingHealthStatusFilter =
+  | "attention"
+  | "failed"
+  | "blocked_configuration"
+  | "received"
+  | "retry_pending"
+  | "processing"
+  | "posted"
+  | "ignored_duplicate"
+  | "ignored_no_accounting_required"
+  | "reversed"
+  | "all";
+
+export interface AccountingHealthSummary {
+  readonly companyId: string;
+  readonly accountingMode: { readonly enabled: boolean; readonly automaticPostingEnabled: boolean };
+  readonly accountingHealth: "HEALTHY" | "ISSUE" | "REVIEW" | "NOT_APPLICABLE";
+  readonly totalEvents: number;
+  readonly failed: number;
+  readonly blockedConfiguration: number;
+  readonly pending: number;
+  readonly processing: number;
+  readonly stuck: number;
+  readonly blocked: number;
+  readonly readyCandidates: number;
+  readonly manualReview: number;
+  readonly historicalWhileOff: number;
+  readonly byEventType: readonly { readonly eventType: string; readonly unresolved: number }[];
+  readonly note: string;
+  /** List/summary readiness is a CANDIDATE only; READY comes from Preview. */
+  readonly readyCandidateNote?: string;
+  /** Phase 4 Prompt 1: journal integrity of posted events (ISSUE, manual review). */
+  readonly integrity?: {
+    readonly postedWithoutJournal: number;
+    readonly unbalancedJournals: number;
+    readonly linkageMismatches: number;
+    readonly duplicateEffectivePostings: number;
+    readonly total: number;
+  };
+  /** Phase 4 Prompt 1: required events never captured (ISSUE, manual review). */
+  readonly missingRequiredEvents?: {
+    readonly total: number;
+    readonly byEventType: readonly { readonly eventType: string; readonly missing: number }[];
+  };
+  /** The simple headline(s); details only after opening a finding. */
+  readonly headlines?: readonly string[];
+  readonly generatedAt: string;
+}
+
+export type AccountingIntegrityKind = "JOURNAL_INTEGRITY" | "MISSING_REQUIRED_EVENT";
+
+/** One journal-integrity / missing-event finding: always MANUAL_REVIEW. */
+export interface AccountingIntegrityRow {
+  readonly kind: AccountingIntegrityKind;
+  readonly code: string;
+  readonly health: "ISSUE" | "REVIEW";
+  readonly repairability: "MANUAL_REVIEW";
+  readonly headline: string;
+  readonly eventId: string | null;
+  readonly eventType: string;
+  readonly eventStatus: string | null;
+  readonly sourceType: string;
+  readonly sourceId: string;
+  readonly businessReference: string | null;
+  readonly occurredOn: string | null;
+  readonly journal: {
+    readonly journalNumber: string | null;
+    readonly status: string | null;
+    readonly debit: string | null;
+    readonly credit: string | null;
+    readonly lines: number;
+    readonly periodStatus: string | null;
+  } | null;
+  readonly actor: { readonly state: "VALID" | "MISSING" | "INVALID" };
+  readonly reconstructable: boolean | null;
+  readonly certifiedCapture: "COMPANY_HISTORICAL_RECOVERY" | null;
+  readonly reason: string;
+  readonly whyNotAutomatic: string;
+  readonly recommendedInvestigation: string;
+  readonly decision: string | null;
+}
+
+export interface AccountingIntegrityPage {
+  readonly items: readonly AccountingIntegrityRow[];
+  readonly total: number;
+  readonly page: number;
+  readonly pageSize: number;
+  readonly generatedAt: string;
+}
+
+export interface AccountingIntegrityQuery {
+  readonly kind?: AccountingIntegrityKind;
+  readonly eventType?: string;
+  readonly page?: number;
+  readonly pageSize?: number;
+}
+
+/** Phase 4 Prompt 1: the recovery context shown by details and Preview. */
+export interface AccountingRecoveryContext {
+  readonly decision: { readonly decision: string; readonly reason: string; readonly condition: string | null } | null;
+  readonly source: { readonly type: string; readonly reference: string | null; readonly state: string };
+  readonly originalActor: { readonly state: "VALID" | "MISSING" | "INVALID"; readonly accountKind: string | null; readonly accountStatus: string | null; readonly note: string };
+  readonly fiscalPeriod: { readonly status: string | null; readonly yearStatus: string | null; readonly matches: number };
+  readonly mappings: { readonly state: string; readonly blockerCodes: readonly string[] };
+  readonly existingJournals: {
+    readonly linkedToEvent: number;
+    readonly postedForSource: number;
+    readonly otherPostedEventsForSource: number;
+    readonly eventJournal: { readonly journalNumber: string; readonly status: string; readonly balanced: boolean; readonly debit: string; readonly credit: string; readonly lines: number } | null;
+  };
+  readonly plannedOperation: string;
+  readonly postRecoveryExpectation: string;
+  readonly blocker: string | null;
+  readonly recommendedInvestigation: readonly string[];
+}
+
+export interface AccountingHealthRow {
+  readonly eventId: string;
+  readonly businessReference: string | null;
+  readonly sourceType: string;
+  readonly eventType: string;
+  readonly status: string;
+  readonly triage: AccountingTriage;
+  readonly triageCode: string;
+  readonly finding: string;
+  readonly lastFailure: string | null;
+  readonly failureCode: string | null;
+  readonly attempts: number;
+  readonly accountingDate: string;
+  readonly failedAt: string | null;
+  /** True for READY CANDIDATES: run Preview Recovery for the authoritative state. */
+  readonly previewRequired?: boolean;
+}
+
+export interface AccountingHealthPage {
+  readonly items: readonly AccountingHealthRow[];
+  readonly total: number;
+  readonly page: number;
+  readonly pageSize: number;
+  readonly generatedAt: string;
+}
+
+export interface AccountingHealthQuery {
+  readonly status?: AccountingHealthStatusFilter;
+  readonly eventType?: string;
+  readonly repairability?: AccountingTriage;
+  readonly reference?: string;
+  readonly dateFrom?: string;
+  readonly dateTo?: string;
+  readonly page?: number;
+  readonly pageSize?: number;
+}
+
+export interface AccountingFinding {
+  readonly findingId: string;
+  readonly eventId: string;
+  readonly domain: "ACCOUNTING";
+  readonly entityNumber: string;
+  readonly health: OrderHealth;
+  readonly classificationCode: string;
+  readonly current: boolean;
+  readonly title: string;
+  readonly summary: string;
+  readonly detectedState: string;
+  readonly expectedState: string;
+  readonly recommendedAction: string;
+  readonly repairCapability: string | null;
+  readonly repairability: Repairability;
+  readonly blockers: readonly RepairIssue[];
+  readonly warnings: readonly RepairIssue[];
+}
+
+export interface AccountingEventDetails {
+  readonly companyId: string;
+  readonly eventId: string;
+  readonly event: {
+    readonly eventType: string;
+    readonly status: string;
+    readonly sourceType: string;
+    readonly businessReference: string | null;
+    readonly accountingDate: string | null;
+    readonly attempts: number;
+    readonly maxAttempts: number;
+    readonly failureCategory: string | null;
+    readonly failureCode: string | null;
+    readonly failureSummary: string | null;
+    readonly failedAt: string | null;
+  };
+  readonly support: { readonly support: string; readonly reason: string };
+  readonly accountingMode: { readonly enabled: boolean; readonly automaticPostingEnabled: boolean };
+  readonly finding: AccountingFinding;
+  readonly sourceOrderId: string | null;
+  readonly diagnostics: {
+    readonly fiscalPeriod: { readonly status: string | null; readonly yearStatus: string | null };
+    readonly areaEnabled: boolean;
+    readonly actorPresent: boolean;
+    readonly postedJournalsForSource: number;
+    readonly otherPostedEventsForSource: number;
+    readonly precheck: {
+      readonly accountingDate: string | null;
+      readonly expectedDebitTotal: string;
+      readonly expectedCreditTotal: string;
+      readonly fiscalPeriodStatus: string | null;
+      readonly resolvedMappings: readonly {
+        readonly accountCode: string;
+        readonly accountName: string;
+        readonly amount: string;
+        readonly entryIntent: string;
+      }[];
+    } | null;
+  };
+  /** Phase 4 Prompt 1 (absent from older servers). */
+  readonly recovery?: AccountingRecoveryContext;
+  readonly previewVersion: string;
+  readonly generatedAt: string;
+}
+
+export interface AccountingRecoveryPreview {
+  readonly companyId: string;
+  readonly eventId: string;
+  readonly businessReference: string | null;
+  readonly finding: AccountingFinding;
+  readonly repairability: Repairability;
+  readonly proposedRepair: RepairPlanPreview["proposedRepair"];
+  readonly currentState: Readonly<Record<string, string | number | boolean | null>>;
+  readonly proposedChanges: readonly RepairProposedChange[];
+  readonly preservedHistory: readonly RepairPreservedRecord[];
+  readonly blockers: readonly RepairIssue[];
+  readonly warnings: readonly RepairIssue[];
+  readonly requiredInputs: readonly RepairRequiredInput[];
+  readonly requiredPermission: string;
+  readonly domainPermissionEquivalent: string;
+  readonly idempotencyKeyBasis: string | null;
+  readonly accountingMode: { readonly enabled: boolean; readonly automaticPostingEnabled: boolean };
+  readonly previewVersion: string;
+  readonly execution: { readonly available: boolean; readonly reason: string; readonly requiredPlatformPermission: string };
+  /** Phase 4 Prompt 1 (absent from older servers). */
+  readonly recovery?: AccountingRecoveryContext;
+  readonly generatedAt: string;
+}
+
+export interface AccountingRecoveryResult extends RepairExecutionResult {
+  readonly eventId: string;
+  readonly eventType: string;
+  readonly journalNumber: string;
+  readonly orderHealthAfter: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Repair Center -- Payroll Health and Payroll period repair (Phase 5 Prompt 1).
+// ---------------------------------------------------------------------------
+export type PayrollHealthState = "HEALTHY" | "ISSUE" | "REVIEW";
+export type PayrollRepairability = "READY" | "MANUAL_REVIEW" | "BLOCKED" | "NOT_REQUIRED";
+
+export interface PayrollHealthSummary {
+  readonly companyId: string;
+  readonly payrollHealth: PayrollHealthState;
+  readonly accountingMode: { readonly enabled: boolean };
+  readonly totalPeriods: number;
+  readonly periodsWithFindings: number;
+  readonly byCode: Readonly<Record<string, number>>;
+  readonly driverFeeFindings: number;
+  readonly headlines: readonly string[];
+  readonly generatedAt: string;
+}
+
+export interface PayrollHealthRow {
+  readonly entityType: "payroll_period" | "outsourced_driver_fee_accrual";
+  readonly entityId: string;
+  readonly reference: string;
+  readonly status: string | null;
+  readonly health: "ISSUE" | "REVIEW";
+  readonly codes: readonly string[];
+  readonly headline: string;
+}
+
+export interface PayrollHealthPage {
+  readonly items: readonly PayrollHealthRow[];
+  readonly total: number;
+  readonly page: number;
+  readonly pageSize: number;
+  readonly generatedAt: string;
+}
+
+export interface PayrollHealthQuery {
+  readonly status?: "attention" | "all";
+  readonly page?: number;
+  readonly pageSize?: number;
+}
+
+export interface PayrollRepairFinding {
+  readonly findingId: string;
+  readonly reasonCode: string;
+  readonly health: "ISSUE" | "REVIEW";
+  readonly headline: string;
+  readonly reason: string;
+  readonly repairability: PayrollRepairability;
+  readonly repairCapability: string | null;
+  readonly executionRoute: "payroll" | "accounting_event" | null;
+  readonly blockers: readonly { readonly code: string; readonly message: string }[];
+  readonly whyNotAutomatic: string | null;
+  readonly recommendedAction: string;
+  readonly execution: { readonly available: boolean; readonly requiredPlatformPermission: string };
+  readonly plannedOperation: string;
+  readonly expectedResult: string;
+}
+
+export interface PayrollLineState {
+  readonly lineId: string;
+  readonly payrollNumber: string;
+  readonly employeeNumber: string | null;
+  readonly employeeName: string | null;
+  /** Today's workforce state; never a finding on its own (history is snapshotted). */
+  readonly employeeActive?: boolean | null;
+  /** Component snapshots and the records behind them (Phase 5 Prompt 2 detail view). */
+  readonly components?: Readonly<Record<string, string>>;
+  readonly status: string;
+  readonly sourceMarker: string;
+  readonly held: boolean;
+  readonly current: { readonly gross: string; readonly net: string; readonly paid: string; readonly outstanding: string };
+  readonly expected: { readonly gross: string; readonly net: string; readonly paid: string; readonly outstanding: string; readonly status: string };
+  readonly flags: { readonly amounts: boolean; readonly components: boolean; readonly payment: boolean; readonly allocation: boolean };
+}
+
+export interface PayrollRepairPreview {
+  readonly companyId: string;
+  readonly periodId: string;
+  readonly periodReference: string;
+  readonly period: {
+    readonly status: string;
+    readonly start: string;
+    readonly end: string;
+    readonly approvedAt: string | null;
+    readonly totals: Readonly<Record<string, string>>;
+    readonly expectedTotals: Readonly<Record<string, string>>;
+  };
+  readonly lines: readonly PayrollLineState[];
+  readonly payments: readonly {
+    readonly paymentId: string;
+    readonly paymentNumber: string;
+    readonly status: string;
+    readonly totalAmount: string;
+    readonly activeAllocated: string;
+  }[];
+  readonly accounting: {
+    readonly enabled: boolean;
+    readonly events: readonly {
+      readonly eventId: string;
+      readonly eventType: string;
+      readonly status: string;
+      readonly recovery: PayrollRepairability | null;
+      readonly classificationCode: string | null;
+    }[];
+  };
+  readonly findings: readonly PayrollRepairFinding[];
+  readonly health: PayrollHealthState;
+  readonly previewVersion: string;
+  readonly requiredPermission: string;
+  readonly generatedAt: string;
+}
+
+export interface PayrollRepairResult {
+  readonly repairExecutionId: string;
+  readonly companyId: string;
+  readonly periodId: string;
+  readonly periodReference: string;
+  readonly findingId: string;
+  readonly reasonCode: string;
+  readonly capabilityCode: string;
+  readonly status: "succeeded";
+  readonly beforeHealth: string;
+  readonly afterHealth: string;
+  readonly beforePreviewVersion: string;
+  readonly afterPreviewVersion: string;
+  readonly executedAt: string;
+  readonly replayed: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Repair Center -- consolidated landing + Repair History (Prompt 5).
+// ---------------------------------------------------------------------------
+export type RepairHistoryResult = "SUCCEEDED" | "REFUSED" | "FAILED" | "REPLAYED";
+
+export interface RepairHistoryCounts {
+  readonly succeeded: number;
+  readonly failed: number;
+  readonly refused: number;
+  readonly replayed: number;
+  readonly lastRepairAt: string | null;
+}
+
+export interface RepairCenterOverview {
+  readonly companyId: string;
+  readonly company: { readonly code: string; readonly nameEn: string; readonly status: string };
+  readonly accountingMode: { readonly enabled: boolean; readonly automaticPostingEnabled: boolean };
+  readonly orderHealth: {
+    readonly companyHealth: string;
+    readonly totalOrders: number;
+    readonly healthy: number;
+    readonly issue: number;
+    readonly review: number;
+    readonly scope: { readonly scope: string; readonly dateFrom: string | null; readonly dateTo: string | null };
+    /** Phase 6: Order issues whose primary finding is accounting (the same root cause Accounting Health lists). */
+    readonly accountingRelatedIssues?: number;
+  };
+  readonly accountingHealth: {
+    readonly accountingHealth: string;
+    readonly failed: number;
+    readonly blockedConfiguration: number;
+    readonly readyCandidates: number;
+    readonly blocked: number;
+    readonly manualReview: number;
+    readonly pending: number;
+    readonly processing: number;
+    readonly stuck: number;
+    readonly historicalWhileOff: number;
+    readonly note: string;
+    readonly readyCandidateNote: string;
+  };
+  /** Phase 6: Payroll Health on the landing (absent from an older API). */
+  readonly payrollHealth?: {
+    readonly payrollHealth: string;
+    readonly totalPeriods: number;
+    readonly periodsWithFindings: number;
+    readonly driverFeeFindings: number;
+    readonly headlines: readonly string[];
+  } | null;
+  /** Phase 6: worst of the domain healths (Accounting NOT_APPLICABLE ignored). */
+  readonly companyHealth?: "HEALTHY" | "ISSUE" | "REVIEW";
+  readonly repairHistory: RepairHistoryCounts;
+  readonly generatedAt: string;
+}
+
+export interface RepairHistoryRow {
+  readonly kind: "execution" | "attempt";
+  readonly id: string;
+  readonly occurredAt: string;
+  readonly entityType: string;
+  readonly entityId: string;
+  readonly entityNumber: string | null;
+  readonly findingId: string | null;
+  readonly reasonCode: string | null;
+  readonly capabilityCode: string | null;
+  readonly actor: string | null;
+  readonly result: RepairHistoryResult;
+  readonly reason: string | null;
+  readonly outcome: string | null;
+  readonly errorCode: string | null;
+  readonly correlationId: string | null;
+  readonly repairExecutionId: string | null;
+  readonly repairApplied: boolean;
+}
+
+export interface RepairHistoryPage {
+  readonly items: readonly RepairHistoryRow[];
+  readonly total: number;
+  readonly page: number;
+  readonly pageSize: number;
+  readonly generatedAt: string;
+}
+
+export interface RepairHistoryQuery {
+  readonly result?: RepairHistoryResult;
+  readonly capabilityCode?: string;
+  readonly entityType?: string;
+  readonly page?: number;
+  readonly pageSize?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Company Data Reset (Company Data Reset, Prompt 1): preview -> execute plan.
+// ---------------------------------------------------------------------------
+export type ResetPreset =
+  | "OPERATIONAL_DATA"
+  | "FINANCIAL_DATA"
+  | "USERS_WORKFORCE"
+  | "FULL_COMPANY_DATA_KEEP_COMPANY"
+  | "CUSTOM";
+export type ResetDomain = "OPERATIONAL" | "FINANCIAL" | "TRADERS_CUSTOMERS" | "WORKFORCE" | "INTEGRATIONS";
+export type ResetUserMode = "KEEP_ALL_USERS" | "DELETE_SELECTED_USERS" | "DELETE_ALL_ELIGIBLE_USERS";
+
+export interface CompanyDataResetRequest {
+  readonly preset: ResetPreset;
+  readonly domains?: readonly ResetDomain[];
+  readonly userMode?: ResetUserMode;
+  readonly selectedAccountIds?: readonly string[];
+  readonly deleteAdminAccountIds?: readonly string[];
+  readonly tradersCustomers?: "KEEP" | "RESET";
+  readonly workforce?: "KEEP" | "RESET";
+}
+
+export interface ResetReferenceCount {
+  readonly table: string;
+  readonly column: string;
+  readonly rows: number;
+}
+
+export interface ResetWorkforcePlan {
+  readonly kind: "employee" | "driver";
+  readonly id: string;
+  readonly reference: string;
+  readonly name: string;
+  readonly action: "DELETE" | "DETACH" | "KEEP" | "DELETE_WITH_DOMAIN";
+  readonly reason: string;
+  readonly historyReferences: readonly ResetReferenceCount[];
+}
+
+export interface ResetUserPlan {
+  readonly accountId: string;
+  readonly username: string;
+  readonly displayName: string;
+  readonly accountKind: string;
+  readonly status: string;
+  readonly isCompanyAdmin: boolean;
+  /** This Company's role names for the account. */
+  readonly roles: readonly string[];
+  /** What deleting this account would mean, independent of the current selection. */
+  readonly eligibility: { readonly state: "ELIGIBLE" | "PROTECTED" | "SHARED" | "BLOCKED"; readonly reason: string | null };
+  readonly classification:
+    | "KEEP"
+    | "ELIGIBLE"
+    | "PROTECTED"
+    | "PROTECTED_PLATFORM_ADMIN"
+    | "BLOCKED"
+    | "SHARED_IDENTITY_PRESERVE"
+    | "DEPENDENCY_REVIEW";
+  readonly reason: string | null;
+  readonly remove: boolean;
+  readonly membershipRemoved: number;
+  readonly roleAssignmentsRemoved: number;
+  readonly employee: ResetWorkforcePlan | null;
+  readonly driver: ResetWorkforcePlan | null;
+  readonly identity: {
+    readonly action: "KEEP" | "DELETE" | "PRESERVE_HISTORY" | "PRESERVE_SHARED";
+    readonly references: readonly ResetReferenceCount[];
+  };
+}
+
+export interface ResetCountPair {
+  readonly delete: number;
+  readonly preserve: number;
+}
+
+export interface CompanyDataResetPlan {
+  readonly company: { readonly id: string; readonly code: string; readonly name: string; readonly environment: string };
+  readonly effectiveDomains: readonly ResetDomain[];
+  readonly requiredDependencies: readonly { readonly domain: ResetDomain; readonly reason: string }[];
+  readonly tables: readonly { readonly table: string; readonly domain: ResetDomain; readonly rows: number }[];
+  readonly entityLinksRemoved: number;
+  readonly users: readonly ResetUserPlan[];
+  readonly summary: {
+    readonly orders: ResetCountPair;
+    readonly collections: ResetCountPair;
+    readonly settlements: ResetCountPair;
+    readonly accountingTransactions: ResetCountPair;
+    readonly payrollTransactions: ResetCountPair;
+    readonly traders: ResetCountPair;
+    readonly customers: ResetCountPair;
+    readonly employees: ResetCountPair;
+    readonly drivers: ResetCountPair;
+    readonly companyUsers: ResetCountPair;
+    readonly roleAssignmentsDeleted: number;
+    readonly membershipsDeleted: number;
+    readonly globalIdentities: ResetCountPair;
+    readonly protectedAdmins: number;
+    readonly sharedIdentitiesPreserved: number;
+    readonly platformRepairExecutions: "PRESERVE";
+    readonly platformRepairAttempts: "PRESERVE";
+    readonly generalAudit: "PRESERVE";
+    readonly referenceCounters: "PRESERVE";
+  };
+  readonly fiscalCalendar: {
+    readonly fiscalYearsPreserved: number;
+    readonly periodsPreserved: number;
+    readonly fiscalYearsToOpen: number;
+    readonly periodsToOpen: number;
+  };
+  /** The Company's last executed reset (audit reference), or null. */
+  readonly lastReset: { readonly auditEventId: string; readonly at: string } | null;
+  readonly blockers: readonly string[];
+  readonly warnings: readonly string[];
+  readonly executable: boolean;
+  readonly confirmation: string;
+  readonly planVersion: string;
+}
+
+export interface CompanyDataResetExecution {
+  readonly company: { readonly id: string; readonly code: string; readonly name: string };
+  readonly planVersion: string;
+  readonly preset: ResetPreset;
+  readonly effectiveDomains: readonly ResetDomain[];
+  readonly totalRemoved: number;
+  readonly identitiesDeleted: number;
+  readonly identitiesPreserved: number;
+  readonly employeesDeleted: number;
+  readonly employeesDetached: number;
+  readonly driversDeleted: number;
+  readonly driversDetached: number;
+  readonly entityLinksRemoved: number;
+  readonly integrityChecks: readonly string[];
+  readonly fiscalYearsOpened: number;
+  readonly periodsOpened: number;
+  readonly backupFile: string;
+  readonly backupSha256: string;
+  readonly backupBytes: number;
+  /** The reset audit row (audit_events.id) and the request correlation id. */
+  readonly auditEventId: string;
+  readonly correlationId: string;
+}
+
+export interface RepairHistoryDetail extends RepairHistoryRow {
+  readonly companyId: string;
+  readonly actorAuthority: string;
+  readonly previewVersion: string | null;
+  readonly repairAppliedStatement: string;
+  readonly execution: {
+    readonly beforeFingerprint: string;
+    readonly afterFingerprint: string;
+    readonly beforeHealth: string;
+    readonly afterHealth: string;
+    readonly beforeClassification: string;
+    readonly afterClassification: string;
+    readonly outcome: Readonly<Record<string, string | number | boolean | null>>;
+    readonly replays: number;
+  } | null;
+}
+
+function orderHealthQuery(query: OrderHealthListQuery): string {
+  const params = new URLSearchParams();
+  for (const [name, value] of Object.entries(query)) {
+    if (value === undefined || value === "") continue;
+    params.set(name, String(value));
+  }
+  const text = params.toString();
+  return text === "" ? "" : `?${text}`;
+}
+
 export const platformApi = {
   async login(identifier: string, password: string): Promise<PlatformIdentity> {
     const result = await request<{ identity: PlatformIdentity }>("platform/auth/login", {
@@ -1619,6 +2448,233 @@ export const platformApi = {
       method: "PATCH",
     });
     if (result === undefined) throw new PlatformApiError("Empty error report", "empty", 500);
+    return result;
+  },
+
+  // Repair Center: every call names the Company explicitly by its UUID.
+  async orderHealthSummary(
+    companyId: string,
+    query: OrderHealthScopeQuery = {},
+  ): Promise<CompanyOrderHealthSummary> {
+    const result = await request<CompanyOrderHealthSummary>(
+      `platform/companies/${encodeURIComponent(companyId)}/repair-center/health/orders/summary${orderHealthQuery(query)}`,
+      { method: "GET", timeoutMs: 60_000 },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty response", "empty_response", 0);
+    return result;
+  },
+
+  async orderHealthList(
+    companyId: string,
+    query: OrderHealthListQuery = {},
+  ): Promise<CompanyOrderHealthPage> {
+    const result = await request<CompanyOrderHealthPage>(
+      `platform/companies/${encodeURIComponent(companyId)}/repair-center/health/orders${orderHealthQuery(query)}`,
+      { method: "GET", timeoutMs: 60_000 },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty response", "empty_response", 0);
+    return result;
+  },
+
+  async verifyOrder(companyId: string, orderId: string): Promise<OrderVerification> {
+    const result = await request<OrderVerification>(
+      `platform/companies/${encodeURIComponent(companyId)}/repair-center/orders/${encodeURIComponent(orderId)}/verify`,
+      { method: "GET" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty response", "empty_response", 0);
+    return result;
+  },
+
+  /** Finding Details: every recomputed finding of one Order (read-only). */
+  async orderFindings(companyId: string, orderId: string): Promise<OrderRepairFindings> {
+    const result = await request<OrderRepairFindings>(
+      `platform/companies/${encodeURIComponent(companyId)}/repair-center/orders/${encodeURIComponent(orderId)}/findings`,
+      { method: "GET" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty response", "empty_response", 0);
+    return result;
+  },
+
+  /** Repair Plan Preview: POST only to carry the reason code; never mutates. */
+  async repairPreview(companyId: string, orderId: string, reasonCode?: string): Promise<RepairPlanPreview> {
+    const result = await request<RepairPlanPreview>(
+      `platform/companies/${encodeURIComponent(companyId)}/repair-center/orders/${encodeURIComponent(orderId)}/repair-preview`,
+      { body: reasonCode === undefined ? {} : { reasonCode }, method: "POST" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty response", "empty_response", 0);
+    return result;
+  },
+
+  /**
+   * Execute ONE certified, READY repair. The caller keeps `idempotencyKey`
+   * for the whole attempt so a retry can never repair twice.
+   */
+  async executeRepair(
+    companyId: string,
+    orderId: string,
+    body: RepairExecutionRequest,
+  ): Promise<RepairExecutionResult> {
+    const result = await request<RepairExecutionResult>(
+      `platform/companies/${encodeURIComponent(companyId)}/repair-center/orders/${encodeURIComponent(orderId)}/execute`,
+      { body, method: "POST", timeoutMs: 60_000 },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty response", "empty_response", 0);
+    return result;
+  },
+
+  async accountingHealthSummary(companyId: string): Promise<AccountingHealthSummary> {
+    const result = await request<AccountingHealthSummary>(
+      `platform/companies/${encodeURIComponent(companyId)}/repair-center/accounting/health/summary`,
+      { method: "GET" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty response", "empty_response", 0);
+    return result;
+  },
+
+  async accountingHealthEvents(companyId: string, query: AccountingHealthQuery = {}): Promise<AccountingHealthPage> {
+    const result = await request<AccountingHealthPage>(
+      `platform/companies/${encodeURIComponent(companyId)}/repair-center/accounting/health/events${orderHealthQuery(query as OrderHealthListQuery)}`,
+      { method: "GET" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty response", "empty_response", 0);
+    return result;
+  },
+
+  /** Phase 4 Prompt 1: journal-integrity and missing-required-event findings (read-only). */
+  async accountingHealthIntegrity(companyId: string, query: AccountingIntegrityQuery = {}): Promise<AccountingIntegrityPage> {
+    const result = await request<AccountingIntegrityPage>(
+      `platform/companies/${encodeURIComponent(companyId)}/repair-center/accounting/health/integrity${orderHealthQuery(query as OrderHealthListQuery)}`,
+      { method: "GET" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty response", "empty_response", 0);
+    return result;
+  },
+
+  async accountingEventDetails(companyId: string, eventId: string): Promise<AccountingEventDetails> {
+    const result = await request<AccountingEventDetails>(
+      `platform/companies/${encodeURIComponent(companyId)}/repair-center/accounting/events/${encodeURIComponent(eventId)}`,
+      { method: "GET" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty response", "empty_response", 0);
+    return result;
+  },
+
+  /** Recovery preview: POST without parameters; never mutates. */
+  async accountingRecoveryPreview(companyId: string, eventId: string): Promise<AccountingRecoveryPreview> {
+    const result = await request<AccountingRecoveryPreview>(
+      `platform/companies/${encodeURIComponent(companyId)}/repair-center/accounting/events/${encodeURIComponent(eventId)}/repair-preview`,
+      { body: {}, method: "POST" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty response", "empty_response", 0);
+    return result;
+  },
+
+  /** Execute ONE READY accounting recovery; keep `idempotencyKey` for the whole attempt. */
+  async executeAccountingRecovery(
+    companyId: string,
+    eventId: string,
+    body: RepairExecutionRequest,
+  ): Promise<AccountingRecoveryResult> {
+    const result = await request<AccountingRecoveryResult>(
+      `platform/companies/${encodeURIComponent(companyId)}/repair-center/accounting/events/${encodeURIComponent(eventId)}/execute`,
+      { body, method: "POST", timeoutMs: 60_000 },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty response", "empty_response", 0);
+    return result;
+  },
+
+  async payrollHealthSummary(companyId: string): Promise<PayrollHealthSummary> {
+    const result = await request<PayrollHealthSummary>(
+      `platform/companies/${encodeURIComponent(companyId)}/repair-center/payroll/health/summary`,
+      { method: "GET" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty response", "empty_response", 0);
+    return result;
+  },
+
+  async payrollHealthFindings(companyId: string, query: PayrollHealthQuery = {}): Promise<PayrollHealthPage> {
+    const result = await request<PayrollHealthPage>(
+      `platform/companies/${encodeURIComponent(companyId)}/repair-center/payroll/health/findings${orderHealthQuery(query as OrderHealthListQuery)}`,
+      { method: "GET" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty response", "empty_response", 0);
+    return result;
+  },
+
+  /** Payroll repair preview for ONE period: POST without parameters; never mutates. */
+  async payrollRepairPreview(companyId: string, periodId: string): Promise<PayrollRepairPreview> {
+    const result = await request<PayrollRepairPreview>(
+      `platform/companies/${encodeURIComponent(companyId)}/repair-center/payroll/periods/${encodeURIComponent(periodId)}/repair-preview`,
+      { body: {}, method: "POST" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty response", "empty_response", 0);
+    return result;
+  },
+
+  /** Execute ONE READY Payroll repair; keep `idempotencyKey` for the whole attempt. */
+  async executePayrollRepair(
+    companyId: string,
+    periodId: string,
+    body: RepairExecutionRequest,
+  ): Promise<PayrollRepairResult> {
+    const result = await request<PayrollRepairResult>(
+      `platform/companies/${encodeURIComponent(companyId)}/repair-center/payroll/periods/${encodeURIComponent(periodId)}/execute`,
+      { body, method: "POST", timeoutMs: 60_000 },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty response", "empty_response", 0);
+    return result;
+  },
+
+  async repairCenterOverview(companyId: string): Promise<RepairCenterOverview> {
+    const result = await request<RepairCenterOverview>(
+      `platform/companies/${encodeURIComponent(companyId)}/repair-center/overview`,
+      { method: "GET" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty response", "empty_response", 0);
+    return result;
+  },
+
+  async repairHistory(companyId: string, query: RepairHistoryQuery = {}): Promise<RepairHistoryPage> {
+    const result = await request<RepairHistoryPage>(
+      `platform/companies/${encodeURIComponent(companyId)}/repair-center/history${orderHealthQuery(query as OrderHealthListQuery)}`,
+      { method: "GET" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty response", "empty_response", 0);
+    return result;
+  },
+
+  async companyDataResetPreview(companyId: string, body: CompanyDataResetRequest): Promise<CompanyDataResetPlan> {
+    const result = await request<CompanyDataResetPlan>(
+      `platform/companies/${encodeURIComponent(companyId)}/data-reset/preview`,
+      { body, method: "POST", timeoutMs: 60_000 },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty response", "empty_response", 0);
+    return result;
+  },
+
+  /** Executes exactly the previewed plan; a changed Company returns 409 reset_plan_stale. */
+  async companyDataResetExecute(
+    companyId: string,
+    body: CompanyDataResetRequest & { readonly planVersion: string; readonly confirmation: string },
+  ): Promise<CompanyDataResetExecution> {
+    const result = await request<CompanyDataResetExecution>(
+      `platform/companies/${encodeURIComponent(companyId)}/data-reset/execute`,
+      { body, method: "POST", timeoutMs: 310_000 },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty response", "empty_response", 0);
+    return result;
+  },
+
+  async repairHistoryRecord(
+    companyId: string,
+    kind: "execution" | "attempt",
+    recordId: string,
+  ): Promise<RepairHistoryDetail> {
+    const result = await request<RepairHistoryDetail>(
+      `platform/companies/${encodeURIComponent(companyId)}/repair-center/history/${kind}/${encodeURIComponent(recordId)}`,
+      { method: "GET" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty response", "empty_response", 0);
     return result;
   },
 
@@ -1983,6 +3039,18 @@ export const platformApi = {
     return result;
   },
 
+  /** Apply an approved setup template to a draft Company created without one. */
+  async applySetupTemplate(
+    companyId: string,
+    templateCode: string,
+    templateVersion: number,
+  ): Promise<void> {
+    await request(`platform/companies/${companyId}/accounting-setup/apply`, {
+      body: { accountingTemplateCode: templateCode, accountingTemplateVersion: templateVersion },
+      method: "POST",
+    });
+  },
+
   async readiness(companyId: string): Promise<ReadinessSummary> {
     const result = await request<ReadinessSummary>(`platform/companies/${companyId}/readiness`, {
       method: "GET",
@@ -2079,47 +3147,6 @@ export const platformApi = {
 
   async updateCompany(companyId: string, changes: Record<string, string>): Promise<void> {
     await request(`platform/companies/${companyId}`, { body: changes, method: "PATCH" });
-  },
-
-  async companyResetPreview(companyId: string): Promise<CompanyResetPreview> {
-    const result = await request<CompanyResetPreview>(
-      `platform/companies/${companyId}/reset-preview`,
-      { method: "GET" },
-    );
-    if (result === undefined)
-      throw new PlatformApiError("Empty reset preview response", "empty", 500);
-    return result;
-  },
-
-  async resetCompanyData(companyId: string, confirmation: string): Promise<CompanyResetResult> {
-    const result = await request<CompanyResetResult>(
-      `platform/companies/${companyId}/reset-execute`,
-      { body: { confirmation }, method: "POST", timeoutMs: 310_000 },
-    );
-    if (result === undefined) throw new PlatformApiError("Empty reset response", "empty", 500);
-    return result;
-  },
-
-  async previewCompanyUsersReset(companyId: string, accountIds: readonly string[]): Promise<CompanyUsersResetPreview> {
-    const result = await request<CompanyUsersResetPreview>(`platform/companies/${companyId}/users-reset-preview`, {
-      body: { accountIds }, method: "POST",
-    });
-    if (result === undefined) throw new PlatformApiError("Empty users reset preview response", "empty", 500);
-    return result;
-  },
-
-  async eligibleCompanyUsersReset(companyId: string): Promise<CompanyUsersResetEligible> {
-    const result = await request<CompanyUsersResetEligible>(`platform/companies/${companyId}/users-reset-eligible`, { method: "GET" });
-    if (result === undefined) throw new PlatformApiError("Empty eligible users response", "empty", 500);
-    return result;
-  },
-
-  async resetCompanyUsers(companyId: string, accountIds: readonly string[], confirmation: string): Promise<CompanyUsersResetResult> {
-    const result = await request<CompanyUsersResetResult>(`platform/companies/${companyId}/users-reset-execute`, {
-      body: { accountIds, confirmation }, method: "POST", timeoutMs: 310_000,
-    });
-    if (result === undefined) throw new PlatformApiError("Empty users reset response", "empty", 500);
-    return result;
   },
 
   async moveCompanyToProduction(companyId: string, reason?: string): Promise<void> {

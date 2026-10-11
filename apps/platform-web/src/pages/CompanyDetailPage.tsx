@@ -6,16 +6,12 @@ import {
   PlatformApiError,
   platformApi,
   type AccountingSetupSummary,
+  type ApprovedTemplateOption,
   type AuditEntry,
   type CompanyDetail,
   type CompanyDeletionEligibility,
   type CompanyDeletionPreview,
   type CompanyDeletionBackup,
-  type CompanyResetPreview,
-  type CompanyResetResult,
-  type CompanyUsersResetPreview,
-  type CompanyUsersResetResult,
-  type CompanyUsersResetEligible,
   type ReadinessSummary,
 } from "../api/platform-client.js";
 import { usePlatformSession } from "../app/PlatformSession.js";
@@ -36,8 +32,6 @@ type CompanyDetailTab =
   | "audit"
   | "lifecycle";
 
-type ResetBusyOperation = "loading-users" | "preparing-preview" | "reset-in-progress";
-
 /**
  * One Company: overview, profile, accounting setup, readiness and lifecycle.
  *
@@ -53,6 +47,7 @@ export function CompanyDetailPage(): ReactElement {
   const canManage = session.can("platform.companies.manage");
   const canDelete = session.can("platform.companies.delete");
   const canReset = session.can("platform.companies.reset");
+  const canRepairCenter = session.can("platform.companies.repair_center.read");
 
   const [company, setCompany] = useState<CompanyDetail | undefined>(undefined);
   const [setup, setSetup] = useState<AccountingSetupSummary | undefined>(undefined);
@@ -62,8 +57,6 @@ export function CompanyDetailPage(): ReactElement {
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [resetBusyOperation, setResetBusyOperation] = useState<ResetBusyOperation | undefined>();
-  const [resetCompletionMessage, setResetCompletionMessage] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>(undefined);
   const [deletionEligibility, setDeletionEligibility] = useState<
     CompanyDeletionEligibility | undefined
@@ -84,29 +77,13 @@ export function CompanyDetailPage(): ReactElement {
   const [closeReason, setCloseReason] = useState("");
   const [closeConfirmation, setCloseConfirmation] = useState("");
   const [closeError, setCloseError] = useState<string | undefined>(undefined);
-  const [resetPreview, setResetPreview] = useState<CompanyResetPreview | undefined>(undefined);
-  const [resetConfirmation, setResetConfirmation] = useState("");
-  const [resetResult, setResetResult] = useState<CompanyResetResult | undefined>(undefined);
-  const [resetError, setResetError] = useState<string | undefined>(undefined);
-  const [usersResetCandidates, setUsersResetCandidates] = useState<CompanyResetPreview["usersToRemove"]>([]);
-  const [usersResetAdmins, setUsersResetAdmins] = useState<CompanyUsersResetEligible["adminUsersPreserved"]>([]);
-  const [usersResetBlockers, setUsersResetBlockers] = useState<readonly string[]>([]);
-  const [usersResetPreview, setUsersResetPreview] = useState<CompanyUsersResetPreview | undefined>(undefined);
-  const [usersResetSelected, setUsersResetSelected] = useState<string[]>([]);
-  const [usersResetConfirmation, setUsersResetConfirmation] = useState("");
-  const [usersResetResult, setUsersResetResult] = useState<CompanyUsersResetResult | undefined>(undefined);
-  const [usersResetError, setUsersResetError] = useState<string | undefined>(undefined);
   const [productionConfirmation, setProductionConfirmation] = useState("");
   const [productionError, setProductionError] = useState<string | undefined>(undefined);
   const [shipmentPrefix, setShipmentPrefix] = useState("");
   const [activeTab, setActiveTab] = useState<CompanyDetailTab>("information");
-  const resetBusyText = resetBusyOperation === "loading-users"
-    ? "Loading users…"
-    : resetBusyOperation === "preparing-preview"
-      ? "Preparing preview…"
-      : resetBusyOperation === "reset-in-progress"
-        ? "Reset in progress…"
-        : undefined;
+  const [templates, setTemplates] = useState<readonly ApprovedTemplateOption[]>([]);
+  const [templateChoice, setTemplateChoice] = useState("");
+  const [setupError, setSetupError] = useState<string | undefined>(undefined);
 
   const load = useCallback(async () => {
     setFailed(false);
@@ -136,6 +113,48 @@ export function CompanyDetailPage(): ReactElement {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // A draft Company created with template "None" has no setup and cannot be
+  // activated until one is applied; load the approved list only then.
+  const needsSetup =
+    company !== undefined && setup !== undefined && company.status === "draft" && setup.status !== "ready";
+  useEffect(() => {
+    if (!needsSetup || !canManage) return;
+    let cancelled = false;
+    void platformApi
+      .approvedTemplates()
+      .then((options) => {
+        if (cancelled) return;
+        setTemplates(options);
+        const first = options[0];
+        setTemplateChoice((current) =>
+          current !== "" || first === undefined ? current : `${first.templateCode}@${first.templateVersion}`,
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setTemplates([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [needsSetup, canManage]);
+
+  async function applySetupTemplate(): Promise<void> {
+    const [code, version] = templateChoice.split("@");
+    if (code === undefined || code === "") return;
+    setBusy(true);
+    setSetupError(undefined);
+    try {
+      await platformApi.applySetupTemplate(companyId, code, Number(version ?? 1));
+      await load();
+    } catch (failure) {
+      setSetupError(
+        failure instanceof PlatformApiError ? failure.message : "The setup template could not be applied.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function saveProfile(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -380,146 +399,12 @@ export function CompanyDetailPage(): ReactElement {
     }
   }
 
-  async function runResetPreview(): Promise<void> {
-    setBusy(true);
-    setResetBusyOperation("preparing-preview");
-    setResetCompletionMessage(undefined);
-    setResetError(undefined);
-    setResetResult(undefined);
-    setResetConfirmation("");
-    try {
-      const preview = await platformApi.companyResetPreview(companyId);
-      setResetPreview(preview);
-      setResetCompletionMessage(
-        `Done — preview ready: ${preview.totalRows.toLocaleString()} transactional row(s); ` +
-          `${preview.fiscalCalendar.fiscalYearsToOpen} fiscal year(s) and ${preview.fiscalCalendar.periodsToOpen} period(s) will be opened.`,
-      );
-    } catch (failure) {
-      setResetError(
-        failure instanceof PlatformApiError ? failure.message : "Unable to run the reset preview.",
-      );
-    } finally {
-      setResetBusyOperation(undefined);
-      setBusy(false);
-    }
-  }
-
-  async function executeReset(): Promise<void> {
-    if (resetPreview === undefined) return;
-    setBusy(true);
-    setResetBusyOperation("reset-in-progress");
-    setResetCompletionMessage(undefined);
-    setResetError(undefined);
-    setResetResult(undefined);
-    try {
-      const result = await platformApi.resetCompanyData(companyId, resetConfirmation);
-      setResetResult(result);
-      setResetPreview(undefined);
-      setResetConfirmation("");
-      await load();
-    } catch (failure) {
-      setResetError(
-        failure instanceof PlatformApiError
-          ? failure.message
-          : "The reset failed and was rolled back.",
-      );
-    } finally {
-      setResetBusyOperation(undefined);
-      setBusy(false);
-    }
-  }
-
-  async function runUsersResetSelection(accountIds: string[]): Promise<void> {
-    setUsersResetSelected(accountIds);
-    setUsersResetConfirmation("");
-    setUsersResetError(undefined);
-    setUsersResetResult(undefined);
-    setUsersResetPreview(undefined);
-    setResetCompletionMessage(undefined);
-    if (accountIds.length === 0) return;
-    setBusy(true);
-    setResetBusyOperation("preparing-preview");
-    try {
-      const preview = await platformApi.previewCompanyUsersReset(companyId, accountIds);
-      setUsersResetPreview(preview);
-      setResetCompletionMessage(
-        `Done — preview ready for ${preview.selectedUsers.length} selected user(s): ` +
-          `${preview.accountsToDelete.length} account(s) will be deleted and ` +
-          `${preview.identitiesRetained.length} identity/identities retained for history or shared access.`,
-      );
-      setUsersResetCandidates((current) => {
-        const byId = new Map(current.map((user) => [user.accountId, user]));
-        for (const user of [...preview.selectedUsers, ...preview.adminUsersPreserved]) byId.set(user.accountId, user);
-        return [...byId.values()];
-      });
-    } catch (failure) {
-      setUsersResetError(failure instanceof PlatformApiError ? failure.message : "Unable to preview selected users.");
-    } finally {
-      setResetBusyOperation(undefined);
-      setBusy(false);
-    }
-  }
-
-  async function runUsersResetList(): Promise<void> {
-    setBusy(true);
-    setResetBusyOperation("loading-users");
-    setResetCompletionMessage(undefined);
-    setUsersResetError(undefined);
-    setUsersResetResult(undefined);
-    setUsersResetSelected([]);
-    setUsersResetPreview(undefined);
-    try {
-      const eligible = await platformApi.eligibleCompanyUsersReset(companyId);
-      setUsersResetCandidates(eligible.usersToRemove);
-      setUsersResetAdmins(eligible.adminUsersPreserved);
-      setUsersResetBlockers(eligible.blockers);
-      setResetCompletionMessage(
-        `Done — loaded ${eligible.usersToRemove.length} eligible user(s); ` +
-          `${eligible.adminUsersPreserved.length} Admin account(s) protected.`,
-      );
-    } catch (failure) {
-      setUsersResetError(failure instanceof PlatformApiError ? failure.message : "Unable to load eligible users.");
-    } finally {
-      setResetBusyOperation(undefined);
-      setBusy(false);
-    }
-  }
-
-  async function executeUsersReset(): Promise<void> {
-    if (usersResetPreview === undefined || usersResetSelected.length === 0) return;
-    setBusy(true);
-    setResetBusyOperation("reset-in-progress");
-    setResetCompletionMessage(undefined);
-    setUsersResetError(undefined);
-    setUsersResetResult(undefined);
-    try {
-      const result = await platformApi.resetCompanyUsers(companyId, usersResetSelected, usersResetConfirmation);
-      setUsersResetResult(result);
-      setUsersResetPreview(undefined);
-      setUsersResetSelected([]);
-      setUsersResetConfirmation("");
-      const eligible = await platformApi.eligibleCompanyUsersReset(companyId);
-      setUsersResetCandidates(eligible.usersToRemove);
-      setUsersResetAdmins(eligible.adminUsersPreserved);
-      setUsersResetBlockers(eligible.blockers);
-      await load();
-    } catch (failure) {
-      setUsersResetError(failure instanceof PlatformApiError ? failure.message : "The selected-user reset failed and was rolled back.");
-    } finally {
-      setResetBusyOperation(undefined);
-      setResetCompletionMessage(undefined);
-      setBusy(false);
-    }
-  }
-
   async function confirmMoveToProduction(): Promise<void> {
     setBusy(true);
     setProductionError(undefined);
     try {
       await platformApi.moveCompanyToProduction(companyId);
       setProductionConfirmation("");
-      setResetPreview(undefined);
-      setResetResult(undefined);
       await load();
     } catch (failure) {
       setProductionError(
@@ -579,6 +464,16 @@ export function CompanyDetailPage(): ReactElement {
           >
             Open Portal
           </a>
+          {canRepairCenter ? (
+            <Link className="platform-button" to={`/companies/${companyId}/repair-center`}>
+              Repair Center
+            </Link>
+          ) : null}
+          {canReset ? (
+            <Link className="platform-button" to={`/companies/${companyId}/data-reset`}>
+              Data Reset
+            </Link>
+          ) : null}
           <Link className="platform-button platform-button--quiet" to="/companies">
             Back
           </Link>
@@ -924,6 +819,46 @@ export function CompanyDetailPage(): ReactElement {
           </>
         )}
 
+        {needsSetup && canManage ? (
+          <div className="platform-warning" data-testid="apply-setup-template" role="region" aria-label="Apply setup template">
+            <p>
+              This Company was created without a setup template, so it has no Chart of Accounts, Cash
+              account, Areas or fiscal calendar and cannot be activated. Apply one now. GL Accounting
+              stays OFF.
+            </p>
+            <label className="platform-field" htmlFor="apply-template">
+              <span>Setup template</span>
+              <select
+                id="apply-template"
+                onChange={(event) => setTemplateChoice(event.target.value)}
+                value={templateChoice}
+              >
+                {templates.map((option) => (
+                  <option
+                    key={`${option.templateCode}@${option.templateVersion}`}
+                    value={`${option.templateCode}@${option.templateVersion}`}
+                  >
+                    {option.displayName} (v{option.templateVersion})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="platform-button"
+              disabled={busy || templateChoice === ""}
+              onClick={() => void applySetupTemplate()}
+              type="button"
+            >
+              Apply setup template
+            </button>
+            {setupError !== undefined ? (
+              <p className="platform-error" role="alert">
+                {setupError}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
         <h3>Onboarding readiness</h3>
         <table className="platform-table">
           <thead>
@@ -1036,6 +971,16 @@ export function CompanyDetailPage(): ReactElement {
                   Activate
                 </button>
               ) : null}
+              {company.status === "draft" && !readiness.canActivate ? (
+                <p className="platform-muted" data-testid="activate-blocked">
+                  Cannot activate yet. Blocked by:{" "}
+                  {readiness.items
+                    .filter((item) => readiness.blockedBy.includes(item.key))
+                    .map((item) => item.label)
+                    .join(", ")}
+                  . Next step: {readiness.nextStep}.
+                </p>
+              ) : null}
               {company.status === "active" ? (
                 <button
                   className="platform-button platform-button--quiet"
@@ -1139,261 +1084,21 @@ export function CompanyDetailPage(): ReactElement {
               </form>
             </dialog>
             {company.environment !== "production" ? (
-              <section
-                aria-labelledby="company-maintenance-heading"
-                style={{ cursor: resetBusyOperation === undefined ? undefined : "progress" }}
-              >
+              <section aria-labelledby="company-maintenance-heading">
                 <h4 id="company-maintenance-heading">Training data &amp; environment</h4>
-                {resetBusyText === undefined ? null : (
-                  <p className="platform-reset-progress" role="status" aria-live="polite">
-                    <span className="platform-reset-progress__spinner" aria-hidden="true" />
-                    {resetBusyText}
-                  </p>
-                )}
-                {resetBusyText === undefined && resetCompletionMessage !== undefined ? (
-                  <p role="status" aria-live="polite">{resetCompletionMessage}</p>
-                ) : null}
                 <p className="platform-muted">
-                  This Company is in <strong>{company.environment}</strong>. Its transactional data
-                  — orders, settlements, reconciliations, accounting entries, payments, expenses,
-                  customers, traders, drivers, employees and all non-Admin Company accounts —
-                  including Trader and Driver Portal accounts — can be reset for training. Any
-                  account with an assigned Admin role, the Company profile, chart of accounts and
-                  configuration are preserved. Non-Admin company access and sessions are removed;
-                  identities referenced by preserved history are retained only as disabled records.
-                  Once the Company moves to production, resetting becomes permanently unavailable.
+                  This Company is in <strong>{company.environment}</strong>, so its data can be
+                  reset for training. Company Data Reset is done in one place only: a previewed,
+                  versioned plan where you choose exactly which data groups are reset and what
+                  happens to Company users (keep all users is the default). Once the Company moves
+                  to production, resetting becomes permanently unavailable.
                 </p>
                 {canReset ? (
-                  <>
-                    <section aria-labelledby="users-only-reset-heading" className="platform-review">
-                      <h5 id="users-only-reset-heading">Users Only Reset</h5>
-                      <p className="platform-muted">
-                        Select only the non-Admin Company or Trader Portal accounts to remove. Other company data and unselected users are preserved; identities required by shared access or history remain without target-company access.
-                      </p>
-                      <button className="platform-button platform-button--quiet" disabled={busy} onClick={() => void runUsersResetList()} type="button">
-                        {resetBusyOperation === "loading-users" ? "Loading users…" : "Load Users for Selective Reset"}
-                      </button>
-                      {usersResetCandidates.length > 0 ? (
-                        <div aria-label="Eligible users for selective reset">
-                          <label>
-                            <input
-                              checked={usersResetSelected.length === usersResetCandidates.length && usersResetCandidates.length > 0}
-                              disabled={busy}
-                              onChange={(event) => void runUsersResetSelection(event.target.checked ? usersResetCandidates.map((user) => user.accountId) : [])}
-                              type="checkbox"
-                            /> Select All eligible users
-                          </label>
-                          {usersResetCandidates.map((user) => (
-                            <label key={user.accountId} style={{ display: "block" }}>
-                              <input
-                                checked={usersResetSelected.includes(user.accountId)}
-                                disabled={busy}
-                                onChange={(event) => {
-                                  const ids = event.target.checked
-                                    ? [...usersResetSelected, user.accountId]
-                                    : usersResetSelected.filter((id) => id !== user.accountId);
-                                  void runUsersResetSelection(ids);
-                                }}
-                                type="checkbox"
-                              /> {user.displayName} ({user.username}) — {user.accountKind} — {user.status}
-                              {user.retentionReason ? <span> — {user.retentionReason}</span> : null}
-                            </label>
-                          ))}
-                        </div>
-                      ) : null}
-                      {usersResetAdmins.map((user) => (
-                        <p key={user.accountId}>Admin protected — not selectable: {user.displayName} ({user.username}) — {user.accountKind}</p>
-                      ))}
-                      {usersResetBlockers.map((blocker) => <p className="platform-warning" key={blocker}>{blocker}</p>)}
-                      {usersResetPreview === undefined ? null : (
-                        <div>
-                          <p><strong>Selected:</strong> {usersResetPreview.selectedUsers.length}</p>
-                          <p><strong>Physical account deletion:</strong> {usersResetPreview.accountsToDelete.length}</p>
-                          {usersResetPreview.accountsToDelete.map((user) => (
-                            <p key={user.accountId}>{user.displayName} ({user.username}) — {user.accountKind} — {user.status}</p>
-                          ))}
-                          <p><strong>Target-company access removal only; identity retained for history or other-company access:</strong> {usersResetPreview.identitiesRetained.length}</p>
-                          {usersResetPreview.identitiesRetained.map((user) => (
-                            <p key={user.accountId}>
-                              {user.displayName} ({user.username}) — {user.accountKind} — {user.status} — {user.reason === "preserved_history" ? (user.retentionReason ?? "preserved history") : "Other-company access is retained; only this Company's access is removed."}
-                              {user.references.length ? ` — ${user.references.map((ref) => `${ref.table}.${ref.column} (${ref.rows}; ${ref.onDelete})`).join(", ")}` : ""}
-                            </p>
-                          ))}
-                          {usersResetPreview.adminUsersPreserved.map((user) => (
-                            <p key={user.accountId}>Admin protected and not selectable: {user.displayName} ({user.username})</p>
-                          ))}
-                          {usersResetPreview.blockers.map((blocker) => <p className="platform-warning" key={blocker}>{blocker}</p>)}
-                          {usersResetPreview.eligible ? (
-                            <>
-                              <label className="platform-field" htmlFor="users-reset-confirmation">
-                                <span>Type {usersResetPreview.confirmation} to confirm</span>
-                                <input autoComplete="off" id="users-reset-confirmation" onChange={(event) => setUsersResetConfirmation(event.target.value)} value={usersResetConfirmation} />
-                              </label>
-                              <button className="platform-button" disabled={busy || usersResetConfirmation !== usersResetPreview.confirmation} onClick={() => void executeUsersReset()} type="button">
-                                {resetBusyOperation === "reset-in-progress" ? "Reset in progress…" : "Reset Selected Users"}
-                              </button>
-                            </>
-                          ) : null}
-                        </div>
-                      )}
-                      {usersResetResult === undefined ? null : (
-                        <div role="status">
-                          <p><strong>Done — Users Only reset succeeded.</strong> {usersResetResult.cleanup.accountsDeleted} account(s) deleted; {usersResetResult.cleanup.sessionsRevoked} Company session(s) revoked; {usersResetResult.cleanup.employeesUnlinked} Employee profile(s) unlinked for later account creation; {usersResetResult.cleanup.retainedIdentities.length} identity/identities retained safely.</p>
-                          {usersResetResult.cleanup.retainedIdentities.map((user) => (
-                            <p key={user.accountId}>Retained {user.displayName} ({user.username}) — {user.reason}; Company access removed. {user.references.map((ref) => `${ref.table}.${ref.column} (${ref.rows})`).join(", ")}</p>
-                          ))}
-                        </div>
-                      )}
-                      {usersResetError === undefined ? null : <p className="platform-login__error" role="alert">{usersResetError}</p>}
-                    </section>
-                    <button
-                      className="platform-button platform-button--quiet"
-                      disabled={busy}
-                      onClick={() => void runResetPreview()}
-                      type="button"
-                    >
-                      {resetBusyOperation === "preparing-preview" ? "Preparing preview…" : "Preview Data Reset"}
-                    </button>
-                    {resetPreview === undefined ? null : (
-                      <div className="platform-review">
-                        <p role="status">READY FOR RESET: {resetPreview.eligible ? "YES" : "NO"}</p>
-                        <p>
-                          <strong>Transactional rows to remove:</strong>{" "}
-                          {resetPreview.totalRows.toLocaleString()}
-                          {" across "}
-                          {resetPreview.tables.length} table(s). A full-database backup is taken
-                          automatically before anything is removed.
-                        </p>
-                        <p>
-                          <strong>Fiscal calendar:</strong> preserve {resetPreview.fiscalCalendar.fiscalYearsPreserved} fiscal year(s)
-                          and {resetPreview.fiscalCalendar.periodsPreserved} period(s); open {resetPreview.fiscalCalendar.fiscalYearsToOpen}
-                          fiscal year(s) and {resetPreview.fiscalCalendar.periodsToOpen} period(s). IDs, dates, numbering and fiscal-year links remain unchanged.
-                        </p>
-                        {resetPreview.tables.map((entry) => (
-                          <p key={entry.table}>
-                            {entry.table}: {entry.rows.toLocaleString()}
-                          </p>
-                        ))}
-                        <section aria-label="Company user reset preview">
-                          <h5>Company accounts</h5>
-                          <p>
-                            <strong>Users to remove:</strong> {resetPreview.usersToRemove.length}
-                          </p>
-                          {resetPreview.usersToRemove.length === 0 ? (
-                            <p>No non-Admin Company users will be removed.</p>
-                          ) : (
-                            resetPreview.usersToRemove.map((user) => (
-                              <p key={user.accountId}>
-                                {user.displayName} ({user.username}) — {user.accountKind}
-                                {user.sharedIdentity
-                                  ? " — shared identity; other-Company access will be preserved"
-                                  : ""}
-                              </p>
-                            ))
-                          )}
-                          <p>
-                            <strong>Admin users preserved:</strong>{" "}
-                            {resetPreview.adminUsersPreserved.length}
-                          </p>
-                          {resetPreview.adminUsersPreserved.length === 0 ? (
-                            <p>No assigned Admin users were found.</p>
-                          ) : (
-                            resetPreview.adminUsersPreserved.map((user) => (
-                              <p key={user.accountId}>
-                                {user.displayName} ({user.username}) — {user.accountKind}; all Company access preserved
-                              </p>
-                            ))
-                          )}
-                          <p className="platform-muted">
-                            Admin status is determined from assigned Company roles. A login identity
-                            referenced by preserved history is retained but disabled after its
-                            Company access is removed.
-                          </p>
-                        </section>
-                        {resetPreview.blockers.map((blocker) => (
-                          <p className="platform-warning" key={blocker}>
-                            {blocker}
-                          </p>
-                        ))}
-                        {resetPreview.eligible ? (
-                          <>
-                            <label className="platform-field" htmlFor="reset-confirmation">
-                              <span>Type RESET {company.code} to confirm</span>
-                              <input
-                                autoComplete="off"
-                                id="reset-confirmation"
-                                onChange={(event) => setResetConfirmation(event.target.value)}
-                                value={resetConfirmation}
-                              />
-                            </label>
-                            <button
-                              className="platform-button"
-                              disabled={busy || resetConfirmation !== `RESET ${company.code}`}
-                              onClick={() => void executeReset()}
-                              type="button"
-                            >
-                              {resetBusyOperation === "reset-in-progress" ? "Reset in progress…" : "Reset Company Data"}
-                            </button>
-                          </>
-                        ) : null}
-                      </div>
-                    )}
-                    {resetResult === undefined ? null : (
-                      <div className="platform-review" role="status">
-                        <p>
-                          <strong>Done — Full company reset succeeded.</strong>{" "}
-                          {resetResult.totalRemoved.toLocaleString()}
-                          {" row(s) removed across "}
-                          {resetResult.removed.length} table(s). {resetResult.preservedVerified}
-                          {" preserved table(s) verified unchanged."}
-                        </p>
-                        <p>
-                          <strong>Fiscal calendar:</strong> {resetResult.fiscalCalendar.fiscalYearsPreserved} fiscal year(s)
-                          and {resetResult.fiscalCalendar.periodsPreserved} period(s) preserved; opened {resetResult.fiscalCalendar.fiscalYearsOpened}
-                          fiscal year(s) and {resetResult.fiscalCalendar.periodsOpened} period(s).
-                        </p>
-                        <p>
-                          <strong>Backup:</strong> {resetResult.backupFile}
-                        </p>
-                        <p>
-                          <strong>Non-Admin accounts deleted:</strong>{" "}
-                          {resetResult.userCleanup.accountsDeleted.toLocaleString()}. Admin-role
-                          accounts were preserved; {resetResult.userCleanup.companyUsersRemoved.toLocaleString()}{" "}
-                          Company user memberships, {resetResult.userCleanup.roleAssignmentsRemoved.toLocaleString()}{" "}
-                          role assignments, {resetResult.userCleanup.businessAccessLinksRemoved.toLocaleString()}{" "}
-                          portal access links and {resetResult.userCleanup.sessionsRevoked.toLocaleString()}{" "}
-                          sessions were removed.
-                        </p>
-                        {resetResult.userCleanup.sharedIdentitiesPreserved > 0 ||
-                        resetResult.userCleanup.historyReferencedIdentitiesPreserved > 0 ? (
-                          <p>
-                            {resetResult.userCleanup.sharedIdentitiesPreserved.toLocaleString()}{" "}
-                            shared identity/identities and{" "}
-                            {resetResult.userCleanup.historyReferencedIdentitiesPreserved.toLocaleString()}{" "}
-                            identity/identities referenced by preserved history were retained safely.
-                          </p>
-                        ) : null}
-                        {resetResult.userCleanup.retainedIdentities.map((user) => (
-                          <p key={user.accountId}>
-                            Retained identity {user.displayName} ({user.username}, {user.accountKind})
-                            {user.reason === "preserved_history"
-                              ? " — disabled; target-Company access removed"
-                              : " — target-Company access removed; other-Company access preserved"}
-                            {user.references.length > 0
-                              ? ` — preserved references: ${user.references
-                                  .map((reference) => `${reference.table}.${reference.column} (${reference.rows}; ${reference.onDelete === "other-company access preserved" ? reference.onDelete : `FK ON DELETE ${reference.onDelete}`})`)
-                                  .join(", ")}`
-                              : " — other-company access is preserved"}
-                          </p>
-                        ))}
-                      </div>
-                    )}
-                    {resetError === undefined ? null : (
-                      <p className="platform-login__error" role="alert">
-                        {resetError}
-                      </p>
-                    )}
-                  </>
+                  <p>
+                    <Link className="platform-button platform-button--quiet" to={`/companies/${companyId}/data-reset`}>
+                      Open Data Reset
+                    </Link>
+                  </p>
                 ) : null}
                 <h4>Move to production</h4>
                 <p className="platform-warning">

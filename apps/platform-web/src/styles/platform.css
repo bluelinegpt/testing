@@ -203,6 +203,26 @@ body {
   resize: vertical;
 }
 
+/* A radio or checkbox inside a field label sits beside its text, not stacked
+   above it (the field itself is a column for text inputs). */
+.platform-field:has(> input[type="radio"]),
+.platform-field:has(> input[type="checkbox"]) {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 6px;
+  row-gap: 2px;
+}
+
+.platform-field input[type="radio"],
+.platform-field input[type="checkbox"] {
+  flex: none;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--platform-accent);
+}
+
 .platform-field textarea[readonly] {
   background: var(--platform-surface-raised);
   color: var(--platform-muted);

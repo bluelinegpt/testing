@@ -7,19 +7,37 @@ import { config as loadEnvironment } from "dotenv";
 import pg from "pg";
 
 import { configuration } from "../configuration/environment.js";
-import { runReset } from "./reset-company-test-data.engine.js";
-import { listCompanies, runDryRun } from "./reset-company-test-data.js";
+import {
+  CliRefusal,
+  describePlan,
+  disposableEnvironmentRefusal,
+  executeForCli,
+  normalizeCliRequest,
+  parseResetIntent,
+  previewForCli,
+} from "./company-data-reset.cli-support.js";
+import { listCompanies } from "./reset-company-test-data.js";
 
 /**
- * Entry point for the Company test-data reset.
+ * Entry point for the Company Data Reset from the command line.
  *
- * Default behaviour is the read-only dry run. Execution requires BOTH `--execute` and
- * `--confirm-company-id <uuid>` matching `--company-id` exactly, is refused outright in
- * production, and takes a backup first unless the operator explicitly waives it.
+ * Company Data Reset, Prompt 2: this CLI no longer has its own reset engine.
+ * It builds the SAME versioned plan the Platform portal previews and executes
+ * it through the SAME planner + executor + integrity checks + audit
+ * (`company-data-reset.cli-support.ts`). The legacy whole-Company
+ * engine is not used.
  *
- *   npm run reset:test-data -- --company-id <uuid>
+ * Default behaviour is the read-only plan (dry run). Execution requires
+ * `--execute`, `--confirm-company-id <uuid>` matching `--company-id`, the
+ * `--plan-version` printed by the dry run, an explicit `--preset`, and a
+ * local disposable development/test database. User mode defaults to keep;
+ * any user deletion also needs `--allow-user-deletion`.
+ *
  *   npm run reset:test-data -- --list-companies
- *   npm run reset:test-data -- --company-id <uuid> --execute --confirm-company-id <uuid>
+ *   npm run reset:test-data -- --company-id <uuid> --preset OPERATIONAL_DATA
+ *   npm run reset:test-data -- --company-id <uuid> --preset FULL_COMPANY_DATA_KEEP_COMPANY --user-mode keep
+ *   npm run reset:test-data -- --company-id <uuid> --preset OPERATIONAL_DATA \
+ *       --execute --confirm-company-id <uuid> --plan-version crp1:<hex>
  */
 
 loadEnvironment({ path: resolve(process.cwd(), "../../.env") });
@@ -131,46 +149,35 @@ function takeBackup(connectionString: string, companyId: string): string {
   return target;
 }
 
-async function execute(client: pg.PoolClient, options: CommandOptions): Promise<void> {
-  write("BlueLineGPT — Company test-data reset EXECUTION");
-  write("=".repeat(110));
-  await client.query("begin");
-  try {
-    const summary = await runReset(client, options.companyId, (message) => write(`  ${message}`));
-    await client.query("commit");
-    write("");
-    write("Removed rows by table");
-    write("-".repeat(110));
-    for (const entry of summary.removed.filter((row) => row.rows > 0)) {
-      write(`  ${entry.table.padEnd(48)}${String(entry.rows).padStart(9)} row(s)`);
-    }
-    write(`  ${"-".repeat(106)}`);
-    write(`  ${"TOTAL".padEnd(48)}${String(summary.totalRemoved).padStart(9)} row(s)`);
-    write("");
-    write(`Guards suspended and restored: ${summary.suspendedTriggers.length}`);
-    write(`Preserved tables verified unchanged: ${summary.preservedVerified}`);
-    write("");
-    write("RESET_COMMITTED");
-  } catch (error) {
-    await client.query("rollback");
-    write("");
-    write(`  ${error instanceof Error ? error.message : String(error)}`);
-    write("");
-    write("RESET_ROLLED_BACK");
-    throw error;
-  }
+function argumentReader(argv: string[]): { valueOf: (name: string) => string; has: (name: string) => boolean } {
+  const args = argv.filter((value) => value.trim() !== "");
+  return {
+    has: (name) => args.includes(name),
+    valueOf: (name) => {
+      for (let index = 0; index < args.length; index += 1) {
+        const value = args[index] ?? "";
+        if (value === name) return (args[index + 1] ?? "").trim();
+        if (value.startsWith(`${name}=`)) return value.slice(name.length + 1).trim();
+      }
+      return "";
+    },
+  };
 }
 
 async function main(): Promise<void> {
-  const options = parseArguments(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  const options = parseArguments(argv);
   if (options.help && !options.listCompanies && options.companyId === "") {
     write("Usage:");
-    write("  npm run reset:test-data -- --company-id <uuid>");
     write("  npm run reset:test-data -- --list-companies");
-    write("  npm run reset:test-data -- --company-id <uuid> \\");
-    write("      --execute --confirm-company-id <uuid> [--backup] [--allow-no-backup]");
+    write("  npm run reset:test-data -- --company-id <uuid> --preset <PRESET> [--domains a,b] \\");
+    write("      [--user-mode keep|selected|all-eligible] [--select id,id] [--delete-admin id] \\");
+    write("      [--traders-customers keep|reset] [--workforce keep|reset] [--allow-user-deletion]");
+    write("  ... --execute --confirm-company-id <uuid> --plan-version crp1:<hex> [--allow-no-backup]");
     write("");
-    write("Default is a read-only dry run. Execution needs both identifiers and they must match.");
+    write("Default is the read-only plan. Presets: OPERATIONAL_DATA, FINANCIAL_DATA, USERS_WORKFORCE,");
+    write("FULL_COMPANY_DATA_KEEP_COMPANY, CUSTOM. User mode defaults to keep; FULL and USERS_WORKFORCE");
+    write("need it explicitly. Runs only against a local development/test database.");
     return;
   }
 
@@ -180,6 +187,39 @@ async function main(): Promise<void> {
   const refusal = rejectionReason(options, environment);
   if (refusal !== null) {
     process.stderr.write(`${refusal}\n`);
+    process.exit(2);
+  }
+  if (options.listCompanies) {
+    const pool = new pg.Pool({ connectionString: settings.database.url, max: 1 });
+    const client = await pool.connect();
+    try {
+      await listCompanies(client);
+    } finally {
+      client.release();
+      await pool.end();
+    }
+    return;
+  }
+  const environmentRefusal = disposableEnvironmentRefusal(environment, settings.database.url);
+  if (environmentRefusal !== null) {
+    process.stderr.write(`${environmentRefusal}\n`);
+    process.exit(2);
+  }
+  if (options.companyId === "") {
+    process.stderr.write("Refusing to continue: --company-id is required.\n");
+    process.exit(2);
+  }
+  const reader = argumentReader(argv);
+  let request;
+  try {
+    request = normalizeCliRequest(parseResetIntent(reader.valueOf, reader.has));
+  } catch (error) {
+    process.stderr.write(`${error instanceof CliRefusal ? error.message : String(error)}\n`);
+    process.exit(2);
+  }
+  const planVersion = reader.valueOf("--plan-version");
+  if (options.execute && planVersion === "") {
+    process.stderr.write("Refusing to execute: --plan-version is required (run without --execute to see the plan and its version).\n");
     process.exit(2);
   }
 
@@ -200,12 +240,29 @@ async function main(): Promise<void> {
   const pool = new pg.Pool({ connectionString: settings.database.url, max: 1 });
   const client = await pool.connect();
   try {
-    if (options.listCompanies) {
-      await listCompanies(client);
-    } else if (options.execute) {
-      await execute(client, options);
-    } else {
-      await runDryRun(client, options.companyId);
+    if (!options.execute) {
+      write("BlueLineGPT — Company Data Reset PLAN (read-only, nothing changed)");
+      write("=".repeat(110));
+      for (const line of describePlan(await previewForCli(client, options.companyId, request))) write(line);
+      return;
+    }
+    write("BlueLineGPT — Company Data Reset EXECUTION (plan-based)");
+    write("=".repeat(110));
+    try {
+      const outcome = await executeForCli(client, options.companyId, request, planVersion, null);
+      write("");
+      for (const entry of outcome.removed) write(`  ${entry.table.padEnd(48)}${String(entry.rows).padStart(9)} row(s)`);
+      write(`  ${"TOTAL".padEnd(48)}${String(outcome.totalRemoved).padStart(9)} row(s)`);
+      write(`  integrity checks passed: ${outcome.integrityChecks.length}`);
+      write(`  audit event: ${outcome.auditEventId}`);
+      write("");
+      write("RESET_COMMITTED");
+    } catch (error) {
+      write("");
+      write(`  ${error instanceof Error ? error.message : String(error)}`);
+      write("");
+      write("RESET_ROLLED_BACK");
+      throw error;
     }
   } finally {
     client.release();

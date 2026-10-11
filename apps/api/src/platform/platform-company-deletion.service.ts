@@ -150,7 +150,11 @@ export class PlatformCompanyDeletionService {
     ).rows.map((row) => row.tableName);
     const directTables = [...COMPANY_DELETION_DIRECT_TABLES].sort();
     const rowCounts: Record<string, number> = {};
-    for (const table of directTables) {
+    // Count only manifest tables the live schema confirms carry `company_id`.
+    // A manifest/schema drift is reported below as a blocking unknown
+    // reference ("Manifest table missing from schema"); counting it here would
+    // instead fail the whole preview with a 500.
+    for (const table of directTables.filter((entry) => liveDirectTables.includes(entry))) {
       rowCounts[table] = Number(
         (
           await sql<{ n: string }>`select count(*)::bigint n from ${sql.table(table)} where company_id = ${companyId}::uuid`.execute(

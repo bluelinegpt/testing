@@ -159,6 +159,17 @@ export class AccountingEventQueryService {
   public async detail(eventId: string) {
     this.support.assertPermission("accounting.view");
     const { companyId } = this.support.context();
+    return this.detailFor(this.database, companyId, eventId);
+  }
+
+  /**
+   * The Event detail itself, for an explicit Company and connection, with NO
+   * permission assertion. `detail()` above is the Company-portal entry point
+   * (permission + tenant); the Platform Repair Center's accounting adapter
+   * calls this with its own Platform authorization and, when executing, its
+   * own transaction (Phase 2 Prompt 4). The query is unchanged.
+   */
+  public async detailFor(database: Kysely<DatabaseSchema>, companyId: string, eventId: string) {
     const header = await sql<Record<string, unknown>>`
       select e.*,
              -- Keep the DATE field date-only. PostgreSQL's Date object parser
@@ -218,7 +229,7 @@ export class AccountingEventQueryService {
         ) rev on true
         left join accounting_configurations c on c.company_id=e.company_id
        where e.id=${eventId}::uuid and e.company_id=${companyId}::uuid
-    `.execute(this.database);
+    `.execute(database);
     if (header.rows[0] === undefined) {
       throw new ApplicationException(
         "accounting_event_not_found",
@@ -234,7 +245,7 @@ export class AccountingEventQueryService {
         from accounting_event_components
        where accounting_event_id=${eventId}::uuid and company_id=${companyId}::uuid
        order by component_number
-    `.execute(this.database);
+    `.execute(database);
     // Durable processing history. The Event row itself only ever holds the
     // LATEST failure, so earlier attempts would vanish the moment a reprocess
     // succeeded. The audit trail is append-only and already records both
@@ -254,9 +265,10 @@ export class AccountingEventQueryService {
          and a.subject_id=${eventId}
        order by a.occurred_at, a.id
        limit 50
-    `.execute(this.database);
+    `.execute(database);
     const row = header.rows[0]!;
     const sourceTransaction = await this.sourceTransaction(
+      database,
       companyId,
       String(row.source_entity_type ?? ""),
       String(row.source_entity_id ?? ""),
@@ -281,10 +293,15 @@ export class AccountingEventQueryService {
    * An unrecognised or missing source returns `undefined`; the screen then
    * shows "Source Record Not Found" rather than an empty card.
    */
-  private async sourceTransaction(companyId: string, type: string, id: string) {
+  private async sourceTransaction(
+    database: Kysely<DatabaseSchema>,
+    companyId: string,
+    type: string,
+    id: string,
+  ) {
     if (id === "" || type === "") return undefined;
     const one = async (statement: ReturnType<typeof sql<Record<string, unknown>>>) =>
-      (await statement.execute(this.database)).rows[0];
+      (await statement.execute(database)).rows[0];
     switch (type) {
       case "order":
         return this.wrap(
@@ -523,7 +540,22 @@ export class AccountingEventQueryService {
    * already makes and adds no per-blocker lookup.
    */
   public async reprocessingReadiness(eventId: string) {
-    const event = (await this.detail(eventId)) as Record<string, unknown>;
+    return this.readinessOf((await this.detail(eventId)) as Record<string, unknown>, eventId);
+  }
+
+  /** `reprocessingReadiness` for an explicit Company/connection, no permission (Prompt 4). */
+  public async reprocessingReadinessFor(
+    database: Kysely<DatabaseSchema>,
+    companyId: string,
+    eventId: string,
+  ) {
+    return this.readinessOf(
+      (await this.detailFor(database, companyId, eventId)) as Record<string, unknown>,
+      eventId,
+    );
+  }
+
+  private readinessOf(event: Record<string, unknown>, eventId: string) {
     const status = String(event.processing_status ?? event.status ?? "");
     const blockers: string[] = [];
 
@@ -621,41 +653,13 @@ export class AccountingEventQueryService {
         );
       }
       if (revalidate !== undefined) await revalidate();
-      const result = await sql<Record<string, unknown>>`
-        update accounting_events
-           set processing_status='received',next_attempt_at=now(),
-               max_attempts=greatest(max_attempts,attempt_count+5),
-               reprocessed_at=now(),reviewed_by_account_id=${actorId}::uuid,
-               reviewed_at=now(),review_note=${input.reason.trim()},
-               failure_category=null,error_code=null,error_metadata=null,
-               safe_error_summary=null
-         where id=${eventId}::uuid and company_id=${companyId}::uuid
-           and processing_status in ('failed','blocked_configuration','retry_pending')
-         returning id,processing_status as status,attempt_count as "attemptCount",
-                   max_attempts as "maxAttempts"
-      `.execute(transaction);
-      if (result.rows[0] === undefined) {
-        throw new ApplicationException(
-          "accounting_event_not_reprocessable",
-          "Only a failed or blocked Accounting Event can be reprocessed",
-          HttpStatus.CONFLICT,
-        );
-      }
-      const resultBody = result.rows[0]!;
-      await this.support.audit(transaction, {
-        action: "accounting.event.reprocessing_requested",
-        after: {
-          ...resultBody,
-          // Prior state is captured so the timeline can say what the Event was
-          // before the request, after the row itself has moved on.
-          priorAttemptCount: readiness.attemptCount,
-          priorFailureCategory: readiness.failureCategory,
-          priorStatus: readiness.status,
-          reason: input.reason.trim(),
-        },
+      const resultBody = await this.requeueInTransaction(transaction, {
+        companyId,
         correlationId: idempotencyKey ?? randomUUID(),
-        subjectId: eventId,
-        subjectType: "accounting_event",
+        eventId,
+        readiness,
+        reason: input.reason,
+        reviewerAccountId: actorId,
       });
       await this.support.completeIdempotency(transaction, {
         idempotencyKey: idempotencyKey!,
@@ -668,6 +672,65 @@ export class AccountingEventQueryService {
     });
     void this.processor.drain(1).catch(() => undefined);
     return response;
+  }
+
+  /**
+   * The re-queue step of `reprocess`, on the caller's transaction (Phase 2
+   * Prompt 4). Same statement, same guard, same audit action. The caller has
+   * already proven readiness. `reviewerAccountId` is the Company reviewer; a
+   * Platform Repair Center caller passes NULL (a Platform administrator is
+   * not a Company account) and records itself in its own repair audit -- the
+   * audit row below still names the real actor from the identity context.
+   */
+  public async requeueInTransaction(
+    transaction: Kysely<DatabaseSchema>,
+    input: {
+      readonly companyId: string;
+      readonly correlationId: string;
+      readonly eventId: string;
+      readonly readiness: { readonly attemptCount: number; readonly failureCategory: unknown; readonly status: string };
+      readonly reason: string;
+      readonly reviewerAccountId: string | null;
+    },
+  ): Promise<Record<string, unknown>> {
+    const { companyId, eventId, readiness } = input;
+    const result = await sql<Record<string, unknown>>`
+      update accounting_events
+         set processing_status='received',next_attempt_at=now(),
+             max_attempts=greatest(max_attempts,attempt_count+5),
+             reprocessed_at=now(),reviewed_by_account_id=${input.reviewerAccountId}::uuid,
+             reviewed_at=now(),review_note=${input.reason.trim()},
+             failure_category=null,error_code=null,error_metadata=null,
+             safe_error_summary=null
+       where id=${eventId}::uuid and company_id=${companyId}::uuid
+         and processing_status in ('failed','blocked_configuration','retry_pending')
+       returning id,processing_status as status,attempt_count as "attemptCount",
+                 max_attempts as "maxAttempts"
+    `.execute(transaction);
+    if (result.rows[0] === undefined) {
+      throw new ApplicationException(
+        "accounting_event_not_reprocessable",
+        "Only a failed or blocked Accounting Event can be reprocessed",
+        HttpStatus.CONFLICT,
+      );
+    }
+    const resultBody = result.rows[0]!;
+    await this.support.audit(transaction, {
+      action: "accounting.event.reprocessing_requested",
+      after: {
+        ...resultBody,
+        // Prior state is captured so the timeline can say what the Event was
+        // before the request, after the row itself has moved on.
+        priorAttemptCount: readiness.attemptCount,
+        priorFailureCategory: readiness.failureCategory,
+        priorStatus: readiness.status,
+        reason: input.reason.trim(),
+      },
+      correlationId: input.correlationId,
+      subjectId: eventId,
+      subjectType: "accounting_event",
+    });
+    return resultBody;
   }
 
   public async reprocessPreview(input: AccountingEventBulkReprocessDto) {

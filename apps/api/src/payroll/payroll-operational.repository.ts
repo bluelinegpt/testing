@@ -155,6 +155,49 @@ export class PayrollOperationalRepository {
     `.execute(database);
   }
 
+  /**
+   * Re-derives every payable line's paid / outstanding amounts from the
+   * Payroll payment ALLOCATIONS that are still active, then the period's
+   * totals and the line / period settlement statuses -- the same three steps
+   * `PayrollPaymentService.reverse` runs after it reverses allocations.
+   *
+   * Allocations are the payment truth (immutable, reversal-only); the line
+   * and period amounts and statuses are their derived cache. Held and
+   * reversed lines are never touched. Called only by the Platform Repair
+   * Center (Phase 5) under the period's FOR UPDATE lock, after it proved
+   * that every active allocation belongs to a confirmed payment and no line
+   * would be overpaid. The approved-Payroll immutability trigger still
+   * refuses any change outside the settlement columns.
+   */
+  public async reconcilePaymentState(
+    database: Kysely<DatabaseSchema>,
+    companyId: string,
+    periodId: string,
+  ): Promise<"approved" | "paid" | "partially_paid"> {
+    await sql`select id from payroll_entries
+      where company_id=${companyId}::uuid and payroll_period_id=${periodId}::uuid
+      for update`.execute(database);
+    await sql`
+      update payroll_entries l
+         set amount_paid=paid.total,
+             outstanding_amount=l.net_salary-paid.total,
+             updated_at=now(), version=l.version+1
+        from (
+          select l2.id, coalesce(sum(a.allocated_amount) filter (where a.reversed_at is null),0) as total
+            from payroll_entries l2
+            left join payroll_payment_allocations a
+              on a.company_id=l2.company_id and a.payroll_line_id=l2.id
+           where l2.company_id=${companyId}::uuid and l2.payroll_period_id=${periodId}::uuid
+           group by l2.id
+        ) paid
+       where l.id=paid.id and l.company_id=${companyId}::uuid
+         and l.status not in ('held','reversed')
+         and (l.amount_paid<>paid.total or l.outstanding_amount<>l.net_salary-paid.total)
+    `.execute(database);
+    await this.recalculatePeriodTotals(database, companyId, periodId);
+    return this.refreshSettlementStatuses(database, companyId, periodId);
+  }
+
   public async refreshSettlementStatuses(
     database: Kysely<DatabaseSchema>,
     companyId: string,

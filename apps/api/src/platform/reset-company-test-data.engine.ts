@@ -220,6 +220,15 @@ function assertIdentifiers(...names: string[]): void {
   }
 }
 
+/**
+ * @deprecated LEGACY whole-Company reset engine (Company Data Reset, Prompt 3).
+ * UNREACHABLE from every HTTP route and CLI: it implicitly removes every
+ * non-admin user (requirement R1). Its only callers are this module and the
+ * legacy database tests that certify it. All Company Data Reset mutations go
+ * through `executeAndAuditCompanyDataReset` (company-data-reset.service.ts);
+ * `company-data-reset.bypass-certification.test.ts` fails if any production
+ * source calls `runReset`. Do not wire it to a route, CLI or service.
+ */
 export async function runReset(
   client: pg.PoolClient,
   companyId: string,

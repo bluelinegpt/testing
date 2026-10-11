@@ -14,6 +14,7 @@ import { KyselyTransactionManager } from "../infrastructure/database/transaction
 import { OperationsHistoryWriter } from "../operations/operations-history.writer.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { AccountingOperationSupport } from "./accounting-operation.support.js";
+import { isAccountingCaptureEnabled } from "./accounting-capture.js";
 import { GeneralExpenseAccountingEventWriter } from "./general-expense-accounting-event.writer.js";
 import { GeneralExpenseQueryService } from "./general-expense-query.service.js";
 import type {
@@ -1211,7 +1212,12 @@ export class GeneralExpenseService {
     // approved first and only fails later, during Accounting Event
     // processing, leaving an approved Expense with no Journal.
     const accountingDate = expense.accountingDate ?? expense.expenseDate;
-    if (accountingDate !== null) {
+    // With GL Accounting OFF there is no Journal to fail later, so the GL
+    // accounts are not required to submit or approve an operational Expense.
+    if (
+      accountingDate !== null &&
+      (await isAccountingCaptureEnabled(database, context.companyId))
+    ) {
       const mappingKeys = await sql<{ mappingKey: string | null }>`
         select distinct expense_account_mapping_key as "mappingKey"
           from general_expense_lines
@@ -1297,6 +1303,9 @@ export class GeneralExpenseService {
     effectiveDate: string,
   ): Promise<void> {
     const { companyId } = this.support.context();
+    // The category's GL mapping only matters when GL Accounting is ON; an
+    // Accounting-OFF Company keeps the mapping key as a classification.
+    if (!(await isAccountingCaptureEnabled(database, companyId))) return;
     const result = await sql<{ valid: boolean }>`
       select exists (
         select 1 from account_mappings m

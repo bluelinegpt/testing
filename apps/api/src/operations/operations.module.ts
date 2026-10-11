@@ -64,6 +64,7 @@ import {
   OrderQuestionAskService,
   OrderQuestionModel,
 } from "./order-question-ask.js";
+import { CompanyOrderHealthService } from "./company-order-health.service.js";
 
 @Module({
   // CompanyConfigurationModule exports BusinessDayService and
@@ -128,6 +129,9 @@ import {
     TraderAccountStatementService,
     TraderSettlementService,
     ReceivableOffsetReversalService,
+    // Phase 3 Prompt 2: THE financial evaluation. Verify First
+    // (OrderMaintenanceService) reads it; the Platform Repair Center too.
+    CompanyOrderHealthService,
     OrderMaintenanceService,
     OrderValidationLookup,
     OrderValidationService,
@@ -144,6 +148,19 @@ import {
   // `AgentModule` imports this module to reuse the exact same central
   // tracking lookup/verify logic Yousef calls, rather than a second tracking
   // implementation living inside the Agent.
-  exports: [OperationsService, PublicTrackingService],
+  // OrderMaintenanceService is exported for the Platform Repair Center, which
+  // runs the existing Verify First (read-only) inside a selected Company.
+  exports: [
+    OperationsService,
+    PublicTrackingService,
+    OrderMaintenanceService,
+    // Repair Center preview reads the reversal's own inspection (read-only).
+    ReceivableOffsetReversalService,
+    // Repair Center Phase 3: receivable status reconciliation (domain operation).
+    TraderReceivableService,
+    // Phase 3 Prompt 2: one instance of the shared financial evaluation for
+    // Verify First and the Platform Repair Center / Company Health.
+    CompanyOrderHealthService,
+  ],
 })
 export class OperationsModule {}

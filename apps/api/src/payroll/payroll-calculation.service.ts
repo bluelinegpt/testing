@@ -576,6 +576,22 @@ export class PayrollCalculationService {
             )
           `.execute(transaction);
         }
+        // Link interim (variable earnings) payment allocations to this line
+        // BEFORE the sources are claimed below. The allocation guard
+        // (validate_employee_variable_earning_allocation, BEFORE INSERT OR
+        // UPDATE) refuses any write to an allocation whose source already
+        // carries a payroll_period_id, so linking after the claim raised
+        // variable_earning_source_already_allocated_to_payroll for every
+        // Employee who received an interim payment in the period.
+        await sql`
+          update employee_variable_earning_payment_allocations
+             set payroll_entry_id=${lineId}::uuid
+           where company_id=${companyId}::uuid and reversed_at is null
+             and (
+               employee_order_earning_id=any(${orderEarnings.earningIds}::uuid[])
+               or employee_collection_fact_id=any(${collectionEarnings.factIds}::uuid[])
+             )
+        `.execute(transaction);
         // Claim the snapshots for this line. The payroll_period_id is null
         // guard is not redundant with the release above: it is the last word on
         // "paid once" if this ever runs alongside another period.
@@ -622,15 +638,6 @@ export class PayrollCalculationService {
                and payroll_period_id is null
           `.execute(transaction);
         }
-        await sql`
-          update employee_variable_earning_payment_allocations
-             set payroll_entry_id=${lineId}::uuid
-           where company_id=${companyId}::uuid and reversed_at is null
-             and (
-               employee_order_earning_id=any(${orderEarnings.earningIds}::uuid[])
-               or employee_collection_fact_id=any(${collectionEarnings.factIds}::uuid[])
-             )
-        `.execute(transaction);
         await this.allocateSalaryAdvances(
           transaction,
           companyId,

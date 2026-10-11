@@ -5,6 +5,7 @@ import { Decimal } from "decimal.js";
 import { type Kysely, sql } from "kysely";
 
 import { BalanceEnforcementCoordinator } from "../accounting/balance-enforcement.coordinator.js";
+import { isAccountingCaptureEnabled } from "../accounting/accounting-capture.js";
 import { PaymentFundingAccountService } from "../accounting/payment-funding-account.service.js";
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
@@ -1524,6 +1525,33 @@ export class DriverEarningsService {
       returning id
     `.execute(transaction);
     if (movement.rows[0] === undefined) {
+      // No owning Event: a hard error with GL Accounting ON (unchanged), the
+      // expected state with it OFF. The OFF trail is marked as generated so
+      // the balance -- which counts the payment row itself -- does not count
+      // it twice.
+      if (!(await isAccountingCaptureEnabled(transaction, options.companyId))) {
+        await sql`
+          insert into cash_bank_movements (
+            id, company_id, movement_number, movement_type, movement_date, accounting_date,
+            source_cash_account_id, source_bank_account_id, destination_cash_account_id,
+            destination_bank_account_id, amount, fee_amount, payment_method, reference_number,
+            description, status, correlation_id, idempotency_identity, accounting_event_id,
+            generated_by_source_type,
+            confirmed_by_account_id, confirmed_at, created_by_account_id, created_at
+          ) values (
+            ${movementId}::uuid, ${options.companyId}::uuid, ${movementNumber},
+            ${movementType}, ${options.paymentDate}::date, ${options.paymentDate}::date,
+            ${options.paymentMethod === "cash" ? options.fundingAccountId : null}::uuid,
+            ${options.paymentMethod === "bank" ? options.fundingAccountId : null}::uuid,
+            null::uuid, null::uuid, ${new Decimal(options.amount).toFixed(2)}::numeric,
+            '0'::numeric, ${movementPaymentMethod}, ${options.paymentNumber},
+            ${`Employee payment ${options.paymentNumber}`}, 'confirmed', ${options.paymentId},
+            ${`employee_payment:${options.paymentId}`}, null, 'employee_payment',
+            ${options.actorId}::uuid, now(), ${options.actorId}::uuid, now()
+          )
+        `.execute(transaction);
+        return;
+      }
       throw new ApplicationException(
         "employee_payment_cash_movement_not_created",
         "The Employee payment Cash/Bank Movement could not be created",
