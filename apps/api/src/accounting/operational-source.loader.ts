@@ -759,11 +759,12 @@ export class OperationalSourceLoader {
     const payments = await sql<{
       amount: string;
       bankAccountId: string | null;
+      direction: "in" | "out";
       id: string;
       paymentMethod: string;
     }>`
       select id,payment_method as "paymentMethod",amount::text,
-             company_bank_account_id as "bankAccountId"
+             company_bank_account_id as "bankAccountId",direction
         from driver_reconciliation_payments
        where company_id=${event.companyId}::uuid
          and reconciliation_id=${event.sourceEntityId}::uuid
@@ -804,14 +805,20 @@ export class OperationalSourceLoader {
     return {
       accountingDate: row.businessDate,
       components: present([
+        // Money received is a debit to Cash/Bank. A Company-pays-Driver line
+        // (`out`, Cash only, 11 Oct 2026) is cash LEAVING the drawer: a credit
+        // to the same Cash account. Debits = credits still holds:
+        // received - paid out + expenses + fee offset = gross collections.
         ...payments.rows.map((payment) =>
           component(
             "driver_collection_cash",
             payment.amount,
-            "debit",
+            payment.direction === "out" ? "credit" : "debit",
             payment.paymentMethod === "cash" ? "driver_collection_cash" : "trader_settlement_bank",
             { ...base, companyBankAccountId: payment.bankAccountId, paymentRowId: payment.id },
-            `${payment.paymentMethod} received in ${row.number}`,
+            payment.direction === "out"
+              ? `Cash paid to Driver in ${row.number}`
+              : `${payment.paymentMethod} received in ${row.number}`,
           ),
         ),
         component(

@@ -13,6 +13,8 @@ import { Logger } from "nestjs-pino";
 import { AppModule } from "../app.module.js";
 import { PasswordHasher } from "../authentication/password-hasher.js";
 import { configuration } from "../configuration/environment.js";
+import { countsInOperationalBalance } from "../accounting/cash-trail-classification.js";
+import { OperationalSourceLoader } from "../accounting/operational-source.loader.js";
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
@@ -424,6 +426,68 @@ describe.skipIf(!runHttpTests)("mixed Cash/Visa Driver collection", () => {
             paidToDrivers: "80.00",
             visaTotal: "334.00",
           });
+
+          // ------------------------------------------ 3. Accounting (step 3)
+          // The Driver Collection Journal must balance for both collections:
+          // received - paid out + expenses + fee offset = gross collections.
+          // The payout is cash LEAVING the drawer, so it is a credit.
+          const loader = new OperationalSourceLoader();
+          const journalFor = async (id: string) => {
+            const facts = await loader.load(transaction, {
+              actorId: accountId,
+              companyId,
+              correlationId: id,
+              effectiveAccountingDate: "2026-10-11",
+              eventHash: "test",
+              eventType: "driver_collection_confirmed",
+              eventVersion: 1,
+              id: randomUUID(),
+              operationalArea: "driver_collections",
+              reversalOfEventId: null,
+              sourceEntityId: id,
+              sourceEntityType: "driver_reconciliation",
+              sourceReference: null,
+            });
+            const total = (intent: "credit" | "debit") =>
+              facts.components
+                .filter((line) => line.entryIntent === intent)
+                .reduce((sum, line) => sum + Math.round(Number(line.amount) * 100), 0) / 100;
+            return { components: facts.components, credit: total("credit"), debit: total("debit") };
+          };
+          const mixedJournal = await journalFor(mixedId);
+          expect(mixedJournal.debit).toBe(mixedJournal.credit);
+          const payoutJournal = await journalFor(payoutId);
+          expect(payoutJournal.debit).toBe(payoutJournal.credit);
+          expect(payoutJournal.debit).toBe(147);
+          expect(
+            payoutJournal.components
+              .filter((line) => line.mappingKey === "driver_collection_cash")
+              .map((line) => [line.entryIntent, line.amount]),
+          ).toEqual([["credit", "80.00"]]);
+
+          // Reversing the payout collection takes both of its Movements out of
+          // the cash balance (Accounting OFF: no counter-Movement is written)
+          // and makes its Order collectable again.
+          const countedMovements = async () =>
+            (
+              await sql<{ n: number }>`
+                select count(*)::int as n from cash_bank_movements m
+                 where m.company_id = ${companyId}::uuid
+                   and m.reference_number = ${String(payout.body.reconciliationNumber)}
+                   and ${countsInOperationalBalance("m")}
+              `.execute(transaction)
+            ).rows[0]?.n;
+          expect(await countedMovements()).toBe(2);
+          const reversed = await post(`/operations/cash/reconciliations/${payoutId}/reverse`, {
+            reason: "Test payout reversal",
+          }).set("X-Idempotency-Key", `payout-reverse-${randomUUID()}`);
+          expect(reversed.status).toBe(201);
+          expect(await countedMovements()).toBe(0);
+          const restored = await sql<{ status: string }>`
+            select driver_reconciliation_status as status from orders
+             where id = ${visaOnly}::uuid and company_id = ${companyId}::uuid
+          `.execute(transaction);
+          expect(restored.rows[0]?.status).toBe("pending");
 
           throw rollbackMarker;
         } finally {
