@@ -32,10 +32,10 @@
       "displayName": "Main app",
       "path": "apps/web",
       "renderService": "bluelinegpt-web-test",
-      "status": "confirmed_live",
-      "localCommit": "c28f3bcf",
+      "status": "needs_deploy",
+      "localCommit": "eb0cd792",
       "localCommitDate": "2026-10-11",
-      "lastChangeDescription": "Trader Credits paid back in Trader Settlements; no re-charge of a credited fee",
+      "lastChangeDescription": "Settlements show 0.00, not -0.00, when nothing is deducted; route inventory knows the two settings routes",
       "lastChangeBy": "claude",
       "confirmedLiveCommit": "c28f3bcf",
       "confirmedLiveAt": "2026-10-11"
