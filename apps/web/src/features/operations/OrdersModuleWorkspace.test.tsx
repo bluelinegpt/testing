@@ -1463,6 +1463,41 @@ describe("OrdersModuleWorkspace", () => {
     );
   });
 
+  it("Clear filters also clears the AI tab's question, answer and grouping, staying on the AI tab", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path === "configuration/order-views") return Promise.resolve(aiMenu);
+        if (path === "operations/orders/questions") {
+          return Promise.resolve({ items: [{ amount: "110.00", count: 1, key: "collect_from_driver" }] });
+        }
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({ filteredCount: 1, items: [order], page: 1, pageSize: 25, totalCount: 1 });
+        }
+        if (path.startsWith("configuration/areas")) return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        return Promise.resolve([]);
+      }),
+      post: vi.fn(() => Promise.resolve({ chips: [], filters: {}, notes: [], source: "ai", unsupported: true })),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
+    );
+    fireEvent.click(await screen.findByRole("tab", { name: "AI (Beta)" }));
+    const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
+    const ready = await questions.findByRole("button", { name: /Ready to collect from driver/u });
+    fireEvent.click(ready);
+    await waitFor(() => expect(ready).toHaveAttribute("aria-pressed", "true"));
+    const box = questions.getByRole("searchbox", { name: "Ask about orders" });
+    fireEvent.change(box, { target: { value: "what is the weather" } });
+    fireEvent.submit(box);
+    expect(await screen.findByText("This box answers questions about orders only.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    await waitFor(() => expect(ready).toHaveAttribute("aria-pressed", "false"));
+    expect(box).toHaveValue("");
+    expect(screen.queryByText("This box answers questions about orders only.")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "AI (Beta)" })).toHaveAttribute("aria-selected", "true");
+  });
+
   it("does not offer the question box to a Driver signed in for their own work", async () => {
     const api = {
       get: vi.fn((path: string) => {

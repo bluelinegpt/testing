@@ -2565,6 +2565,12 @@ export function OrdersModuleWorkspace({
                 });
                 setFilterEmirateId("");
                 setFilterArea(undefined);
+                // Everything goes, the AI tab's work too: the ready question,
+                // the typed question and its answer, and the grouping.
+                clearAsk();
+                setAskText("");
+                setCloseAllStage("idle");
+                setGrouping("");
               }}
               type="button"
             >
