@@ -2247,6 +2247,7 @@ export const englishTranslations = {
         collect: "Collect from this driver",
         settle: "New settlement for this trader",
         confirmReceipt: "Confirm receipt for this trader",
+        confirmReceiptMany: "Confirm receipt for this trader (1 of {{count}})",
         collectFees: "Collect fees from this trader",
       },
       ask: {

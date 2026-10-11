@@ -2283,6 +2283,7 @@ export const arabicTranslations = {
         collect: "تحصيل من هذا المندوب",
         settle: "تسوية جديدة لهذا التاجر",
         confirmReceipt: "تأكيد الاستلام لهذا التاجر",
+        confirmReceiptMany: "تأكيد الاستلام لهذا التاجر (1 من {{count}})",
         collectFees: "تحصيل الرسوم من هذا التاجر",
       },
       ask: {

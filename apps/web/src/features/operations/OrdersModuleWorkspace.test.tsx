@@ -1568,6 +1568,60 @@ describe("OrdersModuleWorkspace", () => {
     );
   });
 
+  it("confirms receipt from the Trader group with that Trader's settlement, and a closed International Order shows its money step", async () => {
+    const awaitingReceipt = {
+      completionBlockerCode: null,
+      isFinanciallyComplete: false,
+      nextActionCode: "confirm_trader_received",
+      nextActionParams: {
+        openDialog: "confirm_receipt",
+        settlementId: "50000000-0000-4000-8000-000000000001",
+        traderId: "30000000-0000-4000-8000-000000000001",
+      },
+      nextActionRoute: "/trader-settlements",
+      waitingFor: "awaiting_trader_receipt_confirmation",
+      workflowState: "awaiting_trader_receipt_confirmation",
+    };
+    const closedInternational = {
+      ...internationalOrder,
+      deliveryStatus: "closed",
+      internationalCarrierStatus: "in_transit",
+      traderId: "30000000-0000-4000-8000-000000000001",
+      traderSettlementStatus: "money_sent_to_trader",
+      workflowGuidance: awaitingReceipt,
+    };
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path === "configuration/order-views") return Promise.resolve(aiMenu);
+        if (path === "operations/orders/questions") {
+          return Promise.resolve({ items: [{ amount: null, count: 1, key: "confirm_trader_receipt" }] });
+        }
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({ filteredCount: 1, items: [closedInternational], page: 1, pageSize: 25, totalCount: 1 });
+        }
+        if (path.startsWith("configuration/areas")) return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    const onNavigate = vi.fn();
+    renderWithRouter(
+      <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={onNavigate} permissions={["users_roles.manage"]} />,
+    );
+    fireEvent.click(await screen.findByRole("tab", { name: "AI (Beta)" }));
+    const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
+    fireEvent.click(await questions.findByRole("button", { name: /Paid, trader not confirmed/u }));
+
+    // A closed International Order no longer shows its last carrier stage in
+    // place of the money step.
+    expect(screen.queryByText("In Transit")).not.toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm receipt for this trader" }));
+    expect(onNavigate).toHaveBeenLastCalledWith(
+      "/trader-settlements?openDialog=confirm_receipt&traderId=30000000-0000-4000-8000-000000000001&settlementId=50000000-0000-4000-8000-000000000001&returnTo=%2Forders",
+    );
+  });
+
   it("groups the selected-Orders actions: status, Driver, manifest, Trader reports, then copy / clear", async () => {
     const api = {
       get: vi.fn((path: string) => {

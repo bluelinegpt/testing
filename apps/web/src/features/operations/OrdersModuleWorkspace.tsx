@@ -302,6 +302,20 @@ const orderQuestions = [
   { grouping: null, key: "on_hold" },
 ] as const satisfies readonly { grouping: OrdersGroupingDimension | null; key: string }[];
 
+/**
+ * An International Order is in its carrier stages only until it is delivered.
+ * Once delivered, closed, returned or cancelled, its next step is the normal
+ * money workflow (confirm the Trader's receipt, close ...), so the carrier
+ * stage must no longer replace it. ORD-000162 (11 Oct 2026): closed, carrier
+ * stage still "In Transit", and its "Confirm receipt" step was hidden.
+ */
+function inCarrierStages(order: { readonly deliveryStatus: string; readonly orderType: string }) {
+  return (
+    order.orderType === "gcc_international" &&
+    !["delivered", "closed", "returned_to_trader", "cancelled"].includes(order.deliveryStatus)
+  );
+}
+
 interface OrderQuestionCount {
   readonly amount: string | null;
   readonly count: number;
@@ -1496,9 +1510,28 @@ export function OrdersModuleWorkspace({
       };
     }
     if (filters.question === "confirm_trader_receipt" && canSettle) {
+      /* Receipt is confirmed per settlement, so the button names one: the
+         settlement the first Order of this Trader points to (the oldest one
+         waiting). Without it the settlements screen cannot know which dialog
+         to open. Several settlements: confirm one, come back, and the button
+         moves on to the next. */
+      const settlementIds = [
+        ...new Set(
+          group.orders
+            .map((order) => order.workflowGuidance?.nextActionParams.settlementId)
+            .filter((id): id is string => typeof id === "string" && id !== ""),
+        ),
+      ];
+      const settlementId = settlementIds[0];
       return {
-        label: t("operations.questions.groupAction.confirmReceipt"),
-        path: `/trader-settlements?openDialog=confirm_receipt&traderId=${traderId}&returnTo=%2Forders`,
+        label:
+          settlementIds.length > 1
+            ? t("operations.questions.groupAction.confirmReceiptMany", { count: settlementIds.length })
+            : t("operations.questions.groupAction.confirmReceipt"),
+        path:
+          settlementId === undefined
+            ? `/trader-settlements?openDialog=confirm_receipt&traderId=${traderId}&returnTo=%2Forders`
+            : `/trader-settlements?openDialog=confirm_receipt&traderId=${traderId}&settlementId=${encodeURIComponent(settlementId)}&returnTo=%2Forders`,
       };
     }
     if (filters.question === "trader_owes_fees") {
@@ -1676,7 +1709,7 @@ export function OrdersModuleWorkspace({
         <td className="money-cell">{formatCurrency(order.customerAmountDue, "AED", locale)}</td>
         <td>
           <DeliveryStatusBadge order={order} />
-          {order.orderType === "gcc_international" && order.internationalCarrierStatus ? (
+          {inCarrierStages(order) && order.internationalCarrierStatus ? (
             <span className="cell-secondary carrier-stage-label">
               {t(`operations.internationalCarrierStatuses.${order.internationalCarrierStatus}`)}
             </span>
@@ -6018,7 +6051,7 @@ function FinancialStatusCell({
             return: order.returnStatus ?? null,
             settlement: order.traderSettlementStatus,
           }}
-          {...(order.orderType === "gcc_international" && order.deliveryStatus !== "delivered"
+          {...(inCarrierStages(order)
             ? { internationalCarrierStatus: order.internationalCarrierStatus }
             : {})}
         />
