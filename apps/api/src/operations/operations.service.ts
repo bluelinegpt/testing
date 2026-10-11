@@ -24,6 +24,12 @@ import {
   type VatPolicy,
 } from "./order-financial-model.js";
 import { closeSettlementComplete } from "./order-close-eligibility.js";
+import {
+  isOrderQuestionKey,
+  ORDER_QUESTION_KEYS,
+  orderQuestionPredicate,
+  type OrderQuestionKey,
+} from "./order-questions.js";
 import { resolveOrderCancellationReason } from "./order-cancellation-reason.js";
 import { allocateAutomaticOrderSerial, nextAutomaticSerial } from "./order-serial-allocation.js";
 import { deriveOrderWorkflowGuidance } from "./order-workflow-guidance.js";
@@ -105,6 +111,15 @@ export interface OperationsStatusCount {
  * status key (zero-filled), so a mobile client never has to special-case a
  * status that simply has no Orders right now.
  */
+export interface OrderQuestionCounts {
+  readonly items: readonly {
+    /** AED total where it means something (cash with Drivers, owed to Traders). */
+    readonly amount: string | null;
+    readonly count: number;
+    readonly key: OrderQuestionKey;
+  }[];
+}
+
 export interface OperationsOperatorDashboardSummary {
   readonly activeTotal: number;
   readonly byStatus: Readonly<Record<string, number>>;
@@ -157,6 +172,12 @@ export interface OperationsOrderFilters {
   readonly settlementStatus?: string | undefined;
   readonly workflowStep?:
     "complete" | "collect_from_driver" | "collect_from_trader" | "settle_trader" | undefined;
+  /**
+   * Orders ready question (`order-questions.ts`). When present it replaces the
+   * tab: the answer covers every Order of the Company that matches, whatever
+   * tab or Orders-menu view is open.
+   */
+  readonly question?: string | undefined;
   readonly quickView?:
     "active" | "all" | "cancelled" | "closed" | "hold" | "accountant" | undefined;
   /**
@@ -908,6 +929,49 @@ export class OperationsService {
    * out for delivery or an Order Returned to Trader still counts as Active
    * here exactly as it does when quick-viewing "Active" in the list.
    */
+  /**
+   * Live counts for the Orders ready questions (`order-questions.ts`), from the
+   * same predicates the list filters with, so a count and the list it opens
+   * always agree. One pass over the Company's Orders. A linked Driver User
+   * only ever counts their own Orders, as in the list.
+   */
+  public async orderQuestionCounts(): Promise<OrderQuestionCounts> {
+    const { companyId } = this.tenants.current();
+    const ownDriverId = await this.currentEmployeeDriverId();
+    const columns = ORDER_QUESTION_KEYS.map(
+      (key) =>
+        sql`count(*) filter (where ${orderQuestionPredicate(key)})::int as ${sql.ref(key)}`,
+    );
+    const result = await sql<Record<OrderQuestionKey, number> & {
+      collectAmount: string;
+      payTraderAmount: string;
+    }>`
+      select ${sql.join(columns)},
+             coalesce(sum(o.customer_amount_due)
+               filter (where ${orderQuestionPredicate("collect_from_driver")}), 0)::text
+               as "collectAmount",
+             coalesce(sum(greatest(o.trader_net_payable - coalesce(o.trader_paid_amount, 0), 0))
+               filter (where ${orderQuestionPredicate("pay_trader")}), 0)::text
+               as "payTraderAmount"
+        from orders o
+       where o.company_id = ${companyId}::uuid
+         and (${ownDriverId ?? null}::uuid is null or o.assigned_driver_id = ${ownDriverId ?? null}::uuid)
+    `.execute(this.database);
+    const row = result.rows[0];
+    return {
+      items: ORDER_QUESTION_KEYS.map((key) => ({
+        amount:
+          key === "collect_from_driver"
+            ? new Decimal(row?.collectAmount ?? 0).toFixed(2)
+            : key === "pay_trader"
+              ? new Decimal(row?.payTraderAmount ?? 0).toFixed(2)
+              : null,
+        count: Number(row?.[key] ?? 0),
+        key,
+      })),
+    };
+  }
+
   public async operatorDashboardSummary(): Promise<OperationsOperatorDashboardSummary> {
     const { companyId } = this.tenants.current();
     const knownStatuses = [
@@ -1102,11 +1166,16 @@ export class OperationsService {
     const emirateId = this.optionalUuidFilter(filters.emirateId);
     const dateFrom = this.optionalDate(filters.dateFrom);
     const dateTo = this.optionalDate(filters.dateTo);
+    const question = this.orderQuestionFilter(filters.question);
     // Orders menu. A Driver User keeps their own work queue: custom tabs are
-    // an Office layout and never narrow or widen what a Driver sees.
+    // an Office layout and never narrow or widen what a Driver sees. A ready
+    // question answers across the whole Company, so it replaces the tab.
     const menuView =
-      ownDriverId === undefined ? await this.orderMenuView(companyId, filters.viewKey) : null;
-    const quickView = menuView?.kind === "custom" ? "all" : (filters.quickView ?? "active");
+      ownDriverId === undefined && question === null
+        ? await this.orderMenuView(companyId, filters.viewKey)
+        : null;
+    const quickView =
+      question !== null || menuView?.kind === "custom" ? "all" : (filters.quickView ?? "active");
     const openTraderReceivablePredicate = sql`
       exists (
         select 1
@@ -1295,6 +1364,7 @@ export class OperationsService {
       and (${cancellationReason}::text is null or o.cancellation_reason_code = ${cancellationReason})
       and (${internationalCarrierStatus}::text is null or o.international_carrier_status = ${internationalCarrierStatus})
       and ${workflowStepPredicate}
+      and ${question === null ? sql`true` : orderQuestionPredicate(question)}
       and (${orderType}::text is null or o.order_type = ${orderType})
       and (${thirdPartyDeliveryCompanyName}::text is null or lower(o.third_party_delivery_company_name) like '%' || lower(${thirdPartyDeliveryCompanyName}::text) || '%')
       and (${destinationCountryName}::text is null or lower(o.destination_country_name) like '%' || lower(${destinationCountryName}::text) || '%')
@@ -1765,6 +1835,7 @@ export class OperationsService {
     const cashStatus = this.optionalFilter(filters.cashStatus);
     const settlementStatus = this.optionalFilter(filters.settlementStatus);
     const workflowStep = this.optionalFilter(filters.workflowStep);
+    const question = this.orderQuestionFilter(filters.question);
     const traderId = this.optionalUuidFilter(filters.traderId);
     const driverId = this.optionalUuidFilter(filters.driverId);
     const areaId = this.optionalUuidFilter(filters.areaId);
@@ -1881,6 +1952,7 @@ export class OperationsService {
         and ${deliveryStatusPredicate}
         and (${cancellationReason}::text is null or o.cancellation_reason_code = ${cancellationReason})
         and ${exportWorkflowStepPredicate}
+        and ${question === null ? sql`true` : orderQuestionPredicate(question)}
         and (${cashStatus}::text is null or o.driver_reconciliation_status = ${cashStatus})
         and (${settlementStatus}::text is null or o.trader_settlement_status = ${settlementStatus})
         and (${traderId}::uuid is null or o.trader_id = ${traderId}::uuid)
@@ -8778,6 +8850,20 @@ export class OperationsService {
     if (typeof error === "object" && error !== null && "code" in error && error.code === "23505") {
       throw new ApplicationException(code, message, HttpStatus.CONFLICT);
     }
+  }
+
+  /** `null` when absent; a named 400 for a key that is not a ready question. */
+  private orderQuestionFilter(value: string | undefined): OrderQuestionKey | null {
+    const key = this.optionalFilter(value);
+    if (key === null) return null;
+    if (!isOrderQuestionKey(key)) {
+      throw new ApplicationException(
+        "order_question_invalid",
+        "This Orders question is not recognised",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return key;
   }
 
   private optionalFilter(value: string | undefined): string | null {

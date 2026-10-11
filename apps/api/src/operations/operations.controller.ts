@@ -42,6 +42,7 @@ import {
   type OrdersReportPage,
   type OperationsDriverDashboardSummary,
   type OperationsOperatorDashboardSummary,
+  type OrderQuestionCounts,
   type OperationsOverview,
   type OperationsOrderQuote,
   type OperationsOrderImportResult,
@@ -243,6 +244,7 @@ export class OperationsController {
     @Query("settlementStatus") settlementStatus?: string,
     @Query("workflowStep")
     workflowStep?: "complete" | "collect_from_driver" | "collect_from_trader" | "settle_trader",
+    @Query("question") question?: string,
     @Query("traderId") traderId?: string,
     @Query("driverId") driverId?: string,
     @Query("areaId") areaId?: string,
@@ -297,9 +299,29 @@ export class OperationsController {
       sortDirection,
       settlementStatus,
       workflowStep,
+      question,
       traderId,
     };
     return this.operations.orders(filters);
+  }
+
+  // Same permissions as the Orders list: the counts only ever describe Orders
+  // the caller can already list, and carry no figure the list does not show.
+  @ApiOperation({ summary: "Live counts for the Orders ready questions" })
+  @RequireAnyPermission(
+    "orders.edit_before_processing",
+    "orders.driver_self_service",
+    "orders.assign_driver",
+    "orders.update_delivery_status",
+    "reconciliations.create",
+    "reconciliations.reverse",
+    "settlements.create",
+    "settlements.reverse",
+    "users_roles.manage",
+  )
+  @Get("orders/questions")
+  public orderQuestionCounts(): Promise<OrderQuestionCounts> {
+    return this.operations.orderQuestionCounts();
   }
 
   // Deliberately narrower than `overview`: no financial totals (COD, revenue,
@@ -396,6 +418,7 @@ export class OperationsController {
     @Query("settlementStatus") settlementStatus?: string,
     @Query("workflowStep")
     workflowStep?: "complete" | "collect_from_driver" | "collect_from_trader" | "settle_trader",
+    @Query("question") question?: string,
     @Query("traderId") traderId?: string,
     @Query("driverId") driverId?: string,
     @Query("areaId") areaId?: string,
@@ -419,6 +442,7 @@ export class OperationsController {
       serialNumber,
       settlementStatus,
       workflowStep,
+      question,
       traderId,
     });
   }
