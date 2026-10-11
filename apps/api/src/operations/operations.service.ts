@@ -37,6 +37,7 @@ import { driverWorkPredicate } from "./driver-work-visibility.js";
 import {
   type CustomViewDefinition,
   type ActiveViewDefinition,
+  completeStandardViews,
   validateOrderViews,
 } from "../company-configuration/order-views.js";
 import { deliveryStatusFilterPredicate } from "./delivery-status-filter.js";
@@ -1786,7 +1787,9 @@ export class OperationsService {
     `.execute(this.database);
     const row = result.rows[0];
     if (row === undefined || !row.enabled) throw unavailable();
-    const validation = validateOrderViews(row.views);
+    // A menu saved before a standard tab existed (the AI tab, 11 Oct 2026)
+    // gains it here exactly as in the settings screen, so it stays valid.
+    const validation = validateOrderViews(completeStandardViews(row.views));
     if (!validation.ok) throw unavailable();
     const view = validation.views.find((candidate) => candidate.key === key);
     if (view === undefined || view.definition === null) throw unavailable();
