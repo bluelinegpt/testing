@@ -61,7 +61,7 @@ export function CompanyOrdersAiPanel({ companyId }: { companyId: string }): Reac
     <section aria-labelledby="company-ai-heading" className="platform-panel">
       <div className="platform-panel__header">
         <div>
-          <h3 id="company-ai-heading">AI</h3>
+          <h3 id="company-ai-heading">AI (Beta)</h3>
           <p className="platform-muted">
             Orders AI adds an AI tab to the Company&apos;s Orders screen: users ask about their Orders
             in Arabic or English and get the matching list. The AI only turns the question into list

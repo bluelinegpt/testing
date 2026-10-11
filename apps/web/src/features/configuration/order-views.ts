@@ -129,7 +129,7 @@ export function standardOrderViews(): OrderView[] {
     system("cancelled", "Cancelled", "ملغاة"),
     system("delivery", "Operation Activity", "نشاط العمليات"),
     system("accountant", "Accountant", "المحاسب"),
-    system("ai", "AI", "الذكاء الاصطناعي"),
+    system("ai", "AI (Beta)", "ذكاء صناعي (تجربة)"),
   ];
 }
 

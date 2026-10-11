@@ -1153,7 +1153,7 @@ describe("OrdersModuleWorkspace", () => {
       <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
     );
     // The ready questions live on the AI tab.
-    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "AI (Beta)" }));
     const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
     const collect = await questions.findByRole("button", { name: /Ready to collect from driver/u });
     await waitFor(() => expect(collect.textContent).toContain("45"));
@@ -1202,7 +1202,7 @@ describe("OrdersModuleWorkspace", () => {
       <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
     );
     // The ready questions live on the AI tab.
-    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "AI (Beta)" }));
     const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
     fireEvent.click(await questions.findByRole("button", { name: /Ready to close/u }));
     fireEvent.click(await questions.findByRole("button", { name: "Close all 4 ready orders" }));
@@ -1244,7 +1244,7 @@ describe("OrdersModuleWorkspace", () => {
       <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
     );
     // The ready questions live on the AI tab.
-    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "AI (Beta)" }));
     const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
     expect(await questions.findByText("Nothing waiting")).toBeInTheDocument();
     expect(questions.queryByRole("button", { name: /Ready to close/u })).not.toBeInTheDocument();
@@ -1286,7 +1286,7 @@ describe("OrdersModuleWorkspace", () => {
       <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
     );
     // The question box lives on the AI tab.
-    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "AI (Beta)" }));
     const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
     fireEvent.change(questions.getByRole("searchbox", { name: "Ask about orders" }), {
       target: { value: "orders with Ahmed not collected" },
@@ -1347,7 +1347,7 @@ describe("OrdersModuleWorkspace", () => {
       <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
     );
     // The question box lives on the AI tab.
-    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "AI (Beta)" }));
     const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
     const box = questions.getByRole("searchbox", { name: "Ask about orders" });
     fireEvent.change(box, { target: { value: "what is the weather" } });
@@ -1391,7 +1391,7 @@ describe("OrdersModuleWorkspace", () => {
       />,
     );
     // The question box lives on the AI tab.
-    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "AI (Beta)" }));
     const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
     const box = questions.getByRole("searchbox", { name: "Ask about orders" });
     fireEvent.change(box, { target: { value: "orders ready for payment" } });
@@ -1453,7 +1453,7 @@ describe("OrdersModuleWorkspace", () => {
     await screen.findByText("Serial Number: SER-000001");
     expect(screen.queryByRole("group", { name: "Quick questions" })).not.toBeInTheDocument();
     expect(api.get).not.toHaveBeenCalledWith("operations/orders/questions");
-    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "AI (Beta)" }));
     const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
     expect(await questions.findByRole("button", { name: /No driver/u })).toBeInTheDocument();
     expect(questions.getByRole("searchbox", { name: "Ask about orders" })).toBeInTheDocument();
@@ -1517,7 +1517,7 @@ describe("OrdersModuleWorkspace", () => {
       <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={onNavigate} permissions={["users_roles.manage"]} />,
     );
     // The ready questions live on the AI tab.
-    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "AI (Beta)" }));
     const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
 
     fireEvent.click(await questions.findByRole("button", { name: /Ready to collect from driver/u }));

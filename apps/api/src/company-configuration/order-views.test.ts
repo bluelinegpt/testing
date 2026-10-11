@@ -55,7 +55,7 @@ describe("standard Orders menu", () => {
       "Cancelled",
       "Operation Activity",
       "Accountant",
-      "AI",
+      "AI (Beta)",
     ]);
     expect(views.filter((view) => view.isDefault).map((view) => view.key)).toEqual(["active"]);
     expect(views.filter((view) => view.showCount).map((view) => view.key)).toEqual(["hold"]);

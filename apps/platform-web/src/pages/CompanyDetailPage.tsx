@@ -599,7 +599,7 @@ export function CompanyDetailPage(): ReactElement {
             ["website", "Website"],
             ["whatsapp", "WhatsApp"],
             ["routes", "Route planning"],
-            ["ai", "AI"],
+            ["ai", "AI (Beta)"],
             ["configuration", "Configuration & Accounting"],
             ["audit", "Audit"],
             ["lifecycle", "Lifecycle"],

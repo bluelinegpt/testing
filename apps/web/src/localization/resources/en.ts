@@ -2837,7 +2837,7 @@ export const englishTranslations = {
       "Change the orders that can make this move and skip the rest (if unchecked, the whole change is cancelled when any selected order is not eligible)",
     quickView: {
       accountant: "Accountant",
-      ai: "AI",
+      ai: "AI (Beta)",
       delivery: "Operation Activity",
       active: "Active Orders",
       all: "All Orders",
