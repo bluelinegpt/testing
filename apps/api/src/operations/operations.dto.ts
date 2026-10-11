@@ -148,6 +148,18 @@ export class ChangeOrderStatusDto {
   public readonly expectedStatus?: (typeof allDeliveryStatuses)[number];
 }
 
+/** Orders question box: a free-text question about Orders, Arabic or English. */
+export class AskOrdersQuestionDto {
+  @IsString()
+  @MinLength(2)
+  @MaxLength(300)
+  public readonly question!: string;
+
+  @IsOptional()
+  @IsIn(["ar", "en"])
+  public readonly language?: "ar" | "en";
+}
+
 export class OrderSelectionDto {
   @IsIn(["ids", "filter"])
   public readonly selectionMode!: "filter" | "ids";

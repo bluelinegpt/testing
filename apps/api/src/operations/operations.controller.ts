@@ -88,6 +88,7 @@ import {
   OrdersWorkflowService,
 } from "./orders-workflow.service.js";
 import { DriverShipmentManifestService } from "./driver-shipment-manifest.service.js";
+import { type AskResult, OrderQuestionAskService } from "./order-question-ask.js";
 import type { ManifestData } from "./driver-shipment-manifest-html.js";
 import {
   TraderAccountStatementService,
@@ -139,6 +140,7 @@ import {
   RegisterInternationalShipmentDto,
   RegisterOrderAttachmentDto,
   OrderSelectionDto,
+  AskOrdersQuestionDto,
   ReverseDriverReconciliationDto,
   ReactivateHoldOrdersDto,
   TraderSettlementEligibleOrdersQueryDto,
@@ -180,6 +182,8 @@ export class OperationsController {
     private readonly pdf: DriverCollectionPdfService,
     @Inject(CompanyProfileService)
     private readonly companyProfile: CompanyProfileService,
+    @Inject(OrderQuestionAskService)
+    private readonly orderQuestionAsk: OrderQuestionAskService,
   ) {}
 
   // Either permission reaches the route; the SERVICE decides which one the
@@ -322,6 +326,26 @@ export class OperationsController {
   @Get("orders/questions")
   public orderQuestionCounts(): Promise<OrderQuestionCounts> {
     return this.operations.orderQuestionCounts();
+  }
+
+  // The question box: free text in, allow-listed Orders filters out. Same
+  // permissions as the Orders list; throttled because each call may reach the
+  // AI provider.
+  @ApiOperation({ summary: "Turn a question about Orders into Orders list filters" })
+  @RequireAnyPermission(
+    "orders.edit_before_processing",
+    "orders.assign_driver",
+    "orders.update_delivery_status",
+    "reconciliations.create",
+    "reconciliations.reverse",
+    "settlements.create",
+    "settlements.reverse",
+    "users_roles.manage",
+  )
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Post("orders/ask")
+  public askOrdersQuestion(@Body() input: AskOrdersQuestionDto): Promise<AskResult> {
+    return this.orderQuestionAsk.ask(input.question, input.language ?? "en");
   }
 
   // Deliberately narrower than `overview`: no financial totals (COD, revenue,

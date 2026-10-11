@@ -59,6 +59,11 @@ import { OrderMaintenanceService } from "./order-maintenance.service.js";
 import { OrderValidationController } from "./order-validation.controller.js";
 import { OrderValidationLookup } from "./order-validation.lookup.js";
 import { OrderValidationService } from "./order-validation.service.js";
+import {
+  OpenRouterOrderQuestionModel,
+  OrderQuestionAskService,
+  OrderQuestionModel,
+} from "./order-question-ask.js";
 
 @Module({
   // CompanyConfigurationModule exports BusinessDayService and
@@ -99,6 +104,9 @@ import { OrderValidationService } from "./order-validation.service.js";
     WhatsAppOutboxWriter,
     OperationsService,
     OrdersWorkflowService,
+    // Orders question box. The AI is behind a class token so tests swap in a fake.
+    OrderQuestionAskService,
+    { provide: OrderQuestionModel, useClass: OpenRouterOrderQuestionModel },
     OrderDeliveryReopenService,
     PublicTrackingService,
     EmployeeDeliveryEarningService,

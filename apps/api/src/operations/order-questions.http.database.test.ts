@@ -18,6 +18,18 @@ import type { DatabaseSchema } from "../infrastructure/database/database.types.j
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import { ApiExceptionFilter } from "../presentation/errors/api-exception.filter.js";
 import { CompanyHostResolver } from "../tenancy/company-host-resolver.js";
+import { OrderQuestionModel } from "./order-question-ask.js";
+
+/** Stands in for the AI: the test controls exactly what it "understood". */
+const fakeModel = {
+  configured: () => true,
+  interpret: ({ question }: { question: string }) =>
+    Promise.resolve(
+      question.includes("weather")
+        ? { aboutOrders: false }
+        : { aboutOrders: true, cashStatus: "pending", driverName: "fujairah" },
+    ),
+};
 
 const runHttpTests = process.env.RUN_RECONCILIATION_HTTP === "true";
 const rollbackMarker = Symbol("rollback order questions http test");
@@ -43,6 +55,8 @@ describe.skipIf(!runHttpTests)("Orders ready questions", () => {
           .useValue({
             execute: (work: (value: typeof transaction) => unknown) => work(transaction),
           })
+          .overrideProvider(OrderQuestionModel)
+          .useValue(fakeModel)
           .overrideProvider(CompanyHostResolver)
           .useValue({ resolve: (host: string | undefined) => host?.split(".")[0] })
           .compile();
@@ -285,6 +299,38 @@ describe.skipIf(!runHttpTests)("Orders ready questions", () => {
             [toPay]: "delivered",
           });
           expect(await listFor("ready_to_close")).toEqual([]);
+
+          // Question box (step 5): a ready question in words needs no AI; any
+          // other question becomes filters, with names resolved in this Company.
+          const ask = (question: string) =>
+            request(server)
+              .post("/api/v1/operations/orders/ask")
+              .set("Authorization", `Bearer ${token}`)
+              .send({ language: "en", question });
+          const library = await ask("Which orders are ready to collect from the driver?");
+          expect(library.status).toBe(201);
+          expect(library.body).toMatchObject({
+            filters: { question: "collect_from_driver" },
+            source: "library",
+            unsupported: false,
+          });
+          const asked = await ask("Fujairah driver orders not collected yet");
+          expect(asked.status).toBe(201);
+          expect(asked.body).toMatchObject({
+            filters: { cashStatus: "pending", driverId, quickView: "all" },
+            source: "ai",
+          });
+          const answer = await request(server)
+            .get(`/api/v1/operations/orders?quickView=all&cashStatus=pending&driverId=${driverId}`)
+            .set("Authorization", `Bearer ${token}`);
+          expect((answer.body.items as { id: string }[]).map((order) => order.id)).toEqual([toCollect]);
+          const outside = await ask("what is the weather tomorrow");
+          expect(outside.body).toMatchObject({ filters: {}, unsupported: true });
+          const logged = await sql<{ n: number }>`
+            select count(*)::int as n from audit_events
+             where company_id = ${companyId}::uuid and action = 'orders.question_asked'
+          `.execute(transaction);
+          expect(logged.rows[0]?.n).toBe(3);
 
           const invalid = await request(server)
             .get("/api/v1/operations/orders?question=drop_table")

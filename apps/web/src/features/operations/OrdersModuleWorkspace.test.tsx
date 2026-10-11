@@ -18,7 +18,7 @@ function renderWithRouter(ui: ReactElement, initialEntries: readonly string[] = 
 
 import { vi } from "vitest";
 
-import type { ApiClient } from "../../api/api-client.js";
+import { ApiError, type ApiClient } from "../../api/api-client.js";
 import { i18nInstance } from "../../localization/i18n.js";
 import { standardOrderViews } from "../configuration/order-views.js";
 import { OrderDetailsWorkspace, OrdersModuleWorkspace } from "./OrdersModuleWorkspace.js";
@@ -1225,7 +1225,185 @@ describe("OrdersModuleWorkspace", () => {
     );
     const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
     expect(await questions.findByText("Nothing waiting")).toBeInTheDocument();
-    expect(questions.queryByRole("button")).not.toBeInTheDocument();
+    expect(questions.queryByRole("button", { name: /Ready to close/u })).not.toBeInTheDocument();
+  });
+
+  it("answers a typed question with its filters, shows how it was understood, and lets a part be removed", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path === "operations/orders/questions") {
+          return Promise.resolve({ items: [{ amount: null, count: 1, key: "ready_to_close" }] });
+        }
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({ filteredCount: 1, items: [order], page: 1, pageSize: 25, totalCount: 1 });
+        }
+        if (path.startsWith("configuration/areas")) return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        return Promise.resolve([]);
+      }),
+      post: vi.fn((path: string) =>
+        path === "operations/orders/ask"
+          ? Promise.resolve({
+              chips: [
+                { field: "driverName", filterKeys: ["driverId"], value: "Ahmed" },
+                { field: "cashStatus", filterKeys: ["cashStatus"], value: "pending" },
+              ],
+              filters: {
+                cashStatus: "pending",
+                driverId: "20000000-0000-4000-8000-000000000001",
+                quickView: "all",
+              },
+              notes: [{ candidates: ["Dubai Mall", "Dubai Marina"], field: "areaName", value: "Dubai" }],
+              source: "ai",
+              unsupported: false,
+            })
+          : Promise.resolve({}),
+      ),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
+    );
+    const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
+    fireEvent.change(questions.getByRole("searchbox", { name: "Ask about orders" }), {
+      target: { value: "orders with Ahmed not collected" },
+    });
+    fireEvent.click(questions.getByRole("button", { name: "Ask" }));
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith("operations/orders/ask", {
+        language: "en",
+        question: "orders with Ahmed not collected",
+      }),
+    );
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(
+        expect.stringMatching(/^operations\/orders\?(?=.*driverId=20000000-0000-4000-8000-000000000001)(?=.*cashStatus=pending)(?=.*quickView=all)/u),
+      ),
+    );
+    expect(await screen.findByText("Understood as:")).toBeInTheDocument();
+    const answer = document.querySelector(".order-questions-answer");
+    expect(answer?.textContent).toContain("Driver: Ahmed");
+    expect(answer?.textContent).toContain("Driver cash: Pending Collection");
+    expect(
+      screen.getByText('More than one Area matches "Dubai": Dubai Mall, Dubai Marina. Write the full name.'),
+    ).toBeInTheDocument();
+
+    api.get.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Remove Driver" }));
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(expect.stringMatching(/^operations\/orders\?(?=.*cashStatus=pending)/u)),
+    );
+    const latest = api.get.mock.calls
+      .map(([path]) => path)
+      .filter((path) => path.startsWith("operations/orders?"))
+      .at(-1);
+    expect(latest).not.toContain("driverId=");
+    expect(screen.queryByRole("button", { name: "Remove Driver" })).not.toBeInTheDocument();
+  });
+
+  it("says when a question is not about Orders, and when the question box is unavailable", async () => {
+    const post = vi
+      .fn()
+      .mockResolvedValueOnce({ chips: [], filters: {}, notes: [], source: "ai", unsupported: true })
+      .mockRejectedValueOnce(
+        new ApiError("unavailable", "order_question_ai_unavailable", 503),
+      );
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path === "operations/orders/questions") return Promise.resolve({ items: [] });
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({ filteredCount: 1, items: [order], page: 1, pageSize: 25, totalCount: 1 });
+        }
+        if (path.startsWith("configuration/areas")) return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        return Promise.resolve([]);
+      }),
+      post,
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
+    );
+    const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
+    const box = questions.getByRole("searchbox", { name: "Ask about orders" });
+    fireEvent.change(box, { target: { value: "what is the weather" } });
+    fireEvent.submit(box);
+    expect(await screen.findByText("This box answers questions about orders only.")).toBeInTheDocument();
+
+    fireEvent.change(box, { target: { value: "orders delivered yesterday" } });
+    fireEvent.submit(box);
+    expect(
+      await screen.findByText("The question box is not available right now. Use the quick questions."),
+    ).toBeInTheDocument();
+  });
+
+  it("saves a question to the user's favourites, asks it again from there, and removes it", async () => {
+    localStorage.clear();
+    const answer = {
+      chips: [{ field: "question", filterKeys: ["question"], value: "pay_trader" }],
+      filters: { question: "pay_trader", quickView: "all" },
+      notes: [],
+      source: "library",
+      unsupported: false,
+    };
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path === "operations/orders/questions") return Promise.resolve({ items: [] });
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({ filteredCount: 1, items: [order], page: 1, pageSize: 25, totalCount: 1 });
+        }
+        if (path.startsWith("configuration/areas")) return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        return Promise.resolve([]);
+      }),
+      post: vi.fn(() => Promise.resolve(answer)),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+        persistenceScope={{ companyId: "company-1", userId: "user-1" }}
+      />,
+    );
+    const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
+    const box = questions.getByRole("searchbox", { name: "Ask about orders" });
+    fireEvent.change(box, { target: { value: "orders ready for payment" } });
+    fireEvent.submit(box);
+    fireEvent.click(await screen.findByRole("button", { name: "☆ Add to favourites" }));
+    expect(screen.getByRole("button", { name: "★ In favourites (click to remove)" })).toBeInTheDocument();
+    expect(
+      JSON.parse(localStorage.getItem("blueline.orders.favouriteQuestions.company-1.user-1") ?? "[]"),
+    ).toEqual(["orders ready for payment"]);
+
+    // Asked again from the favourite (fresh answer, so relative dates stay right).
+    const favourite = questions.getByRole("button", { name: "orders ready for payment" });
+    fireEvent.click(favourite);
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2));
+    expect(api.post).toHaveBeenLastCalledWith("operations/orders/ask", {
+      language: "en",
+      question: "orders ready for payment",
+    });
+
+    fireEvent.click(
+      questions.getByRole("button", { name: "Remove from favourites: orders ready for payment" }),
+    );
+    expect(questions.queryByRole("button", { name: "orders ready for payment" })).not.toBeInTheDocument();
+    expect(localStorage.getItem("blueline.orders.favouriteQuestions.company-1.user-1")).toBe("[]");
+  });
+
+  it("does not offer the question box to a Driver signed in for their own work", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path === "operations/orders/questions") return Promise.resolve({ items: [] });
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({ filteredCount: 1, items: [order], page: 1, pageSize: 25, totalCount: 1 });
+        }
+        if (path.startsWith("configuration/areas")) return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        return Promise.resolve([]);
+      }),
+      post: vi.fn(),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["orders.driver_self_service"]} />,
+    );
+    const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
+    expect(questions.queryByRole("searchbox")).not.toBeInTheDocument();
   });
 
   it("puts the next action on each Driver / Trader group of a ready question", async () => {

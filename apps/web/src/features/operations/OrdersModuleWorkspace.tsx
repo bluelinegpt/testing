@@ -171,6 +171,9 @@ interface OrderFilters {
   workflowStep: string;
   /** Orders ready question key (`order-questions.ts`); empty when none. */
   question: string;
+  /** Set by the question box only (Driver cash / Trader settlement status). */
+  cashStatus: string;
+  settlementStatus: string;
 }
 
 interface SelectionPayload extends Partial<OrderFilters> {
@@ -202,6 +205,8 @@ const bulkSelectionFilterKeys = [
   "workflowStep",
   // "Select all matching" of a ready question selects exactly its answer.
   "question",
+  "cashStatus",
+  "settlementStatus",
 ] as const satisfies readonly (keyof OrderFilters)[];
 
 type ManifestSelectionPayload = Partial<OrderFilters> & {
@@ -274,6 +279,8 @@ const initialFilters: OrderFilters = {
   traderId: "",
   workflowStep: "",
   question: "",
+  cashStatus: "",
+  settlementStatus: "",
 };
 
 /**
@@ -296,6 +303,83 @@ interface OrderQuestionCount {
   readonly amount: string | null;
   readonly count: number;
   readonly key: string;
+}
+
+/** `POST operations/orders/ask` (`order-question-ask.ts`). */
+interface OrderAskChip {
+  readonly field: string;
+  readonly filterKeys: readonly string[];
+  readonly value: string;
+}
+interface OrderAskResult {
+  readonly chips: readonly OrderAskChip[];
+  readonly filters: Readonly<Record<string, string>>;
+  readonly notes: readonly {
+    readonly candidates: readonly string[];
+    readonly field: string;
+    readonly value: string;
+  }[];
+  readonly source: "ai" | "library";
+  readonly unsupported: boolean;
+}
+
+/** Same permissions as `POST operations/orders/ask` (no Driver self service). */
+const orderAskPermissions = [
+  "orders.edit_before_processing",
+  "orders.assign_driver",
+  "orders.update_delivery_status",
+  "reconciliations.create",
+  "reconciliations.reverse",
+  "settlements.create",
+  "settlements.reverse",
+  "users_roles.manage",
+];
+
+/**
+ * Favourite questions (11 Oct 2026): a user's own saved questions, kept per
+ * Company and user in this browser -- the same place the Orders list already
+ * remembers its filters. A favourite is asked again when clicked, so "yesterday"
+ * always means yesterday.
+ */
+const favouriteQuestionsLimit = 12;
+function favouriteQuestionsKey(scope: { readonly companyId: string; readonly userId: string }) {
+  return `blueline.orders.favouriteQuestions.${scope.companyId}.${scope.userId}`;
+}
+function readFavouriteQuestions(key: string | null): readonly string[] {
+  if (key === null) return [];
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(key) ?? "[]");
+    return Array.isArray(parsed)
+      ? parsed
+          .filter((item): item is string => typeof item === "string" && item.trim() !== "")
+          .slice(0, favouriteQuestionsLimit)
+      : [];
+  } catch {
+    return [];
+  }
+}
+const sameQuestion = (left: string, right: string) =>
+  left.trim().toLocaleLowerCase() === right.trim().toLocaleLowerCase();
+
+/** The value of one "Understood as" chip, in the user's language. */
+function orderAskChipValue(chip: OrderAskChip, t: TFunction): string {
+  const each = (value: string, prefix: string) =>
+    value
+      .split(",")
+      .map((item) => t(`${prefix}.${item}`, { defaultValue: item }))
+      .join(", ");
+  switch (chip.field) {
+    case "question":
+      return t(`operations.questions.label.${chip.value}`, { defaultValue: chip.value });
+    case "cashStatus":
+      return each(chip.value, "driverCashStatuses");
+    case "deliveryStatus":
+    case "settlementStatus":
+    case "orderType":
+      return each(chip.value, "statuses");
+    default:
+      return chip.value;
+  }
 }
 
 /**
@@ -413,6 +497,40 @@ export function OrdersModuleWorkspace({
     {},
   );
   const [closeAllStage, setCloseAllStage] = useState<"idle" | "confirm" | "busy">("idle");
+  /* Question box (step 6): the typed question, and how it was understood. */
+  const [askText, setAskText] = useState("");
+  const [askBusy, setAskBusy] = useState(false);
+  const [askResult, setAskResult] = useState<OrderAskResult>();
+  const [askError, setAskError] = useState<string>();
+  /* The question the shown answer belongs to (what a favourite saves). */
+  const [askedQuestion, setAskedQuestion] = useState("");
+  const favouritesKey =
+    persistenceScope === undefined ? null : favouriteQuestionsKey(persistenceScope);
+  const [favourites, setFavourites] = useState<readonly string[]>(() =>
+    readFavouriteQuestions(favouritesKey),
+  );
+  useEffect(() => {
+    setFavourites(readFavouriteQuestions(favouritesKey));
+  }, [favouritesKey]);
+  const saveFavourites = (next: readonly string[]) => {
+    setFavourites(next);
+    if (favouritesKey === null) return;
+    try {
+      window.localStorage.setItem(favouritesKey, JSON.stringify(next));
+    } catch {
+      // Storage blocked by the browser: the list still works until a reload.
+    }
+  };
+  const isFavourite = (question: string) => favourites.some((item) => sameQuestion(item, question));
+  const toggleFavourite = (question: string) => {
+    const trimmed = question.trim();
+    if (trimmed === "") return;
+    saveFavourites(
+      isFavourite(trimmed)
+        ? favourites.filter((item) => !sameQuestion(item, trimmed))
+        : [...favourites, trimmed].slice(-favouriteQuestionsLimit),
+    );
+  };
   const persistenceKey =
     persistenceScope === undefined
       ? null
@@ -440,6 +558,8 @@ export function OrdersModuleWorkspace({
     filters.search,
     filters.serialNumber,
     filters.traderId,
+    filters.cashStatus,
+    filters.settlementStatus,
   ].some((value) => value !== "");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [allMatching, setAllMatching] = useState(false);
@@ -865,8 +985,66 @@ export function OrdersModuleWorkspace({
     }
   };
 
+  const clearAsk = () => {
+    setAskResult(undefined);
+    setAskError(undefined);
+  };
+
+  /* The question box. The API turns the question into allow-listed Orders
+     filters (the AI never sees an Order); the answer is the normal list with
+     exactly those filters -- every other filter is cleared so nothing left
+     over from before changes the answer. */
+  const askOrders = async (asked?: string) => {
+    const question = (asked ?? askText).trim();
+    if (question.length < 2 || askBusy) return;
+    setAskBusy(true);
+    setAskError(undefined);
+    try {
+      const result = await api.post<OrderAskResult>("operations/orders/ask", {
+        language: locale,
+        question,
+      });
+      setCloseAllStage("idle");
+      setAskResult(result);
+      setAskedQuestion(question);
+      if (result.unsupported) return;
+      const applied = Object.fromEntries(
+        Object.entries(result.filters ?? {}).filter(([key]) => orderFilterKeys.includes(key)),
+      );
+      list.setFilters({
+        ...Object.fromEntries(orderFilterKeys.map((key) => [key, ""])),
+        ...applied,
+      });
+      const ready = orderQuestions.find((item) => item.key === applied.question);
+      setGrouping(ready === undefined || ready.grouping === null ? "" : [ready.grouping]);
+      clearSelection();
+    } catch (requestError) {
+      setAskResult(undefined);
+      setAskError(
+        requestError instanceof ApiError && requestError.code === "order_question_ai_unavailable"
+          ? t("operations.questions.aiUnavailable")
+          : t("operations.questions.askFailed"),
+      );
+    } finally {
+      setAskBusy(false);
+    }
+  };
+
+  /* Removing a chip clears exactly the filters it set. */
+  const removeAskChip = (chip: OrderAskChip) => {
+    const change: Record<string, string> = Object.fromEntries(
+      chip.filterKeys.map((key) => [key, ""]),
+    );
+    // Delivered dates live in the Delivery Activity view; without them the
+    // answer goes back to all Orders.
+    if (chip.field === "deliveredDate") change.quickView = "all";
+    if (chip.field === "question") setGrouping("");
+    setFilters((current) => ({ ...current, ...change }));
+  };
+
   const selectQuestion = (question: (typeof orderQuestions)[number]) => {
     setCloseAllStage("idle");
+    clearAsk();
     if (filters.question === question.key) {
       updateFilters({ question: "" });
       setGrouping("");
@@ -933,6 +1111,7 @@ export function OrdersModuleWorkspace({
   const deliveryView = filters.quickView === "delivery";
 
   const selectQuickView = (view: QuickView) => {
+    clearAsk();
     list.setFilters({
       question: "",
       quickView: view,
@@ -958,6 +1137,7 @@ export function OrdersModuleWorkspace({
   const selectedMenuKey = filters.viewKey !== "" ? filters.viewKey : filters.quickView;
   const selectedMenuView = menuTabs?.find((view) => view.key === selectedMenuKey);
   const selectMenuView = (view: OrderView) => {
+    clearAsk();
     list.setFilters({
       ...menuViewFilters(view),
       question: "",
@@ -1031,6 +1211,7 @@ export function OrdersModuleWorkspace({
   const canUpdateStatus = isAdministrator || permissions.includes("orders.update_delivery_status");
   const canReconcile = isAdministrator || permissions.includes("reconciliations.create");
   const canSettle = isAdministrator || permissions.includes("settlements.create");
+  const canAsk = permissions.some((permission) => orderAskPermissions.includes(permission));
   const selectedReportOrder = bulkSelectedOrders.length === 1 ? bulkSelectedOrders[0] : undefined;
   const traderReceivableOrders = bulkSelectedOrders.filter(
     (order) => Number(order.traderReceivableOutstanding ?? 0) > 0 && order.traderId,
@@ -1633,7 +1814,165 @@ export function OrdersModuleWorkspace({
               )}
             </span>
           ) : null}
+          {canAsk
+            ? favourites.map((favourite) => (
+                <span className="order-favourite-question" key={favourite}>
+                  <button
+                    className="order-question order-favourite-ask"
+                    disabled={askBusy}
+                    onClick={() => {
+                      setAskText(favourite);
+                      void askOrders(favourite);
+                    }}
+                    title={favourite}
+                    type="button"
+                  >
+                    <span aria-hidden="true">★ </span>
+                    {favourite}
+                  </button>
+                  <button
+                    aria-label={t("operations.questions.favouriteRemove", { question: favourite })}
+                    className="order-ask-chip-remove"
+                    onClick={() => toggleFavourite(favourite)}
+                    title={t("operations.questions.favouriteRemove", { question: favourite })}
+                    type="button"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))
+            : null}
+          {canAsk ? (
+            <form
+              className="order-questions-ask"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void askOrders();
+              }}
+              role="search"
+            >
+              <input
+                aria-label={t("operations.questions.askLabel")}
+                maxLength={300}
+                onChange={(event) => setAskText(event.target.value)}
+                placeholder={t("operations.questions.askPlaceholder")}
+                type="search"
+                value={askText}
+              />
+              <button
+                className="button button-primary"
+                disabled={askBusy || askText.trim().length < 2}
+                type="submit"
+              >
+                {askBusy ? t("common.working") : t("operations.questions.askButton")}
+              </button>
+            </form>
+          ) : null}
         </div>
+        {askError !== undefined || askResult !== undefined ? (
+          <div aria-live="polite" className="order-questions-answer">
+            {askError !== undefined ? (
+              <span className="order-questions-answer-error" role="alert">
+                {askError}
+              </span>
+            ) : null}
+            {askResult?.unsupported ? (
+              <span className="order-questions-answer-note">
+                {t("operations.questions.notAboutOrders")}
+              </span>
+            ) : null}
+            {askResult !== undefined && !askResult.unsupported ? (
+              <>
+                <span className="order-questions-answer-title">
+                  {t("operations.questions.understoodAs")}
+                </span>
+                {askResult.chips
+                  // A chip whose filters were since cleared elsewhere is gone.
+                  .filter((chip) =>
+                    chip.filterKeys.some(
+                      (key) => (filters as unknown as Record<string, string>)[key] !== "",
+                    ),
+                  )
+                  .map((chip) => (
+                    <span className="order-ask-chip" key={chip.field}>
+                      <span className="order-ask-chip-field">
+                        {t(`operations.questions.field.${chip.field}`, {
+                          defaultValue: chip.field,
+                        })}
+                        :
+                      </span>{" "}
+                      {orderAskChipValue(chip, t)}
+                      <button
+                        aria-label={t("operations.questions.removeChip", {
+                          field: t(`operations.questions.field.${chip.field}`, {
+                            defaultValue: chip.field,
+                          }),
+                        })}
+                        className="order-ask-chip-remove"
+                        onClick={() => removeAskChip(chip)}
+                        type="button"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                {askResult.chips.length === 0 ? (
+                  <span className="order-questions-answer-note">
+                    {t("operations.questions.understoodNothing")}
+                  </span>
+                ) : null}
+                {askResult.notes.map((note) => (
+                  <span className="order-questions-answer-note" key={`${note.field}:${note.value}`}>
+                    {note.candidates.length === 0
+                      ? t("operations.questions.nameNotFound", {
+                          field: t(`operations.questions.field.${note.field}`, {
+                            defaultValue: note.field,
+                          }),
+                          value: note.value,
+                        })
+                      : t("operations.questions.nameAmbiguous", {
+                          candidates: note.candidates.join(locale === "ar" ? "، " : ", "),
+                          field: t(`operations.questions.field.${note.field}`, {
+                            defaultValue: note.field,
+                          }),
+                          value: note.value,
+                        })}
+                  </span>
+                ))}
+              </>
+            ) : null}
+            {askResult !== undefined && !askResult.unsupported && askedQuestion !== "" ? (
+              <button
+                aria-pressed={isFavourite(askedQuestion)}
+                className="button button-secondary order-questions-favourite"
+                onClick={() => toggleFavourite(askedQuestion)}
+                type="button"
+              >
+                {isFavourite(askedQuestion)
+                  ? `★ ${t("operations.questions.favouriteSaved")}`
+                  : `☆ ${t("operations.questions.favouriteAdd")}`}
+              </button>
+            ) : null}
+            <button
+              className="button button-secondary order-questions-answer-clear"
+              onClick={() => {
+                // An applied answer is undone too: back to the normal list.
+                if (askResult !== undefined && !askResult.unsupported) {
+                  list.setFilters({
+                    ...Object.fromEntries(orderFilterKeys.map((key) => [key, ""])),
+                    quickView: "active",
+                  });
+                  setGrouping("");
+                }
+                clearAsk();
+                setAskText("");
+              }}
+              type="button"
+            >
+              {t("operations.questions.askClear")}
+            </button>
+          </div>
+        ) : null}
         {false ? (
           <section className="card" aria-label={t("operations.quickView.accountant")}>
             <div className="orders-quick-views" role="tablist">
