@@ -2806,6 +2806,12 @@ export const arabicTranslations = {
     orderViews: "طرق عرض الطلبات",
     pageSize: "الصفوف",
     paymentCondition: "من يدفع؟",
+    paymentConditions: {
+      customer_pays_cod_and_fee: "يدفع العميل",
+      customer_pays_cod_trader_pays_fee: "يدفع التاجر",
+      prepaid_customer_pays_fee: "مدفوع مسبقاً؛ العميل يدفع رسوم الخدمة",
+      prepaid_trader_pays_fee: "مدفوع مسبقاً؛ التاجر يدفع رسوم الخدمة",
+    },
     previousPage: "الصفحة السابقة",
     processEligibleOnly:
       "تغيير الطلبات التي يمكنها هذا الانتقال وتخطي الباقي (إذا لم يُحدد، يُلغى التغيير بالكامل عند وجود أي طلب غير مؤهل)",

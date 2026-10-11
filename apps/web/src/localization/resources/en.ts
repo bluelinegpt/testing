@@ -2828,8 +2828,8 @@ export const englishTranslations = {
     pageSize: "Rows",
     paymentCondition: "Who pays?",
     paymentConditions: {
-      customer_pays_cod_and_fee: "Pay by Customer — collect COD and/or delivery fee from customer",
-      customer_pays_cod_trader_pays_fee: "Pay by Trader — collect delivery fee from Trader",
+      customer_pays_cod_and_fee: "Pay by Customer",
+      customer_pays_cod_trader_pays_fee: "Pay by Trader",
       prepaid_customer_pays_fee: "Prepaid; customer pays service fee",
       prepaid_trader_pays_fee: "Prepaid; trader pays service fee",
     },

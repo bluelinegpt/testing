@@ -2805,6 +2805,30 @@ td:last-child {
 .modal-backdrop:has(> .new-driver-collection-modal) {
   padding: 0;
 }
+/* Create / Edit Order uses the whole viewport. */
+.order-modal.create-order-modal {
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+}
+.modal-backdrop:has(> .create-order-modal) {
+  padding: 0;
+}
+/* PSystem Serial: read-only display, not a focusable input. */
+.psystem-serial-display {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color, #d9e0ec);
+  border-radius: 8px;
+  background: var(--surface-subtle, #f4f6fa);
+  color: var(--muted-text, #64748b);
+  font-size: 0.875rem;
+  user-select: text;
+}
 
 /* Narrow screens: use the full viewport rather than leaving a margin that
    squeezes the content further. */

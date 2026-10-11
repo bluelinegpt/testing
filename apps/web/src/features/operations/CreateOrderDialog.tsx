@@ -937,7 +937,7 @@ export function CreateOrderDialog({
   return (
     <>
       <Modal
-        className="order-modal"
+        className="order-modal create-order-modal"
         closeLabel={t("common.close")}
         onRequestClose={requestClose}
         title={t(isEdit ? "operations.editOrder" : "operations.createOrder")}
@@ -1001,10 +1001,18 @@ export function CreateOrderDialog({
                         value={referenceNumber}
                       />
                     </label>
-                    <label className="field">
-                      <span>{t("operations.psystemSerial")}</span>
-                      <input readOnly value={t("operations.psystemSerialGenerated")} />
-                    </label>
+                    <div className="field psystem-serial-field">
+                      <span id="order-psystem-serial-label">{t("operations.psystemSerial")}</span>
+                      {/* Display only: generated after saving, so it is not a
+                          form control and Tab skips straight past it. */}
+                      <div
+                        aria-labelledby="order-psystem-serial-label"
+                        className="psystem-serial-display"
+                        data-testid="order-psystem-serial"
+                      >
+                        {t("operations.psystemSerialGenerated")}
+                      </div>
+                    </div>
                   </div>
                   {errorFor("serialNumber") === undefined ? null : (
                     <small className="field-error" id="order-serialNumber-error" role="alert">
