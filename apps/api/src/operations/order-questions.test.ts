@@ -59,6 +59,8 @@ describe("Orders ready questions", () => {
     expect(text).toContain("o.return_status = 'returned_to_trader'");
     // An open Trader fee receivable keeps the Order out of this answer.
     expect(text).toContain("not exists");
+    // A Collect Order still waiting for a Driver is not finished work.
+    expect(text).toContain("not (o.delivery_status = 'collect_order' and o.assigned_driver_id is null)");
   });
 
   it("collect from Driver matches New Driver Collection, including Orders with nothing to collect", () => {

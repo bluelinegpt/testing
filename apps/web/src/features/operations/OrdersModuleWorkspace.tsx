@@ -2589,12 +2589,16 @@ export function OrdersModuleWorkspace({
                   Driver, manifest, Trader reports, then copy / clear. In Arabic
                   the first group sits on the right. */}
               <div className="bulk-actions">
-                {(canUpdateStatus && !selectedHasInternational) ||
+                {(canUpdateStatus && (!selectedHasInternational || filters.question === "ready_to_close")) ||
                 (canUpdateStatus &&
                   bulkSelectedOrders.some((order) => order.orderType === "gcc_international")) ||
                 (canUpdateStatus && filters.quickView === "hold" && !allMatching) ? (
                   <div className="bulk-action-group">
-                    {canUpdateStatus && !selectedHasInternational ? (
+                    {/* Closing is the same for International Orders, so the
+                        Ready to close answer keeps Change Status even when
+                        one is selected; the server checks every Order. */}
+                    {canUpdateStatus &&
+                    (!selectedHasInternational || filters.question === "ready_to_close") ? (
                       <button onClick={() => setBulkAction("status")} type="button">
                         <MoreHorizontal aria-hidden="true" size={17} />
                         {t("operations.changeStatus")}

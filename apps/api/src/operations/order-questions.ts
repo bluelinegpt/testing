@@ -60,7 +60,8 @@ const openTraderReceivable = sql<boolean>`
  * received, not eligible, or nothing owed -- `closeSettlementComplete`), and a
  * return actually handed back. Plus no open Trader fee receivable, so an Order
  * this question closes does not stay in the Active list as financially pending.
- * Only the statuses the close transition accepts (`CLOSE_PREDECESSOR_STATUSES`).
+ * Only the statuses the close transition accepts (`CLOSE_PREDECESSOR_STATUSES`),
+ * minus Collect Orders that still need a Driver.
  */
 const readyToClose = sql<boolean>`
   (o.delivery_status in ('delivered', 'returned_to_trader', 'collect_order')
@@ -68,6 +69,9 @@ const readyToClose = sql<boolean>`
    and (o.trader_settlement_status in ('money_sent_to_trader', 'money_received_by_trader', 'not_eligible')
         or o.trader_net_payable <= 0)
    and (o.delivery_status <> 'returned_to_trader' or o.return_status = 'returned_to_trader')
+   -- A Collect Order still waiting for a Driver has not been picked up yet,
+   -- so it is not finished work (Aiman, 11 Oct 2026).
+   and not (o.delivery_status = 'collect_order' and o.assigned_driver_id is null)
    and not ${openTraderReceivable})
 `;
 
