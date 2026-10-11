@@ -679,6 +679,27 @@ export class OperationalSourceLoader {
             receivableNumber: string;
             sourceReference: string | null;
           }> };
+    // Trader Credits paid back in this Settlement (added to the payment). Each
+    // one settles Trader Payable the Credit itself raised (trader_credit_issued:
+    // Dr COD Receivable / Cr Trader Payable), so it is a further DEBIT to
+    // Trader Payable alongside the Orders' gross.
+    const creditSchema = await sql<{ tableExists: boolean }>`
+      select to_regclass('public.trader_settlement_credit_applications') is not null as "tableExists"
+    `.execute(database);
+    const credits =
+      creditSchema.rows[0]?.tableExists === true
+        ? (
+            await sql<{ amount: string; creditId: string; creditNumber: string }>`
+              select a.amount_applied::text as amount, a.credit_id as "creditId",
+                     c.credit_number as "creditNumber"
+                from trader_settlement_credit_applications a
+                join trader_credits c on c.id=a.credit_id and c.company_id=a.company_id
+               where a.company_id=${event.companyId}::uuid
+                 and a.settlement_id=${event.sourceEntityId}::uuid
+               order by c.credit_number
+            `.execute(database)
+          ).rows
+        : [];
     const base = {
       sourceEntityId: event.sourceEntityId,
       sourceEntityType: "trader_settlement",
@@ -698,6 +719,16 @@ export class OperationalSourceLoader {
           "trader_payable",
           base,
           `Trader settlement ${row.settlementNumber}`,
+        ),
+        ...credits.map((credit) =>
+          component(
+            "trader_payable",
+            credit.amount,
+            "debit",
+            "trader_payable",
+            { ...base, traderCreditId: credit.creditId },
+            `Trader Credit ${credit.creditNumber} paid in ${row.settlementNumber}`,
+          ),
         ),
         ...payments.rows.map((payment) =>
           component(
@@ -727,6 +758,7 @@ export class OperationalSourceLoader {
         allocations: allocations.rows,
         paymentRows: payments.rows,
         receivableOffsets: offsets.rows,
+        creditApplications: credits,
       },
       sourceReference: row.settlementNumber,
     };

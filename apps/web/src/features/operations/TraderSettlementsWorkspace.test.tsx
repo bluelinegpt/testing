@@ -218,6 +218,12 @@ function setup(
       getCalls.push(path);
       const extraFirst = overrides.getExtra?.(path);
       if (extraFirst !== undefined) return Promise.resolve(extraFirst);
+      // No saved draft for the chosen Trader. Without this the generic fallback
+      // below answered `{ items: [] }`, which the dialog read as a draft with
+      // no payload and crashed on.
+      if (path.startsWith("operations/settlements/drafts/open")) {
+        return Promise.resolve(null);
+      }
       if (path.startsWith("operations/settlements/payments/summary")) {
         return Promise.resolve(summary);
       }
@@ -505,6 +511,85 @@ describe("TraderSettlementsWorkspace", () => {
     expect(dialog.getByRole("button", { name: "Preview Statement" })).toBeInTheDocument();
     expect(dialog.getByRole("button", { name: "Print" })).toBeInTheDocument();
     expect(dialog.getByRole("button", { name: "Download PDF" })).toBeInTheDocument();
+  });
+
+  it("lists an open Trader Credit beside the Orders, unticked, and applies it in full when ticked", async () => {
+    setup({
+      getExtra: (path) =>
+        path.startsWith("operations/settlements/payments/open-credits")
+          ? [
+              {
+                amount: "18.00",
+                businessDate: "2026-10-02",
+                creditId: "credit-1",
+                creditNumber: "TCR-000001",
+                reason: "Fee offset reversed",
+                remainingAmount: "18.00",
+                sourceOrderNumber: "ORD-000108",
+                sourceReferenceNumber: "1715",
+              },
+            ]
+          : undefined,
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Traders New Settlement" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.click(await dialog.findByRole("button", { name: /Test Trader/ }));
+    const creditRow = (await dialog.findByText("TCR-000001")).closest("tr");
+    expect(creditRow?.textContent).toContain("Trader Credit (+)");
+    expect(creditRow?.textContent).toContain("+18.00");
+    const tick = dialog.getByRole("checkbox", { name: "Pay back Trader Credit TCR-000001" });
+    // Never ticked for the operator: paying money out is a deliberate choice.
+    expect(tick).not.toBeChecked();
+    fireEvent.click(tick);
+    expect(tick).toBeChecked();
+    // The amount paid now carries the Credit as an applied line.
+    const appliedCell = () => dialog.getByText("TCR-000001").closest("tr")?.lastElementChild?.textContent;
+    await waitFor(() => expect(appliedCell()).toBe("18.00"));
+    fireEvent.click(dialog.getByRole("checkbox", { name: "Pay back Trader Credit TCR-000001" }));
+    await waitFor(() => expect(appliedCell()).toBe("-"));
+  });
+
+  it("adds a ticked Trader Credit to the payment it sends", async () => {
+    const { postCalls } = setup({
+      getExtra: (path) =>
+        path.startsWith("operations/settlements/payments/open-credits")
+          ? [
+              {
+                amount: "18.00",
+                businessDate: "2026-10-02",
+                creditId: "credit-1",
+                creditNumber: "TCR-000001",
+                reason: "Fee offset reversed",
+                remainingAmount: "18.00",
+                sourceOrderNumber: "ORD-000108",
+                sourceReferenceNumber: "1715",
+              },
+            ]
+          : undefined,
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Traders New Settlement" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.click(await dialog.findByRole("button", { name: /Test Trader/ }));
+    fireEvent.click(
+      await dialog.findByRole("checkbox", { name: "Pay back Trader Credit TCR-000001" }),
+    );
+    fireEvent.change(dialog.getByLabelText("Gross Order Payable (+)"), { target: { value: "100" } });
+    await dialog.findByText("Outstanding Before");
+    fireEvent.change(dialog.getByLabelText("Cash Account"), {
+      target: { value: "cash-company-1" },
+    });
+    expect(await dialog.findByText("Trader Credits paid back (+)")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(dialog.getByText("Confirm Money Sent to Trader")).toBeInTheDocument(),
+    );
+    fireEvent.click(dialog.getByText("Confirm Money Sent to Trader"));
+    await waitFor(() =>
+      expect(postCalls.some((call) => call.path === "operations/settlements/drafts")).toBe(true),
+    );
+    const draft = postCalls.find((call) => call.path === "operations/settlements/drafts")!
+      .body as { amount: number; creditApplications: unknown };
+    expect(draft.amount).toBe(118);
+    expect(draft.creditApplications).toEqual([{ amount: 18, creditId: "credit-1" }]);
   });
 
   it("saves a draft without calling the legacy posting endpoint", async () => {

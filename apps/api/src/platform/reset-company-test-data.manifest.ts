@@ -63,6 +63,7 @@ export const PURGE_TABLES = new Set([
   "outsourced_driver_fee_payments",
   "outsourced_driver_payments",
   // Trader Settlements
+  "trader_settlement_credit_applications",
   "trader_settlement_orders",
   "trader_settlement_payments",
   "trader_settlement_receivable_offsets",

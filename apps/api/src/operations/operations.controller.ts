@@ -105,6 +105,7 @@ import {
   type TraderSettlementReportData,
   type TraderSettlementSummary,
   type TraderSettlementDraft,
+  type OpenTraderCredit,
 } from "./trader-settlement.service.js";
 // Runtime class values are required for Nest validation metadata.
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
@@ -1325,6 +1326,15 @@ export class OperationsController {
     @Query() query: TraderSettlementEligibleOrdersQueryDto,
   ): Promise<TraderSettlementPage<TraderEligibleOrderRow>> {
     return this.traderSettlementService.eligibleOrders(query);
+  }
+
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
+  @ApiOperation({ summary: "Open Trader Credits the Company still owes one Trader" })
+  @Get("settlements/payments/open-credits")
+  public traderSettlementOpenCredits(
+    @Query("traderId", new ParseUUIDPipe()) traderId: string,
+  ): Promise<readonly OpenTraderCredit[]> {
+    return this.traderSettlementService.openCredits(traderId);
   }
 
   @RequireAnyPermission("settlements.create", "users_roles.manage")

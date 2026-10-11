@@ -102,7 +102,9 @@ describe("permanent Company deletion manifest", () => {
     // and `destination_countries` (now Company-scoped) join the direct set;
     // `platform_workflow_test_steps` leaves it (no `company_id`; cascades from
     // its scenario). The live-schema certification proves the set.
-    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(179);
+    // 179 -> 180 (11 Oct 2026): `trader_settlement_credit_applications`
+    // (Trader Credits paid in Settlements; PURGE, with its Settlement).
+    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(180);
     expect(COMPANY_DELETION_MANIFEST_HASH).toMatch(/^[a-f0-9]{64}$/);
   });
 

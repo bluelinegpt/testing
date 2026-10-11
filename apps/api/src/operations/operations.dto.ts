@@ -1415,6 +1415,16 @@ export class TraderSettlementReceivableOffsetDto {
   public readonly amount!: number;
 }
 
+export class TraderSettlementCreditApplicationDto {
+  @IsUUID()
+  public readonly creditId!: string;
+
+  @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })
+  @Max(9999999999999.99)
+  @Min(0.01)
+  public readonly amount!: number;
+}
+
 export class CreateTraderSettlementDto {
   /**
    * Company CASH account funding a cash settlement.
@@ -1448,6 +1458,17 @@ export class CreateTraderSettlementDto {
   @ValidateNested({ each: true })
   @Type(() => TraderSettlementReceivableOffsetDto)
   public readonly receivableOffsets?: readonly TraderSettlementReceivableOffsetDto[];
+
+  /**
+   * Open Trader Credits paid back to the Trader in this Settlement. Each one
+   * ADDS to the payment: net = Order allocations - fee deductions + credits.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @ValidateNested({ each: true })
+  @Type(() => TraderSettlementCreditApplicationDto)
+  public readonly creditApplications?: readonly TraderSettlementCreditApplicationDto[];
 
   @IsOptional()
   @IsIn(paymentMethods)

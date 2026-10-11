@@ -143,6 +143,12 @@ interface EligibleTraderOrder {
 /** The authoritative operational timestamp for this screen. */
 const BUSINESS_DATE_COLUMN = "s.confirmed_at";
 
+/** Status of a Trader Credit from the amount applied so far (matches the table CHECK). */
+function traderCreditStatus(applied: Decimal, amount: string): "applied" | "open" | "partially_applied" {
+  if (applied.lessThanOrEqualTo(0)) return "open";
+  return applied.greaterThanOrEqualTo(amount) ? "applied" : "partially_applied";
+}
+
 export interface Page<T> {
   /**
    * The Date Mode actually applied, resolved by the backend.
@@ -203,6 +209,8 @@ export interface CreateTraderSettlementResult {
   readonly orderCount: number;
   readonly receivableOffsetAmount: string;
   readonly receivableOffsetCount: number;
+  readonly creditAppliedAmount: string;
+  readonly creditAppliedCount: number;
   readonly paymentMethod: "bank_transfer" | "cash";
   readonly settlementId: string;
   readonly settlementNumber: string;
@@ -294,6 +302,28 @@ export interface TraderSettlementReceivableOffset {
   readonly areaNameAr?: string | null;
 }
 
+/** A Trader Credit paid back inside a Settlement. */
+export interface TraderSettlementCreditApplied {
+  readonly amountApplied: string;
+  readonly businessDate: string;
+  readonly creditNumber: string;
+  readonly reason: string;
+  readonly sourceOrderNumber: string | null;
+  readonly sourceReferenceNumber: string | null;
+}
+
+/** An open Trader Credit the Company still owes the Trader. */
+export interface OpenTraderCredit {
+  readonly amount: string;
+  readonly businessDate: string;
+  readonly creditId: string;
+  readonly creditNumber: string;
+  readonly reason: string;
+  readonly remainingAmount: string;
+  readonly sourceOrderNumber: string | null;
+  readonly sourceReferenceNumber: string | null;
+}
+
 interface TraderSettlementSummaryTotals {
   readonly amountPaidNow: string;
   readonly grossOrderPayable: string;
@@ -308,6 +338,8 @@ interface TraderSettlementSummaryTotals {
   readonly totalServiceFees: string;
   readonly totalVat: string;
   readonly traderFeeDeductions: string;
+  /** Trader Credits paid back in this Settlement (added to the payment). */
+  readonly traderCreditsApplied?: string;
 }
 
 export interface TraderSettlementDetail {
@@ -322,6 +354,7 @@ export interface TraderSettlementDetail {
   readonly notes: string | null;
   readonly orders: readonly TraderSettlementDetailOrder[];
   readonly receivableOffsets: readonly TraderSettlementReceivableOffset[];
+  readonly creditApplications: readonly TraderSettlementCreditApplied[];
   readonly paymentDate: string;
   readonly paymentMethod: "bank_transfer" | "cash";
   readonly paymentReference: string | null;
@@ -376,6 +409,7 @@ export interface TraderSettlementReportData {
   };
   readonly orders: readonly TraderSettlementDetailOrder[];
   readonly receivableOffsets: readonly TraderSettlementReceivableOffset[];
+  readonly creditApplications?: readonly TraderSettlementCreditApplied[];
   readonly summary: TraderSettlementSummaryTotals;
 }
 
@@ -936,18 +970,35 @@ export class TraderSettlementService {
         (sum, line) => sum.plus(line.amount),
         new Decimal(0),
       );
-      const netPayment = this.money(allocationTotal.minus(offsetTotal));
-      if (netPayment.lessThan(0)) {
+      if (this.money(allocationTotal.minus(offsetTotal)).lessThan(0)) {
         throw new ApplicationException(
           "settlement_offsets_exceed_payable",
           "Trader fee deductions cannot exceed the selected Order payables",
           HttpStatus.BAD_REQUEST,
         );
       }
+      // Open Trader Credits paid back in this Settlement. They ADD to the
+      // payment: the Company owes the Trader this money (for example a fee it
+      // handed back when a Receivable offset was reversed).
+      const creditApplications = (input.creditApplications ?? []).filter(
+        (line) => line.amount > 0,
+      );
+      const creditIds = creditApplications.map((line) => line.creditId);
+      if (new Set(creditIds).size !== creditIds.length) {
+        throw new ApplicationException(
+          "settlement_credit_duplicate",
+          "The same Trader Credit cannot be applied twice",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      const creditTotal = this.money(
+        creditApplications.reduce((sum, line) => sum.plus(line.amount), new Decimal(0)),
+      );
+      const netPayment = this.money(allocationTotal.minus(offsetTotal).plus(creditTotal));
       if (!netPayment.equals(this.money(new Decimal(input.amount)))) {
         throw new ApplicationException(
           "settlement_allocation_mismatch",
-          "Gross Order payables minus fee deductions must equal the payment amount",
+          "Gross Order payables minus fee deductions plus Trader Credits must equal the payment amount",
           HttpStatus.BAD_REQUEST,
         );
       }
@@ -1042,6 +1093,52 @@ export class TraderSettlementService {
             "A selected Trader fee belongs to an Order that has not been delivered yet",
             HttpStatus.CONFLICT,
             [receivable.receivableNumber],
+          );
+        }
+      }
+      const lockedCredits =
+        creditIds.length === 0
+          ? []
+          : (
+              await sql<{
+                amount: string;
+                amountApplied: string;
+                creditNumber: string;
+                id: string;
+                status: string;
+                traderId: string;
+              }>`
+                select id, credit_number as "creditNumber", trader_id as "traderId",
+                       amount::text, amount_applied::text as "amountApplied", status
+                  from trader_credits
+                 where company_id=${companyId}::uuid
+                   and id in (${sql.join(creditIds.map((id) => sql`${id}::uuid`))})
+                 order by id for update
+              `.execute(transaction)
+            ).rows;
+      if (lockedCredits.length !== creditIds.length) {
+        throw new ApplicationException(
+          "settlement_credit_not_found",
+          "One or more selected Trader Credits were not found",
+          HttpStatus.NOT_FOUND,
+        );
+      }
+      const creditAmountById = new Map(
+        creditApplications.map((line) => [line.creditId, this.money(new Decimal(line.amount))]),
+      );
+      for (const credit of lockedCredits) {
+        const amount = creditAmountById.get(credit.id) ?? new Decimal(0);
+        const remaining = new Decimal(credit.amount).minus(credit.amountApplied);
+        if (
+          credit.traderId !== input.traderId ||
+          !["open", "partially_applied"].includes(credit.status) ||
+          amount.greaterThan(remaining)
+        ) {
+          throw new ApplicationException(
+            "settlement_credit_ineligible",
+            "A selected Trader Credit is no longer open for this Trader",
+            HttpStatus.CONFLICT,
+            [credit.creditNumber],
           );
         }
       }
@@ -1152,7 +1249,8 @@ export class TraderSettlementService {
         ) values (
           ${companyId}::uuid, ${settlementNumber}, ${input.traderId}::uuid,
           coalesce(${input.paymentDate ?? null}::date, current_date),
-          ${grossPayable.toNumber()}, 0, ${this.money(offsetTotal).toNumber()}, 0, 0,
+          ${grossPayable.toNumber()}, 0, ${this.money(offsetTotal).toNumber()}, 0,
+          ${creditTotal.toNumber()},
           ${netPayable.toNumber()},
           'draft', ${identity.identityId}::uuid
         )
@@ -1200,6 +1298,24 @@ export class TraderSettlementService {
              set amount_collected=${newCollected.toNumber()},
                  status=${newStatus},updated_at=now()
            where company_id=${companyId}::uuid and id=${receivable.id}::uuid
+        `.execute(transaction);
+      }
+      for (const credit of lockedCredits) {
+        const amount = creditAmountById.get(credit.id) ?? new Decimal(0);
+        await sql`
+          insert into trader_settlement_credit_applications(
+            company_id, settlement_id, credit_id, amount_applied
+          ) values(
+            ${companyId}::uuid, ${settlementId}::uuid, ${credit.id}::uuid, ${amount.toNumber()}
+          )
+        `.execute(transaction);
+        const applied = this.money(new Decimal(credit.amountApplied).plus(amount));
+        await sql`
+          update trader_credits
+             set amount_applied=${applied.toNumber()},
+                 status=${traderCreditStatus(applied, credit.amount)},
+                 updated_at=now()
+           where company_id=${companyId}::uuid and id=${credit.id}::uuid
         `.execute(transaction);
       }
       // A bank transfer names its Bank account and nothing else. Rejecting a
@@ -1374,6 +1490,12 @@ export class TraderSettlementService {
             receivableId: line.receivableId,
           })),
           traderFeeDeductions: this.money(offsetTotal).toFixed(2),
+          creditApplications: lockedCredits.map((credit) => ({
+            amount: (creditAmountById.get(credit.id) ?? new Decimal(0)).toFixed(2),
+            creditId: credit.id,
+            creditNumber: credit.creditNumber,
+          })),
+          traderCreditsApplied: creditTotal.toFixed(2),
           settlementNumber,
           traderId: input.traderId,
         },
@@ -1426,6 +1548,8 @@ export class TraderSettlementService {
         paymentMethod: payment.method,
         receivableOffsetAmount: this.money(offsetTotal).toFixed(2),
         receivableOffsetCount: lockedReceivables.length,
+        creditAppliedAmount: creditTotal.toFixed(2),
+        creditAppliedCount: lockedCredits.length,
         settlementId,
         settlementNumber,
         traderId: input.traderId,
@@ -2207,11 +2331,36 @@ export class TraderSettlementService {
            where company_id=${companyId}::uuid and id=${offset.receivableId}::uuid
         `.execute(transaction);
       }
+      // Trader Credits this Settlement paid back become owed again.
+      const creditApplications = (
+        await sql<{ amountApplied: string; amount: string; creditAmountApplied: string; creditId: string }>`
+          select a.credit_id as "creditId", a.amount_applied::text as "amountApplied",
+                 c.amount::text, c.amount_applied::text as "creditAmountApplied"
+            from trader_settlement_credit_applications a
+            join trader_credits c on c.id=a.credit_id and c.company_id=a.company_id
+           where a.company_id=${companyId}::uuid and a.settlement_id=${settlementId}::uuid
+           order by c.id for update of c
+        `.execute(transaction)
+      ).rows;
+      for (const application of creditApplications) {
+        const restored = this.money(
+          Decimal.max(0, new Decimal(application.creditAmountApplied).minus(application.amountApplied)),
+        );
+        await sql`
+          update trader_credits
+             set amount_applied=${restored.toNumber()},
+                 status=${traderCreditStatus(restored, application.amount)},
+                 updated_at=now()
+           where company_id=${companyId}::uuid and id=${application.creditId}::uuid
+             and status <> 'cancelled'
+        `.execute(transaction);
+      }
       await this.history.audit(transaction, {
         action: "trader_settlement.reverse",
         actorId: identity.identityId,
         after: {
           orderCount: links.length,
+          creditsRestored: creditApplications.length,
           reason: trimmedReason,
           reversalSettlementNumber: reversalNumber,
           reversedSettlementNumber: original.settlementNumber,
@@ -2404,7 +2553,12 @@ export class TraderSettlementService {
     const header = await this.settlementHeader(companyId, settlementId);
     const orders = await this.settlementOrders(companyId, settlementId);
     const receivableOffsets = await this.settlementReceivableOffsets(companyId, settlementId);
-    const summary = this.settlementSummaryWithOffsets(orders.summary, receivableOffsets);
+    const creditApplications = await this.settlementCreditApplications(companyId, settlementId);
+    const summary = this.settlementSummaryWithOffsets(
+      orders.summary,
+      receivableOffsets,
+      creditApplications,
+    );
     return {
       beneficiaryBank: header.beneficiaryBank,
       confirmedBy: header.confirmedBy,
@@ -2417,6 +2571,7 @@ export class TraderSettlementService {
       notes: header.notes,
       orders: orders.lines,
       receivableOffsets,
+      creditApplications,
       paymentDate: header.paymentDate,
       paymentMethod: header.paymentMethod,
       paymentReference: header.paymentReference,
@@ -2465,6 +2620,7 @@ export class TraderSettlementService {
     const header = await this.settlementHeader(companyId, settlementId);
     const orders = await this.settlementOrders(companyId, settlementId);
     const receivableOffsets = await this.settlementReceivableOffsets(companyId, settlementId);
+    const creditApplications = await this.settlementCreditApplications(companyId, settlementId);
     const branding = await this.companyProfile.branding();
     const logoDataUri = branding.hasLogo
       ? await this.companyProfile
@@ -2516,7 +2672,12 @@ export class TraderSettlementService {
       },
       orders: orders.lines,
       receivableOffsets,
-      summary: this.settlementSummaryWithOffsets(orders.summary, receivableOffsets),
+      creditApplications,
+      summary: this.settlementSummaryWithOffsets(
+        orders.summary,
+        receivableOffsets,
+        creditApplications,
+      ),
     };
   }
 
@@ -2912,17 +3073,76 @@ export class TraderSettlementService {
   private settlementSummaryWithOffsets(
     summary: TraderSettlementSummaryTotals,
     offsets: readonly TraderSettlementReceivableOffset[],
+    credits: readonly TraderSettlementCreditApplied[] = [],
   ): TraderSettlementSummaryTotals {
     const deductions = offsets.reduce(
       (total, offset) => total.plus(offset.amountApplied),
       new Decimal(0),
     );
+    const creditTotal = credits.reduce(
+      (total, credit) => total.plus(credit.amountApplied),
+      new Decimal(0),
+    );
     return {
       ...summary,
       grossOrderPayable: summary.amountPaidNow,
-      netPayment: new Decimal(summary.amountPaidNow).minus(deductions).toFixed(2),
+      netPayment: new Decimal(summary.amountPaidNow).minus(deductions).plus(creditTotal).toFixed(2),
       traderFeeDeductions: deductions.toFixed(2),
+      ...(credits.length === 0 ? {} : { traderCreditsApplied: creditTotal.toFixed(2) }),
     };
+  }
+
+  private async settlementCreditApplications(
+    companyId: string,
+    settlementId: string,
+  ): Promise<readonly TraderSettlementCreditApplied[]> {
+    const schema = await sql<{ tableExists: boolean }>`
+      select to_regclass('public.trader_settlement_credit_applications') is not null as "tableExists"
+    `.execute(this.database);
+    if (schema.rows[0]?.tableExists !== true) return [];
+    const rows = await sql<TraderSettlementCreditApplied>`
+      select a.amount_applied::text as "amountApplied", c.credit_number as "creditNumber",
+             c.business_date::text as "businessDate", c.reason,
+             o.order_number as "sourceOrderNumber", o.reference_number as "sourceReferenceNumber"
+        from trader_settlement_credit_applications a
+        join trader_credits c on c.id=a.credit_id and c.company_id=a.company_id
+        left join orders o on o.id=c.source_order_id and o.company_id=c.company_id
+       where a.company_id=${companyId}::uuid and a.settlement_id=${settlementId}::uuid
+       order by c.credit_number
+    `.execute(this.database);
+    return rows.rows.map((row) => ({
+      ...row,
+      amountApplied: new Decimal(row.amountApplied).toFixed(2),
+    }));
+  }
+
+  /**
+   * Open Trader Credits for one Trader: money the Company still owes him,
+   * offered on the Settlement screen to be paid back with his next payment.
+   */
+  public async openCredits(traderId: string): Promise<readonly OpenTraderCredit[]> {
+    this.assertAnyPermission("settlements.create");
+    const { companyId } = this.tenants.current();
+    const schema = await sql<{ tableExists: boolean }>`
+      select to_regclass('public.trader_settlement_credit_applications') is not null as "tableExists"
+    `.execute(this.database);
+    if (schema.rows[0]?.tableExists !== true) return [];
+    const rows = await sql<OpenTraderCredit>`
+      select c.id as "creditId", c.credit_number as "creditNumber",
+             c.business_date::text as "businessDate", c.amount::text,
+             c.remaining_amount::text as "remainingAmount", c.reason,
+             o.order_number as "sourceOrderNumber", o.reference_number as "sourceReferenceNumber"
+        from trader_credits c
+        left join orders o on o.id=c.source_order_id and o.company_id=c.company_id
+       where c.company_id=${companyId}::uuid and c.trader_id=${traderId}::uuid
+         and c.status in ('open','partially_applied')
+       order by c.business_date, c.credit_number
+    `.execute(this.database);
+    return rows.rows.map((row) => ({
+      ...row,
+      amount: new Decimal(row.amount).toFixed(2),
+      remainingAmount: new Decimal(row.remainingAmount).toFixed(2),
+    }));
   }
 
   /**
@@ -3337,6 +3557,15 @@ export class TraderSettlementService {
         .sort(),
       traderBankAccountId: input.traderBankAccountId ?? "",
       traderId: input.traderId,
+      // Only when present, so a request without Credits hashes exactly as it
+      // did before this field existed (idempotent replays keep matching).
+      ...((input.creditApplications ?? []).length === 0
+        ? {}
+        : {
+            creditApplications: (input.creditApplications ?? [])
+              .map((line) => [line.creditId, new Decimal(line.amount).toFixed(2)].join("|"))
+              .sort(),
+          }),
     };
     return createHash("sha256").update(JSON.stringify(material)).digest("hex");
   }

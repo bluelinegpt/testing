@@ -6033,6 +6033,19 @@ export class OperationsService {
          limit 1 for update
     `.execute(transaction);
     if (existing.rows[0] !== undefined) return { created: false, amount: order.serviceFee };
+    const creditNumber = await this.liveCreditForReversedFee(
+      transaction,
+      companyId,
+      order.orderNumber,
+    );
+    if (creditNumber !== null) {
+      throw new ApplicationException(
+        "trader_receivable_reversed_and_credited",
+        `This Order's fee was reversed and the Trader was given Trader Credit ${creditNumber}. Charging it again would make the Trader pay twice.`,
+        HttpStatus.CONFLICT,
+        [creditNumber],
+      );
+    }
     await this.createOrderTraderReceivableIfNeeded(transaction, {
         actorAccountId: actor === undefined ? identity.identityId : actor.actorAccountId,
         ...(actor === undefined ? {} : { actorRole: actor.actorRole }),
@@ -8387,6 +8400,32 @@ export class OperationsService {
     if (amountDue.lessThanOrEqualTo(0)) {
       return;
     }
+    // NO RE-CHARGE AFTER A CREDITED REVERSAL (AL Fahd, 1-2 Oct 2026). When
+    // this Order's fee was reversed out of a Settlement and the Trader was
+    // compensated with a Trader Credit, charging the fee again makes him pay
+    // it twice: once through the new Receivable and once more because the
+    // Credit is still owed to him. The Credit decides; to bill the fee again,
+    // the Credit must be cancelled first.
+    const creditNumber = await this.liveCreditForReversedFee(
+      database,
+      input.companyId,
+      input.orderNumber,
+    );
+    if (creditNumber !== null) {
+      await sql`
+        insert into order_events (
+          company_id, order_id, event_type, event_category, field_name, new_value,
+          actor_account_id, actor_role, source, correlation_id
+        ) values (
+          ${input.companyId}::uuid, ${input.orderId}::uuid,
+          'trader_receivable.not_recharged_credit_open', 'financial_change',
+          'trader_receivable_due',
+          ${JSON.stringify({ amount: amountDue.toFixed(2), creditNumber })}::jsonb,
+          ${input.actorAccountId}::uuid, ${input.actorRole ?? "Company User"}, 'system', ${input.correlationId}
+        )
+      `.execute(database);
+      return;
+    }
     const receivableNumber = await this.nextReferenceNumber(
       database,
       input.companyId,
@@ -8420,6 +8459,30 @@ export class OperationsService {
       )
     `.execute(database);
   }
+  /**
+   * The live Trader Credit (number) that compensated a REVERSED service-charge
+   * Receivable of this Order, or null. A cancelled Credit does not count.
+   */
+  private async liveCreditForReversedFee(
+    database: Parameters<Parameters<KyselyTransactionManager["execute"]>[0]>[0],
+    companyId: string,
+    orderNumber: string,
+  ): Promise<string | null> {
+    const row = (
+      await sql<{ creditNumber: string }>`
+        select c.credit_number as "creditNumber"
+          from trader_receivables r
+          join trader_credits c on c.company_id=r.company_id and c.source_receivable_id=r.id
+         where r.company_id=${companyId}::uuid and r.source_type='service_charge'
+           and r.source_reference=${orderNumber} and r.status='reversed'
+           and c.status<>'cancelled'
+         order by c.credit_number
+         limit 1
+      `.execute(database)
+    ).rows[0];
+    return row?.creditNumber ?? null;
+  }
+
   private calculateVatAmount(serviceFee: Decimal, vatPolicy: VatPolicy): Decimal {
     return calculateVatAmount(serviceFee, vatPolicy);
   }

@@ -115,6 +115,7 @@ interface CreateTraderSettlementResult {
   readonly orderCount: number;
   readonly paymentMethod: "bank_transfer" | "cash";
   readonly receivableOffsetAmount: string;
+  readonly creditAppliedAmount?: string;
   readonly receivableOffsetCount: number;
   readonly settlementId: string;
   readonly settlementNumber: string;
@@ -141,8 +142,31 @@ interface TraderSettlementDraftPayload {
   readonly paymentDate?: string;
   readonly paymentMethod?: string;
   readonly receivableOffsets?: readonly { amount: string; receivableId: string }[];
+  readonly creditApplications?: readonly { amount: number | string; creditId: string }[];
   readonly traderBankAccountId?: string;
   readonly traderId?: string;
+}
+
+/** A Trader Credit paid back inside a Settlement. */
+interface TraderSettlementCreditApplied {
+  readonly amountApplied: string;
+  readonly businessDate: string;
+  readonly creditNumber: string;
+  readonly reason: string;
+  readonly sourceOrderNumber: string | null;
+  readonly sourceReferenceNumber: string | null;
+}
+
+/** An open Trader Credit: money the Company still owes the Trader. */
+interface OpenTraderCredit {
+  readonly amount: string;
+  readonly businessDate: string;
+  readonly creditId: string;
+  readonly creditNumber: string;
+  readonly reason: string;
+  readonly remainingAmount: string;
+  readonly sourceOrderNumber: string | null;
+  readonly sourceReferenceNumber: string | null;
 }
 
 interface TraderSettlementDraftRow {
@@ -220,6 +244,7 @@ interface TraderSettlementSummaryTotals {
   readonly totalServiceFees: string;
   readonly totalVat: string;
   readonly traderFeeDeductions: string;
+  readonly traderCreditsApplied?: string;
 }
 
 interface TraderSettlementReceivableOffset {
@@ -244,6 +269,7 @@ interface TraderSettlementDetail {
   readonly notes: string | null;
   readonly orders: readonly TraderSettlementDetailOrder[];
   readonly receivableOffsets: readonly TraderSettlementReceivableOffset[];
+  readonly creditApplications?: readonly TraderSettlementCreditApplied[];
   readonly paymentDate: string;
   readonly paymentMethod: "bank_transfer" | "cash";
   readonly paymentReference: string | null;
@@ -1933,6 +1959,12 @@ function NewSettlementDialog({
     readonly { amount: string; receivableId: string }[]
   >([]);
   const [receivableOffsetsCustomized, setReceivableOffsetsCustomized] = useState(false);
+  // Open Trader Credits (money the Company owes this Trader). Shown with the
+  // Orders and never ticked automatically: paying one is a deliberate choice.
+  const [openCredits, setOpenCredits] = useState<readonly OpenTraderCredit[]>([]);
+  const [creditApplications, setCreditApplications] = useState<
+    readonly { amount: string; creditId: string }[]
+  >([]);
 
   // Step 3 — Payment Details.
   const [amount, setAmount] = useState("");
@@ -2133,6 +2165,19 @@ function NewSettlementDialog({
     setAutoAllocate(false);
     setReceivableOffsets(payload.receivableOffsets ?? []);
     setReceivableOffsetsCustomized((payload.receivableOffsets ?? []).length > 0);
+    const draftCredits = (payload.creditApplications ?? []).map((line) => ({
+      amount: String(line.amount),
+      creditId: line.creditId,
+    }));
+    setCreditApplications(draftCredits);
+    if (draftCredits.length > 0) {
+      // The saved amount is the net payment, which includes the Credits; the
+      // Orders' amount is what remains once they are taken back out.
+      const creditTotal = draftCredits.reduce((sum, line) => sum + safeMoneyValue(line.amount), 0);
+      const orderAmount = money(safeMoneyValue(payload.amount ?? 0) - creditTotal);
+      setAmount(orderAmount);
+      setPaymentAmount(orderAmount);
+    }
   }, [loadedDraft, traders]);
 
   /*
@@ -2239,6 +2284,33 @@ function NewSettlementDialog({
     // keep the result of whatever filter was in force when the Trader was
     // chosen, and changing Emirate silently reloads only half the table.
   }, [api, trader, t, orderFilters.emirateId, orderFilters.areaId, orderFilters.driverId]);
+
+  useEffect(() => {
+    if (trader === undefined) {
+      setOpenCredits([]);
+      setCreditApplications([]);
+      return;
+    }
+    const controller = new AbortController();
+    void api
+      .get<readonly OpenTraderCredit[]>(
+        `operations/settlements/payments/open-credits?traderId=${trader.id}`,
+        controller.signal,
+      )
+      .then((response) => {
+        // An older API answers this route with nothing usable; show no Credits.
+        const rows = Array.isArray(response) ? response : [];
+        setOpenCredits(rows);
+        // Keep only applications that still match an open Credit.
+        setCreditApplications((current) =>
+          current.filter((line) => rows.some((row) => row.creditId === line.creditId)),
+        );
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setOpenCredits([]);
+      });
+    return () => controller.abort();
+  }, [api, trader]);
   /* Select the originating Order once, from the eligible list the backend just
      returned.
 
@@ -2564,7 +2636,11 @@ function NewSettlementDialog({
     (total, line) => total + safeMoneyValue(line.amount),
     0,
   );
-  const netPayment = requestedAmount - receivableOffsetTotal;
+  const creditApplicationTotal = creditApplications.reduce(
+    (total, line) => total + safeMoneyValue(line.amount),
+    0,
+  );
+  const netPayment = requestedAmount - receivableOffsetTotal + creditApplicationTotal;
   const receivableOffsetErrors: string[] = [];
   for (const line of receivableOffsets) {
     const row = receivableById.get(line.receivableId);
@@ -2651,6 +2727,14 @@ function NewSettlementDialog({
     paymentDate,
     paymentMethod,
     receivableOffsets: receivableOffsets.map((line) => ({ amount: safeMoneyValue(line.amount), receivableId: line.receivableId })),
+    ...(creditApplications.length === 0
+      ? {}
+      : {
+          creditApplications: creditApplications.map((line) => ({
+            amount: safeMoneyValue(line.amount),
+            creditId: line.creditId,
+          })),
+        }),
     traderId: trader!.id,
   });
 
@@ -2793,6 +2877,12 @@ function NewSettlementDialog({
               <dt>{t("traderSettlements.companyFeeDeductions")}</dt>
               <dd>-{money(confirmed.receivableOffsetAmount)}</dd>
             </div>
+            {safeMoneyValue(confirmed.creditAppliedAmount ?? 0) === 0 ? null : (
+              <div className="detail-line">
+                <dt>{t("traderSettlements.traderCreditsPaidBack")}</dt>
+                <dd>+{money(confirmed.creditAppliedAmount ?? 0)}</dd>
+              </div>
+            )}
             <div className="detail-line">
               <dt>{t("traderSettlements.columnOrders")}</dt>
               <dd>{confirmed.orderCount}</dd>
@@ -3277,6 +3367,47 @@ function NewSettlementDialog({
                           </tr>
                         );
                       })}
+                      {openCredits.map((credit) => {
+                        const applied = creditApplications.some(
+                          (line) => line.creditId === credit.creditId,
+                        );
+                        return (
+                          <tr className="row-credit" key={`credit-${credit.creditId}`}>
+                            <td>
+                              <input
+                                aria-label={t("traderSettlements.applyTraderCredit", {
+                                  number: credit.creditNumber,
+                                })}
+                                checked={applied}
+                                onChange={(event) => {
+                                  setCreditApplications((current) =>
+                                    event.target.checked
+                                      ? [
+                                          ...current,
+                                          { amount: credit.remainingAmount, creditId: credit.creditId },
+                                        ]
+                                      : current.filter((line) => line.creditId !== credit.creditId),
+                                  );
+                                }}
+                                type="checkbox"
+                              />
+                            </td>
+                            <td className="mono">{credit.sourceOrderNumber ?? "-"}</td>
+                            <td className="mono">{credit.sourceReferenceNumber ?? "-"}</td>
+                            <td>-</td>
+                            <td className="mono">{credit.creditNumber}</td>
+                            <td>{credit.businessDate.slice(0, 10)}</td>
+                            <td>-</td>
+                            <td>-</td>
+                            <td>{credit.reason}</td>
+                            <td>{t("traderSettlements.traderCreditPlus")}</td>
+                            <td className="numeric">+{money(credit.amount)}</td>
+                            <td>{money(safeMoneyValue(credit.amount) - safeMoneyValue(credit.remainingAmount))}</td>
+                            <td className="numeric">+{money(credit.remainingAmount)}</td>
+                            <td>{applied ? money(credit.remainingAmount) : "-"}</td>
+                          </tr>
+                        );
+                      })}
                       {eligibleOrders.length === 0 && eligibleReceivables.length === 0 ? (
                         <tr>
                           <td className="empty-state" colSpan={12}>
@@ -3673,6 +3804,12 @@ function NewSettlementDialog({
                       <dt>{t("traderSettlements.companyFeeDeductions")}</dt>
                       <dd>-{money(receivableOffsetTotal)}</dd>
                     </div>
+                    {creditApplications.length === 0 ? null : (
+                      <div className="detail-line">
+                        <dt>{t("traderSettlements.traderCreditsPaidBack")}</dt>
+                        <dd>+{money(creditApplicationTotal)}</dd>
+                      </div>
+                    )}
                     <div className="detail-line">
                       <dt>{t("traderSettlements.netPaymentToTrader")}</dt>
                       <dd>{money(netPayment)}</dd>
@@ -4433,6 +4570,15 @@ export function SettlementDetailDialog({
               <dt>{t("traderSettlements.companyFeeDeductions")}</dt>
               <dd>-{money(detail.summary.traderFeeDeductions)}</dd>
             </div>
+            {(detail.creditApplications ?? []).length === 0 ? null : (
+              <div className="detail-line">
+                <dt>{t("traderSettlements.traderCreditsPaidBack")}</dt>
+                <dd>
+                  +{money(detail.summary.traderCreditsApplied ?? 0)} (
+                  {(detail.creditApplications ?? []).map((credit) => credit.creditNumber).join(", ")})
+                </dd>
+              </div>
+            )}
             <div className="detail-line">
               <dt>{t("traderSettlements.netPaymentToTrader")}</dt>
               <dd>{money(detail.summary.netPayment)}</dd>

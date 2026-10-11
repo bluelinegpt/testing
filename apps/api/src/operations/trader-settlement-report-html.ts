@@ -16,6 +16,7 @@ export type ReportLanguage = "en" | "ar";
 interface Labels {
   readonly additionalFees: string;
   readonly amountPaidNow: string;
+  readonly traderCreditsPaidBack: string;
   readonly area: string;
   readonly beneficiaryBank: string;
   readonly cod: string;
@@ -85,6 +86,7 @@ const LABELS: Record<ReportLanguage, Labels> = {
   ar: {
     additionalFees: "رسوم إضافية",
     amountPaidNow: "المبلغ المدفوع الآن",
+    traderCreditsPaidBack: "أرصدة دائنة للتاجر مدفوعة",
     area: "المنطقة",
     beneficiaryBank: "حساب التاجر المستفيد",
     cod: "الدفع عند الاستلام",
@@ -152,6 +154,7 @@ const LABELS: Record<ReportLanguage, Labels> = {
   en: {
     additionalFees: "Additional Fees",
     amountPaidNow: "Amount Paid Now",
+    traderCreditsPaidBack: "Trader Credits paid back",
     area: "Area",
     beneficiaryBank: "Trader Beneficiary Bank",
     cod: "COD Amount",
@@ -522,6 +525,14 @@ export function buildTraderSettlementStatementHtml(
           money(new Decimal(data.summary.totalServiceFees).plus(data.summary.traderFeeDeductions).toFixed(2)),
         )
       : "") +
+    ((data.creditApplications ?? []).length === 0
+      ? ""
+      : summaryLine(
+          `${labels.traderCreditsPaidBack} (${(data.creditApplications ?? [])
+            .map((credit) => credit.creditNumber)
+            .join(", ")})`,
+          money(data.summary.traderCreditsApplied ?? "0.00"),
+        )) +
     summaryLine(labels.amountPaidNow, money(data.summary.netPayment)) +
     `</section>`;
 
