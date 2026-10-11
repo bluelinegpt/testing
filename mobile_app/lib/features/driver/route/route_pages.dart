@@ -857,8 +857,7 @@ final class _CurrentStopCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(l10n.routeCurrentStop, style: theme.textTheme.labelMedium),
-          if (place.isNotEmpty)
-            Text(place, style: theme.textTheme.titleMedium),
+          if (place.isNotEmpty) Text(place, style: theme.textTheme.titleMedium),
           const SizedBox(height: AppSpacing.xs),
           Text(order.label, style: theme.textTheme.titleLarge),
           if (order.customerName?.trim().isNotEmpty ?? false)

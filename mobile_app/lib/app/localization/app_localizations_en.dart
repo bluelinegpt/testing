@@ -975,7 +975,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get routeShowOnMap => 'Show on map';
 
   @override
-  String get routeChangeNumberHint => 'Tap a number to change the order of the stops.';
+  String get routeChangeNumberHint =>
+      'Tap a number to change the order of the stops.';
 
   @override
   String get routeChangeNumber => 'Change number';
@@ -994,7 +995,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get routeNoStartAreas => 'There are no Areas to start from right now.';
 
   @override
-  String get routePlanFromAreaHint => 'Choose the Area you will go to first, for example the one you are in now. The rest of the route is arranged from there.';
+  String get routePlanFromAreaHint =>
+      'Choose the Area you will go to first, for example the one you are in now. The rest of the route is arranged from there.';
 
   @override
   String get routeStopSaved => 'Saved. The next stop is ready.';

@@ -477,21 +477,18 @@ void main() {
         'run': _runJson(startedAt: 'x', deferred: ['order-9']),
       }).run!;
       final plan = TripPlan.of(run);
-      expect([for (final stop in plan.stops) stop.order.id], [
-        'order-1',
-        'order-2',
-        'order-9',
-      ]);
-      expect([for (final stop in plan.afterNext) stop.order.id], [
-        'order-2',
-        'order-9',
-        'order-1',
-      ]);
-      expect([for (final stop in plan.moved(2, 0)) stop.order.id], [
-        'order-9',
-        'order-1',
-        'order-2',
-      ]);
+      expect(
+        [for (final stop in plan.stops) stop.order.id],
+        ['order-1', 'order-2', 'order-9'],
+      );
+      expect(
+        [for (final stop in plan.afterNext) stop.order.id],
+        ['order-2', 'order-9', 'order-1'],
+      );
+      expect(
+        [for (final stop in plan.moved(2, 0)) stop.order.id],
+        ['order-9', 'order-1', 'order-2'],
+      );
     });
 
     test('the Driver\'s own order is used across Areas', () {

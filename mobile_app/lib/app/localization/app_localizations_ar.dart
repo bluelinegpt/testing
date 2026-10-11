@@ -984,7 +984,8 @@ class AppLocalizationsAr extends AppLocalizations {
   String get routeNoStartAreas => 'لا توجد مناطق للبدء منها حالياً.';
 
   @override
-  String get routePlanFromAreaHint => 'اختر المنطقة التي ستذهب إليها أولاً، مثل المنطقة التي أنت فيها الآن، وسيتم ترتيب باقي المسار بعدها.';
+  String get routePlanFromAreaHint =>
+      'اختر المنطقة التي ستذهب إليها أولاً، مثل المنطقة التي أنت فيها الآن، وسيتم ترتيب باقي المسار بعدها.';
 
   @override
   String get routeStopSaved => 'تم الحفظ. المحطة التالية جاهزة.';

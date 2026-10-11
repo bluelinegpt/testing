@@ -211,12 +211,8 @@ final class CachedDriverRouteRepository implements DriverRouteRepository {
     String status, {
     String? reason,
   }) => _guard(
-    () => inner.changeStopStatus(
-      idempotencyKey,
-      orderId,
-      status,
-      reason: reason,
-    ),
+    () =>
+        inner.changeStopStatus(idempotencyKey, orderId, status, reason: reason),
   );
 
   Future<RouteState> _guard(
