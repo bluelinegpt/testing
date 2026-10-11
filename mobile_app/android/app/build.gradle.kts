@@ -94,8 +94,11 @@ afterEvaluate {
             if (source.exists()) {
                 val targetDir = outputs.get().dir("flutter-apk").asFile
                 targetDir.mkdirs()
-                source.copyTo(java.io.File(targetDir, "TawseelHub.apk"), overwrite = true)
-                println("Saved ${'$'}{targetDir}${'$'}{java.io.File.separator}TawseelHub.apk")
+                // `targetDir.resolve`, not `java.io.File(...)`: inside a Gradle
+                // script `java` is the Java extension, so `java.io` does not resolve.
+                val target = targetDir.resolve("TawseelHub.apk")
+                source.copyTo(target, overwrite = true)
+                println("Saved " + target.path)
             }
         }
     }
