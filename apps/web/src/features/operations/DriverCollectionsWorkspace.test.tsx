@@ -285,7 +285,7 @@ describe("DriverCollectionsWorkspace", () => {
     expect(within(scrollArea as HTMLElement).getAllByRole("row")).toHaveLength(15);
     // The summary ends with the cash actually collected, not Net Expected /
     // Actual Received / Difference.
-    expect(within(dialog).getByText("Cash Collected from Driver").nextElementSibling?.textContent).toBe(
+    expect(within(dialog).getByText("Net Cash").nextElementSibling?.textContent).toBe(
       "2800.00",
     );
     expect(within(dialog).queryByText("Net Expected from Driver")).not.toBeInTheDocument();
@@ -542,11 +542,11 @@ describe("DriverCollectionsWorkspace", () => {
         target: { value: "visa" },
       });
       await within(dialog).findByText("No cash to hand over.");
+      // The Company's only bank account is selected automatically.
+      await waitFor(() =>
+        expect(within(dialog).getByLabelText("Bank Account")).toHaveValue("bank-1"),
+      );
       const confirmButton = screen.getByRole("button", { name: "Confirm reconciliation" });
-      expect(confirmButton).toBeDisabled();
-      fireEvent.change(await within(dialog).findByLabelText("Bank Account"), {
-        target: { value: "bank-1" },
-      });
       await waitFor(() => expect(confirmButton).toBeEnabled());
       fireEvent.click(confirmButton);
       await waitFor(() => expect(confirmBody(dialog.api)).toBeDefined());
@@ -562,6 +562,48 @@ describe("DriverCollectionsWorkspace", () => {
           },
         ],
       });
+    });
+
+    it("does not pick a bank account by itself when the Company has more than one", async () => {
+      const dialog = await openCreateDialog({
+        getExtra: (path) =>
+          path.startsWith("operations/accounting/cash-bank/bank-accounts")
+            ? [
+                { accountName: "Main", bankName: "Test Bank", id: "bank-1" },
+                { accountName: "Second", bankName: "Other Bank", id: "bank-2" },
+              ]
+            : undefined,
+      });
+      fireEvent.click(await screen.findByRole("checkbox", { name: /ORD-1/ }));
+      fireEvent.change(within(dialog).getByLabelText("Payment method for ORD-1"), {
+        target: { value: "visa" },
+      });
+      const bank = await within(dialog).findByLabelText("Bank Account");
+      await within(dialog).findByText("No cash to hand over.");
+      expect(bank).toHaveValue("");
+      expect(screen.getByRole("button", { name: "Confirm reconciliation" })).toBeDisabled();
+      fireEvent.change(bank, { target: { value: "bank-2" } });
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Confirm reconciliation" })).toBeEnabled(),
+      );
+    });
+
+    it("reads the review as one calculation ending in Net Cash, without a combined net expected", async () => {
+      const second = { ...eligibleOrder, amountCollected: "25.00", id: "order-2", orderNumber: "ORD-2" };
+      const dialog = await openCreateDialog({ eligibleOrders: [eligibleOrder, second] });
+      fireEvent.click(await screen.findByRole("checkbox", { name: /ORD-1/ }));
+      fireEvent.click(screen.getByRole("checkbox", { name: /ORD-2/ }));
+      fireEvent.change(within(dialog).getByLabelText("Payment method for ORD-2"), {
+        target: { value: "visa" },
+      });
+      const review = within(dialog).getByTestId("collection-review-summary");
+      const valueOf = (label: string) => within(review).getByText(label).nextElementSibling?.textContent;
+      await waitFor(() => expect(valueOf("Total Visa (1)")).toBe("25.00"));
+      expect(valueOf("Total Amount (Cash + Visa)")).toBe("85.00");
+      expect(valueOf("Total Cash (1)")).toBe("60.00");
+      expect(valueOf("Net Cash")).toBe("60.00");
+      expect(within(dialog).queryByText("Net Expected from Driver")).not.toBeInTheDocument();
+      expect(within(dialog).queryByText("Cash net expected from Driver")).not.toBeInTheDocument();
     });
 
     it("asks for the cash paid to the Driver when expenses are higher than the cash", async () => {

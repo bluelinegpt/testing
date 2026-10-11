@@ -1377,6 +1377,31 @@ function CreateDriverCollectionDialog({
   const visaExpected = preview === undefined ? 0 : Number(money(preview.visaExpected ?? "0"));
   const visaNeedsBank = visaExpected > 0;
 
+  /* One bank account and Visa money to place: nothing to choose, so select it.
+     With two or more the cashier still picks, so Visa money never lands in
+     the wrong account by default. */
+  useEffect(() => {
+    if (!visaNeedsBank || selectedBankAccountId !== "" || bankAccounts.length !== 1) return;
+    const only = bankAccounts[0];
+    if (only !== undefined) setSelectedBankAccountId(only.id);
+  }, [bankAccounts, selectedBankAccountId, visaNeedsBank]);
+
+  const minusAmount = (value: string | undefined) =>
+    Number(value ?? 0) === 0 ? money(0) : `- ${money(value)}`;
+  // "Outsourced Driver Fee (15.00 × 3)" when every offset line is the same
+  // fee; otherwise the number of Orders (the fee table above has the detail).
+  const driverFeeLabel = (() => {
+    const lines = (preview?.driverFeeAllocations ?? []).filter((line) => Number(line.amount) > 0);
+    const amounts = new Set(lines.map((line) => money(line.amount)));
+    if (lines.length > 0 && amounts.size === 1) {
+      return t("operations.collectionSplit.driverFeeFormula", {
+        count: lines.length,
+        fee: [...amounts][0],
+      });
+    }
+    return t("operations.collectionSplit.driverFeeOrders", { count: lines.length });
+  })();
+
   type PaymentLine = {
     readonly amount: number;
     readonly bankAccountId?: string;
@@ -2051,31 +2076,49 @@ function CreateDriverCollectionDialog({
                       </ul>
                     </div>
                   )}
-                  <dl className="reconciliation-summary">
+                  {/* Read top to bottom as one calculation (Aiman, 11 Oct 2026):
+                      total, its Visa and Cash parts, then what comes off the
+                      cash, ending with the Net Cash the Driver hands over.
+                      No combined "net expected" -- Visa is already in the bank. */}
+                  <dl className="reconciliation-summary" data-testid="collection-review-summary">
                     <div className="detail-line">
-                      <dt>{t("operations.selectedCollections")}</dt>
+                      <dt>{t("operations.collectionSplit.totalAmount")}</dt>
                       <dd>{money(preview?.grossCollections)}</dd>
                     </div>
                     <div className="detail-line">
-                      <dt>{t("operations.collectionSplit.cashGross")}</dt>
-                      <dd>{money(preview?.cashGross ?? preview?.grossCollections)}</dd>
-                    </div>
-                    <div className="detail-line">
-                      <dt>{t("operations.collectionSplit.visaGross")}</dt>
+                      <dt>
+                        {t("operations.collectionSplit.totalVisa", {
+                          count: preview?.visaOrderCount ?? liveSplit.visaCount,
+                        })}
+                      </dt>
                       <dd>{money(preview?.visaGross ?? "0")}</dd>
                     </div>
                     <div className="detail-line">
-                      <dt>{t("operations.expenses")}</dt>
-                      <dd>{money(preview?.expenseTotal)}</dd>
+                      <dt>
+                        {t("operations.collectionSplit.totalCash", {
+                          count: preview?.cashOrderCount ?? liveSplit.cashCount,
+                        })}
+                      </dt>
+                      <dd>{money(preview?.cashGross ?? preview?.grossCollections)}</dd>
                     </div>
                     <div className="detail-line">
-                      <dt>{t("operations.driverFeeOffset.title")}</dt>
-                      <dd>{money(preview?.driverPayableDeduction)}</dd>
+                      <dt>{t("operations.expenses")}</dt>
+                      <dd>{minusAmount(preview?.expenseTotal)}</dd>
                     </div>
+                    {Number(preview?.driverPayableDeduction ?? 0) === 0 ? null : (
+                      <div className="detail-line">
+                        <dt>{driverFeeLabel}</dt>
+                        <dd>{minusAmount(preview?.driverPayableDeduction)}</dd>
+                      </div>
+                    )}
                     <div className="detail-line detail-line-total">
-                      <dt>{t("operations.netExpected")}</dt>
+                      <dt>
+                        {companyPays
+                          ? t("operations.collectionSplit.companyPaysDriver")
+                          : t("operations.collectionSplit.netCash")}
+                      </dt>
                       <dd>
-                        <strong>{money(preview?.netAmountExpected)}</strong>
+                        <strong>{money(cashDue)}</strong>
                       </dd>
                     </div>
                   </dl>
@@ -2089,18 +2132,6 @@ function CreateDriverCollectionDialog({
                   >
                     <section className="collection-settlement-cash">
                       <h4>{t("operations.collectionSplit.cashSection")}</h4>
-                      <dl className="reconciliation-summary">
-                        <div className="detail-line detail-line-total">
-                          <dt>
-                            {companyPays
-                              ? t("operations.collectionSplit.companyPaysDriver")
-                              : t("operations.collectionSplit.cashNetExpected")}
-                          </dt>
-                          <dd>
-                            <strong>{money(cashDue)}</strong>
-                          </dd>
-                        </div>
-                      </dl>
                       {companyPays ? (
                         <div className="alert alert-warning" role="status">
                           {t("operations.collectionSplit.companyPaysDriverHint", {

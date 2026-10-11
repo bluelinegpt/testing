@@ -214,11 +214,11 @@ describe("buildDriverCollectionReportHtml", () => {
     expect(arabic).toContain("تحصيل مندوب");
   });
 
-  it("ends the summary with the cash collected from the Driver, in red, without the confusing totals", () => {
+  it("ends the summary with Net Cash, in red, without the confusing totals", () => {
     const html = buildDriverCollectionReportHtml(sample, "en", "11/10/2026, 12:00 (UAE)");
     const summary = html.slice(html.indexOf('class="summary-section"'), html.indexOf('class="signatures"'));
     expect(summary).toContain(
-      '<div class="summary-line summary-final"><span>Cash Collected from Driver</span><span>AED 100.00</span></div>',
+      '<div class="summary-line summary-final"><span>Net Cash</span><span>AED 100.00</span></div>',
     );
     expect(summary).not.toContain("Net Expected");
     expect(summary).not.toContain("Difference");
@@ -258,6 +258,6 @@ describe("buildDriverCollectionReportHtml", () => {
     expect(html).toContain(
       '<div class="summary-line summary-final"><span>Cash Paid to Driver</span><span>AED 30.00</span></div>',
     );
-    expect(html).not.toContain("Cash Collected from Driver");
+    expect(html).not.toContain("<span>Net Cash</span>");
   });
 });
