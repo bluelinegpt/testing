@@ -613,6 +613,8 @@ export function OrdersModuleWorkspace({
     filters.traderId,
     filters.cashStatus,
     filters.settlementStatus,
+    // A ready question narrows the list too: show "19 of 146", not the tab total.
+    filters.question,
   ].some((value) => value !== "");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [allMatching, setAllMatching] = useState(false);
