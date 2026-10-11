@@ -74,7 +74,9 @@ final class ApiDriverRepository implements DriverRepository {
       'portal/driver/orders/$orderId/status',
       headers: {'X-Idempotency-Key': idempotencyKey},
       data: {
-        'status': status,
+        // An action queued offline by an older build may still carry
+        // `returned_to_branch`; the API only accepts `in_branch` for it.
+        'status': status == 'returned_to_branch' ? 'in_branch' : status,
         'reason': ?reason,
         'expectedStatus': ?expectedStatus,
       },

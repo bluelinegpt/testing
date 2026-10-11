@@ -207,6 +207,7 @@ final class RouteRun {
     this.manualOrder = false,
     this.branchLatitude,
     this.branchLongitude,
+    this.orderSequence = const [],
   });
 
   factory RouteRun.fromJson(Map<String, dynamic> json) => RouteRun(
@@ -232,6 +233,11 @@ final class RouteRun {
     manualOrder: _bool(json['manualOrder']),
     branchLatitude: _double(json['branchLatitude']),
     branchLongitude: _double(json['branchLongitude']),
+    orderSequence: [
+      if (json['orderSequence'] case final List<Object?> ids)
+        for (final id in ids)
+          if (id is String && id.isNotEmpty) id,
+    ],
   );
 
   final String id, referenceNumber, businessDate, direction, resultSource;
@@ -245,6 +251,9 @@ final class RouteRun {
   final String? startedAt;
   final bool manualOrder;
   final double? branchLatitude, branchLongitude;
+
+  /// The Driver's own Order order across Areas (empty until he arranges it).
+  final List<String> orderSequence;
 
   bool get isFallback => resultSource != 'provider';
   bool get isStarted => startedAt != null;
@@ -276,6 +285,7 @@ final class RouteRun {
     'manualOrder': manualOrder,
     'branchLatitude': branchLatitude,
     'branchLongitude': branchLongitude,
+    'orderSequence': orderSequence,
   };
 }
 
@@ -286,12 +296,11 @@ final class TripStop {
   final RouteArea area;
 }
 
-/// The trip as the Driver works it: every Order still to deliver, in route
-/// order (his own order when he arranged it), then the deferred ones.
-///
-/// [current] is the first stop he has not tried yet. A "no answer" only
-/// moves him on: that Order stays in the trip, unchanged, under [retry],
-/// and he can open it whenever he comes back.
+/// The trip as the Driver works it: every Order still to deliver, in one
+/// list. When he has arranged the route himself his own Order order is used
+/// across all Areas (Abu Hail first, Al Awir second, ...); otherwise the
+/// Areas' order, then any deferred Orders. The first stop is the current
+/// one; "Next" moves it to the end, so nothing is ever dropped.
 final class TripPlan {
   TripPlan._(this.stops);
 
@@ -302,25 +311,118 @@ final class TripPlan {
     ];
     final areaById = {for (final area in run.areas) area.areaId: area};
     for (final order in run.deferredOrders) {
-      final area = areaById[order.areaId];
-      if (area != null) stops.add(TripStop(order: order, area: area));
+      // A deferred Order is never dropped, even when its Area is not listed.
+      final area =
+          areaById[order.areaId] ??
+          RouteArea(
+            areaId: order.areaId ?? '',
+            areaNameEn: '',
+            emirateNameEn: '',
+            isSequenced: false,
+            isNew: false,
+            status: 'pending',
+            orderCount: 1,
+            cashHandoverCount: 0,
+            orders: [order],
+          );
+      stops.add(TripStop(order: order, area: area));
+    }
+    if (run.manualOrder && run.orderSequence.isNotEmpty) {
+      final position = {
+        for (final (index, id) in run.orderSequence.indexed) id: index,
+      };
+      final indexed = stops.indexed.toList()
+        ..sort((left, right) {
+          final a = position[left.$2.order.id];
+          final b = position[right.$2.order.id];
+          if (a != null && b != null) return a.compareTo(b);
+          if (a != null) return -1;
+          if (b != null) return 1;
+          return left.$1.compareTo(right.$1);
+        });
+      return TripPlan._(List.unmodifiable([for (final e in indexed) e.$2]));
     }
     return TripPlan._(List.unmodifiable(stops));
   }
 
   final List<TripStop> stops;
 
-  List<TripStop> get untried => [
-    for (final stop in stops)
-      if (stop.order.noAnswerCount == 0) stop,
-  ];
-  List<TripStop> get retry => [
-    for (final stop in stops)
-      if (stop.order.noAnswerCount > 0) stop,
-  ];
-  TripStop? get current => untried.isEmpty ? null : untried.first;
+  TripStop? get current => stops.isEmpty ? null : stops.first;
   bool get isFinished => stops.isEmpty;
   int get total => stops.length;
+
+  /// The stops with the one at [from] moved to [to] (both 0-based).
+  List<TripStop> moved(int from, int to) {
+    final list = [...stops];
+    final stop = list.removeAt(from);
+    list.insert(to.clamp(0, list.length), stop);
+    return list;
+  }
+
+  /// "Next": the current stop goes to the end.
+  List<TripStop> get afterNext =>
+      stops.length < 2 ? stops : moved(0, stops.length - 1);
+}
+
+/// Google Maps directions through the stops' Areas in trip order, so the
+/// Driver can see the whole route on the map. Each Area is used once; an
+/// Area with a pin is placed by it, otherwise by its name. Google Maps takes
+/// at most ten places (nine waypoints and the destination).
+Uri? tripOverviewUri(List<TripStop> stops) {
+  final points = <String>[];
+  for (final stop in stops) {
+    final area = stop.area;
+    final point = area.hasPin
+        ? '${area.latitude},${area.longitude}'
+        : area.areaNameEn.trim().isEmpty
+        ? ''
+        : [
+            area.areaNameEn.trim(),
+            if (area.emirateNameEn.trim().isNotEmpty) area.emirateNameEn.trim(),
+            'United Arab Emirates',
+          ].join(', ');
+    if (point.isEmpty || points.contains(point)) continue;
+    points.add(point);
+    if (points.length == 10) break;
+  }
+  if (points.isEmpty) return null;
+  return Uri.https('www.google.com', '/maps/dir/', {
+    'api': '1',
+    'destination': points.last,
+    if (points.length > 1)
+      'waypoints': points.sublist(0, points.length - 1).join('|'),
+    'travelmode': 'driving',
+  });
+}
+
+/// An Area the Driver may start his route from (before a route exists).
+final class RouteStartArea {
+  const RouteStartArea({
+    required this.areaId,
+    required this.areaNameEn,
+    this.areaNameAr,
+    required this.emirateNameEn,
+    this.emirateNameAr,
+  });
+
+  factory RouteStartArea.fromJson(Map<String, dynamic> json) => RouteStartArea(
+    areaId: _string(json['areaId']) ?? '',
+    areaNameEn: _string(json['areaNameEn']) ?? '',
+    areaNameAr: _string(json['areaNameAr']),
+    emirateNameEn: _string(json['emirateNameEn']) ?? '',
+    emirateNameAr: _string(json['emirateNameAr']),
+  );
+
+  final String areaId, areaNameEn, emirateNameEn;
+  final String? areaNameAr, emirateNameAr;
+
+  String label(String locale) {
+    final area = locale == 'ar' ? (areaNameAr ?? areaNameEn) : areaNameEn;
+    final emirate = locale == 'ar'
+        ? (emirateNameAr ?? emirateNameEn)
+        : emirateNameEn;
+    return '$area · $emirate';
+  }
 }
 
 /// What the Route tab shows. `offline` marks a saved copy served because the
@@ -333,6 +435,7 @@ final class RouteState {
     this.offline = false,
     this.tripChangedCount,
     this.tripFailedCount = 0,
+    this.startAreas = const [],
   });
 
   factory RouteState.fromJson(
@@ -349,6 +452,10 @@ final class RouteState {
       {'changedCount': final Object? count} => _int(count),
       _ => null,
     },
+    startAreas: [
+      for (final item in _maps(json['startAreas']))
+        RouteStartArea.fromJson(item),
+    ],
     tripFailedCount: switch (json['trip']) {
       {'failedOrderIds': final List<Object?> failed} => failed.length,
       _ => 0,
@@ -362,6 +469,9 @@ final class RouteState {
   /// not be (changed by the office meanwhile).
   final int? tripChangedCount;
   final int tripFailedCount;
+
+  /// Before a route exists: the Areas he may start from.
+  final List<RouteStartArea> startAreas;
 
   Map<String, dynamic> toJson() => {
     'enabled': enabled,

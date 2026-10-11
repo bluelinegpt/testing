@@ -282,7 +282,7 @@
   "routeStartTripConfirmBody": "سيتم تحويل طلباتك المسندة إلى قيد التوصيل.",
   "routeStartTripDone": "تم تحويل {count} طلب إلى قيد التوصيل.",
   "routeStartTripSomeFailed": "تعذّر بدء بعض الطلبات لأن المكتب عدّلها.",
-  "routeArrangeHint": "اسحب المناطق لترتيبها كما تريد، واستخدم الأسهم لترتيب الطلبات داخل كل منطقة.",
+  "routeArrangeHint": "اضغط على الرقم لتغيير مكان المنطقة أو اسحبها، واستخدم الأسهم لترتيب الطلبات داخل كل منطقة.",
   "routeReplanConfirm": "هل تريد استبدال ترتيبك بالمسار المقترح؟",
   "routeReplanConfirmAction": "استبدال",
   "routeCancel": "إلغاء",
@@ -301,5 +301,16 @@
   "routeTripFinished": "تم الانتهاء من جميع المحطات.",
   "routeReturnToBranch": "عُد إلى الفرع وسلّم",
   "routeNavigateToBranch": "الملاحة إلى الفرع",
-  "routeOnMyWayMessage": "مرحباً {customer}، أنا في الطريق إليك بطلبك رقم {order}."
+  "routeOnMyWayMessage": "مرحباً {customer}، أنا في الطريق إليك بطلبك رقم {order}.",
+  "routeNext": "التالي",
+  "routeDetails": "التفاصيل",
+  "routeFullRoute": "المسار كاملاً",
+  "routeShowOnMap": "عرض على الخريطة",
+  "routeChangeNumberHint": "اضغط على الرقم لتغيير ترتيب المحطات.",
+  "routeChangeNumber": "تغيير الرقم",
+  "routeMoveToTitle": "نقل {item} إلى الرقم",
+  "routePositionNumber": "رقم {number}",
+  "routeNoStartAreas": "لا توجد مناطق للبدء منها حالياً.",
+  "routePlanFromAreaHint": "اختر المنطقة التي ستذهب إليها أولاً، مثل المنطقة التي أنت فيها الآن، وسيتم ترتيب باقي المسار بعدها.",
+  "routeStopSaved": "تم الحفظ. المحطة التالية جاهزة."
 }

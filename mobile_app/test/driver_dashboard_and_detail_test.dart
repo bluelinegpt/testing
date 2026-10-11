@@ -1131,7 +1131,7 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, 'Return to Branch'));
       await tester.pumpAndSettle();
       expect(repository.changeStatusCalls, 1);
-      expect(repository.lastStatusTarget, 'returned_to_branch');
+      expect(repository.lastStatusTarget, 'in_branch');
       expect(repository.lastStatusReason, 'Customer refused');
       expect(find.text('Status updated.'), findsOneWidget);
       // Terminal-for-the-Driver after Return to Branch — no action buttons.
@@ -1518,4 +1518,12 @@ final class _RoutePlanningOff implements DriverRouteRepository {
   @override
   Future<RouteState> noAnswer(String idempotencyKey, String orderId) =>
       throw UnimplementedError();
+
+  @override
+  Future<RouteState> changeStopStatus(
+    String idempotencyKey,
+    String orderId,
+    String status, {
+    String? reason,
+  }) => throw UnimplementedError();
 }

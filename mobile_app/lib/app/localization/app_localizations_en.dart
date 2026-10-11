@@ -898,7 +898,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get routeArrangeHint =>
-      'Drag the Areas into the order you want. Use the arrows to order the orders inside an Area.';
+      'Tap a number to change an Area\'s place, or drag it. Use the arrows to order the orders inside an Area.';
 
   @override
   String get routeReplanConfirm =>
@@ -961,4 +961,41 @@ class AppLocalizationsEn extends AppLocalizations {
   String routeOnMyWayMessage(String customer, String order) {
     return 'Hello $customer, I\'m on my way with your order $order.';
   }
+
+  @override
+  String get routeNext => 'Next';
+
+  @override
+  String get routeDetails => 'Details';
+
+  @override
+  String get routeFullRoute => 'Full route';
+
+  @override
+  String get routeShowOnMap => 'Show on map';
+
+  @override
+  String get routeChangeNumberHint => 'Tap a number to change the order of the stops.';
+
+  @override
+  String get routeChangeNumber => 'Change number';
+
+  @override
+  String routeMoveToTitle(String item) {
+    return 'Move $item to number';
+  }
+
+  @override
+  String routePositionNumber(int number) {
+    return 'Number $number';
+  }
+
+  @override
+  String get routeNoStartAreas => 'There are no Areas to start from right now.';
+
+  @override
+  String get routePlanFromAreaHint => 'Choose the Area you will go to first, for example the one you are in now. The rest of the route is arranged from there.';
+
+  @override
+  String get routeStopSaved => 'Saved. The next stop is ready.';
 }

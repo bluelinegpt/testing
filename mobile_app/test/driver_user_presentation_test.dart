@@ -1278,4 +1278,12 @@ final class _FakeRouteRepository implements DriverRouteRepository {
   @override
   Future<RouteState> noAnswer(String idempotencyKey, String orderId) =>
       throw UnimplementedError();
+
+  @override
+  Future<RouteState> changeStopStatus(
+    String idempotencyKey,
+    String orderId,
+    String status, {
+    String? reason,
+  }) => throw UnimplementedError();
 }

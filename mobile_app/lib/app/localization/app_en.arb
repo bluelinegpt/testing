@@ -284,7 +284,7 @@
   "routeStartTripDone": "{count} orders are now Out for delivery.",
   "@routeStartTripDone": {"placeholders": {"count": {"type": "int"}}},
   "routeStartTripSomeFailed": "Some orders could not be started because the office changed them.",
-  "routeArrangeHint": "Drag the Areas into the order you want. Use the arrows to order the orders inside an Area.",
+  "routeArrangeHint": "Tap a number to change an Area's place, or drag it. Use the arrows to order the orders inside an Area.",
   "routeReplanConfirm": "Replace your own order with the suggested route?",
   "routeReplanConfirmAction": "Replace",
   "routeCancel": "Cancel",
@@ -305,5 +305,18 @@
   "routeReturnToBranch": "Return to branch and hand over",
   "routeNavigateToBranch": "Navigate to branch",
   "routeOnMyWayMessage": "Hello {customer}, I'm on my way with your order {order}.",
-  "@routeOnMyWayMessage": {"placeholders": {"customer": {"type": "String"}, "order": {"type": "String"}}}
+  "@routeOnMyWayMessage": {"placeholders": {"customer": {"type": "String"}, "order": {"type": "String"}}},
+  "routeNext": "Next",
+  "routeDetails": "Details",
+  "routeFullRoute": "Full route",
+  "routeShowOnMap": "Show on map",
+  "routeChangeNumberHint": "Tap a number to change the order of the stops.",
+  "routeChangeNumber": "Change number",
+  "routeMoveToTitle": "Move {item} to number",
+  "@routeMoveToTitle": {"placeholders": {"item": {"type": "String"}}},
+  "routePositionNumber": "Number {number}",
+  "@routePositionNumber": {"placeholders": {"number": {"type": "int"}}},
+  "routeNoStartAreas": "There are no Areas to start from right now.",
+  "routePlanFromAreaHint": "Choose the Area you will go to first, for example the one you are in now. The rest of the route is arranged from there.",
+  "routeStopSaved": "Saved. The next stop is ready."
 }

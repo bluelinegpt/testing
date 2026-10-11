@@ -154,7 +154,7 @@ List<DriverDashboardCard> driverDashboardCards(
 /// current status. Backend-authoritative (`operations.service.ts`
 /// `driverTransitions` inside `changeOrderStatus`) transitions:
 /// `assigned_to_driver -> out_for_delivery`, `out_for_delivery ->
-/// {hold, delivered, returned_to_branch}`. Nothing else is reachable, so
+/// {hold, delivered, in_branch}` (Return to Branch). Nothing else is reachable, so
 /// this is the complete set — there is no separate "report failure" concept
 /// on the backend, only Return to Branch. Hold is not a new backend status
 /// (Operations already had it); this is only what a `driver`-kind identity
@@ -181,7 +181,9 @@ String driverActionTargetStatus(DriverAction action) => switch (action) {
   DriverAction.startDelivery => 'out_for_delivery',
   DriverAction.markDelivered => 'delivered',
   DriverAction.hold => 'hold',
-  DriverAction.returnToBranch => 'returned_to_branch',
+  // The API's target for Return to Branch is `in_branch` (the Order is back
+  // at the branch); `returned_to_branch` is rejected by the status DTO.
+  DriverAction.returnToBranch => 'in_branch',
 };
 
 /// Mirrors the backend's generic `order_status_reason_required` rule for the

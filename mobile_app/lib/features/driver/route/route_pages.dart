@@ -2,6 +2,7 @@ import 'package:bluelinegpt_mobile/app/localization/app_localizations.dart';
 import 'package:bluelinegpt_mobile/app/providers.dart';
 import 'package:bluelinegpt_mobile/app/theme/app_theme.dart';
 import 'package:bluelinegpt_mobile/features/driver/driver_models.dart';
+import 'package:bluelinegpt_mobile/features/driver/driver_order_detail_view.dart';
 import 'package:bluelinegpt_mobile/features/driver/driver_pages.dart';
 import 'package:bluelinegpt_mobile/features/driver/route/route_models.dart';
 import 'package:bluelinegpt_mobile/shared/widgets/mobile_ui_components.dart';
@@ -101,22 +102,26 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
   late RouteState _state = widget.initial;
   bool _busy = false;
 
-  Future<void> _run(Future<RouteState> Function(String key) action) async {
-    if (_busy) return;
+  /// Runs one route call; true when it succeeded.
+  Future<bool> _run(Future<RouteState> Function(String key) action) async {
+    if (_busy) return false;
     final l10n = AppLocalizations.of(context);
     final messenger = ScaffoldMessenger.of(context);
     setState(() => _busy = true);
     try {
       final next = await action(_uuid.v4());
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() => _state = next);
       if (next.stale) {
         messenger.showSnackBar(SnackBar(content: Text(l10n.routeStaleNotice)));
+        return false;
       }
+      return true;
     } on Object {
       if (mounted) {
         messenger.showSnackBar(SnackBar(content: Text(l10n.routeActionFailed)));
       }
+      return false;
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -145,40 +150,117 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
         .defer(key, order.id, run.revision),
   );
 
-  /// The start Area is chosen from the Areas of the Driver's own Orders.
+  /// "Start from an Area": the Area he goes to first (for example the one he
+  /// is in now); the rest of the route is arranged from there. The server
+  /// lists the Areas of his open Orders, so this works for a Driver User too.
   Future<void> _pickStartArea() async {
     final l10n = AppLocalizations.of(context);
-    final orders = await ref.read(driverRepositoryProvider).orders();
-    if (!mounted) return;
-    final areas = <String, String>{};
-    for (final order in orders) {
-      if (order.status == 'assigned_to_driver' ||
-          order.status == 'out_for_delivery') {
-        areas[order.areaId] = order.areaName;
-      }
+    final locale = Localizations.localeOf(context).languageCode;
+    final messenger = ScaffoldMessenger.of(context);
+    if (_state.startAreas.isEmpty) {
+      await _refresh();
+      if (!mounted) return;
+    }
+    final areas = _state.startAreas;
+    if (areas.isEmpty) {
+      messenger.showSnackBar(SnackBar(content: Text(l10n.routeNoStartAreas)));
+      return;
     }
     final chosen = await showModalBottomSheet<String>(
       context: context,
+      isScrollControlled: true,
       builder: (context) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            ListTile(
-              title: Text(
-                l10n.routeChooseArea,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-            ),
-            for (final entry in areas.entries)
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.75,
+          ),
+          child: ListView(
+            shrinkWrap: true,
+            children: [
               ListTile(
-                title: Text(entry.value),
-                onTap: () => Navigator.of(context).pop(entry.key),
+                title: Text(
+                  l10n.routeChooseArea,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                subtitle: Text(l10n.routePlanFromAreaHint),
               ),
-          ],
+              for (final area in areas)
+                ListTile(
+                  leading: const Icon(Icons.place_outlined),
+                  title: Text(area.label(locale)),
+                  onTap: () => Navigator.of(context).pop(area.areaId),
+                ),
+            ],
+          ),
         ),
       ),
     );
     if (chosen != null) await _plan(startAreaId: chosen);
+  }
+
+  /// Asks for a new number (1-based on screen) for the item at [current].
+  /// [labels] are what sits at each number now. Returns the 0-based index.
+  Future<int?> _pickPosition(String item, List<String> labels, int current) {
+    final l10n = AppLocalizations.of(context);
+    return showModalBottomSheet<int>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.75,
+          ),
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              ListTile(
+                title: Text(
+                  l10n.routeMoveToTitle(item),
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              for (final (index, label) in labels.indexed)
+                ListTile(
+                  selected: index == current,
+                  leading: CircleAvatar(
+                    radius: 16,
+                    child: Text('${index + 1}'),
+                  ),
+                  title: Text(l10n.routePositionNumber(index + 1)),
+                  subtitle: Text(label),
+                  onTap: () => Navigator.of(context).pop(index),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _setAreaPosition(RouteRun run, int from) async {
+    final locale = Localizations.localeOf(context).languageCode;
+    final pending = [
+      for (final area in run.areas)
+        if (!area.isDone) area,
+    ];
+    if (pending.length < 2) return;
+    final to = await _pickPosition(pending[from].areaName(locale), [
+      for (final area in pending) area.areaName(locale),
+    ], from);
+    if (to == null || to == from || !mounted) return;
+    await _moveArea(run, from, to);
+  }
+
+  Future<void> _showRouteOnMap(List<TripStop> stops) async {
+    final uri = tripOverviewUri(stops);
+    if (uri == null) return;
+    final l10n = AppLocalizations.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(l10n.externalAppUnavailable)),
+      );
+    }
   }
 
   Future<void> _openMaps(RouteArea area) async {
@@ -222,12 +304,91 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
           key,
           run.revision,
           [for (final area in areas) area.areaId],
+          // Deferred Orders stay last; an explicit list keeps them in it.
           orderIds: [
             for (final area in areas)
               for (final order in area.orders) order.id,
+            for (final order in run.deferredOrders) order.id,
           ],
         ),
   );
+
+  /// Saves the trip's stops in [stops] order: the Areas in the order they
+  /// first appear, and every Order in exactly this order.
+  Future<bool> _saveStops(RouteRun run, List<TripStop> stops) {
+    final known = {for (final area in run.areas) area.areaId};
+    final areaIds = <String>[];
+    for (final stop in stops) {
+      final id = stop.area.areaId;
+      if (known.contains(id) && !areaIds.contains(id)) areaIds.add(id);
+    }
+    return _run(
+      (key) => ref
+          .read(driverRouteRepositoryProvider)
+          .reorder(
+            key,
+            run.revision,
+            areaIds,
+            orderIds: [for (final stop in stops) stop.order.id],
+          ),
+    );
+  }
+
+  /// "Next": the current stop goes to the end of the route (no answer,
+  /// traffic, anything) and the following one becomes current. The Order
+  /// itself is not changed.
+  Future<void> _next(RouteRun run) async {
+    final plan = TripPlan.of(run);
+    if (plan.total < 2) return;
+    await _saveStops(run, plan.afterNext);
+  }
+
+  /// Gives the stop at [from] a new number in the route.
+  Future<void> _setStopPosition(RouteRun run, int from) async {
+    final locale = Localizations.localeOf(context).languageCode;
+    final plan = TripPlan.of(run);
+    if (plan.total < 2) return;
+    final to = await _pickPosition(plan.stops[from].order.label, [
+      for (final stop in plan.stops)
+        [
+          stop.order.label,
+          if (stop.area.areaName(locale).isNotEmpty) stop.area.areaName(locale),
+        ].join(' · '),
+    ], from);
+    if (to == null || to == from || !mounted) return;
+    await _saveStops(run, plan.moved(from, to));
+  }
+
+  /// Delivered, Hold or Return to Branch straight from the trip screen. The
+  /// stop leaves the route and the next one becomes current.
+  Future<void> _stopStatus(RouteOrder order, String status) async {
+    final l10n = AppLocalizations.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    String? reason;
+    if (status == 'delivered') {
+      final confirmed = await promptDriverStatusConfirm(
+        context,
+        title: '${l10n.confirmStatusChange} (${order.label})',
+        confirmLabel: l10n.delivered,
+      );
+      if (!confirmed || !mounted) return;
+    } else {
+      reason = await promptDriverStatusReason(
+        context,
+        title: '${l10n.confirmStatusChange} (${order.label})',
+        confirmLabel: status == 'hold' ? l10n.hold : l10n.returnToBranchAction,
+      );
+      if (reason == null || reason.trim().isEmpty || !mounted) return;
+    }
+    final done = await _run(
+      (key) => ref
+          .read(driverRouteRepositoryProvider)
+          .changeStopStatus(key, order.id, status, reason: reason?.trim()),
+    );
+    if (done && mounted) {
+      messenger.showSnackBar(SnackBar(content: Text(l10n.routeStopSaved)));
+    }
+  }
 
   /// [from] and [to] index the Areas still to visit; finished Areas keep
   /// their place after them.
@@ -297,10 +458,6 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
     }
   }
 
-  Future<void> _noAnswer(RouteOrder order) => _run(
-    (key) => ref.read(driverRouteRepositoryProvider).noAnswer(key, order.id),
-  );
-
   Future<void> _openOrder(RouteOrder order) async {
     if (order.id.isEmpty) return;
     await context.push('/orders/${order.id}');
@@ -354,7 +511,10 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
           notices: notices,
           actionsEnabled: actionsEnabled,
           onOpenOrder: _openOrder,
-          onNoAnswer: _noAnswer,
+          onStatus: _stopStatus,
+          onNext: () => _next(run),
+          onSetPosition: (index) => _setStopPosition(run, index),
+          onShowMap: _showRouteOnMap,
         ),
       );
     }
@@ -399,6 +559,11 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
                   onPressed: actionsEnabled ? () => _reverse(run) : null,
                   icon: const Icon(Icons.swap_vert),
                   label: Text(l10n.routeReverse),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => _showRouteOnMap(TripPlan.of(run).stops),
+                  icon: const Icon(Icons.map_outlined),
+                  label: Text(l10n.routeShowOnMap),
                 ),
               ],
             ),
@@ -463,6 +628,9 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
                       onOpenOrder: _openOrder,
                       onMoveOrder: (orderIndex, step) =>
                           _moveOrder(run, area, orderIndex, step),
+                      onNumber: actionsEnabled && pendingAreas.length > 1
+                          ? () => _setAreaPosition(run, index)
+                          : null,
                     ),
                 ],
               ),
@@ -509,9 +677,10 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
   }
 }
 
-/// The trip, one stop at a time. A "no answer" only moves the Driver on:
-/// the Order keeps its status and stays under "try again", and he can open
-/// it whenever he comes back.
+/// The trip, one stop at a time, on one screen. The current stop carries
+/// everything the Driver needs at the door: Delivered, Hold, Return to
+/// branch, Next, and Call/WhatsApp/SMS. Below it the whole route is listed
+/// with numbers; tapping a number moves that stop to another number.
 final class _TripView extends StatelessWidget {
   const _TripView({
     required this.run,
@@ -519,7 +688,10 @@ final class _TripView extends StatelessWidget {
     required this.notices,
     required this.actionsEnabled,
     required this.onOpenOrder,
-    required this.onNoAnswer,
+    required this.onStatus,
+    required this.onNext,
+    required this.onSetPosition,
+    required this.onShowMap,
   });
 
   final RouteRun run;
@@ -527,7 +699,10 @@ final class _TripView extends StatelessWidget {
   final List<Widget> notices;
   final bool actionsEnabled;
   final Future<void> Function(RouteOrder order) onOpenOrder;
-  final Future<void> Function(RouteOrder order) onNoAnswer;
+  final Future<void> Function(RouteOrder order, String status) onStatus;
+  final Future<void> Function() onNext;
+  final Future<void> Function(int index) onSetPosition;
+  final Future<void> Function(List<TripStop> stops) onShowMap;
 
   Future<void> _open(BuildContext context, Uri? uri) async {
     if (uri == null) return;
@@ -546,8 +721,6 @@ final class _TripView extends StatelessWidget {
     final theme = Theme.of(context);
     final plan = TripPlan.of(run);
     final current = plan.current;
-    final upNext = plan.untried.skip(1).toList();
-    final retry = plan.retry;
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(AppSpacing.md),
@@ -564,29 +737,40 @@ final class _TripView extends StatelessWidget {
             stop: current,
             locale: locale,
             actionsEnabled: actionsEnabled,
+            canGoNext: plan.total > 1,
             onOpen: (uri) => _open(context, uri),
-            onOpenOrder: () => onOpenOrder(current.order),
-            onNoAnswer: () => onNoAnswer(current.order),
+            onDetails: () => onOpenOrder(current.order),
+            onStatus: (status) => onStatus(current.order, status),
+            onNext: onNext,
           ),
-        if (upNext.isNotEmpty) ...[
+        if (plan.total > 0) ...[
           const SizedBox(height: AppSpacing.md),
-          Text(l10n.routeUpNext, style: theme.textTheme.titleSmall),
-          for (final stop in upNext)
-            _OrderTile(
-              order: stop.order,
-              area: stop.area,
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  l10n.routeFullRoute,
+                  style: theme.textTheme.titleSmall,
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () => onShowMap(plan.stops),
+                icon: const Icon(Icons.map_outlined),
+                label: Text(l10n.routeShowOnMap),
+              ),
+            ],
+          ),
+          if (plan.total > 1)
+            Text(l10n.routeChangeNumberHint, style: theme.textTheme.bodySmall),
+          for (final (index, stop) in plan.stops.indexed)
+            _StopTile(
+              number: index + 1,
+              stop: stop,
               locale: locale,
-              onTap: () => onOpenOrder(stop.order),
-            ),
-        ],
-        if (retry.isNotEmpty) ...[
-          const SizedBox(height: AppSpacing.md),
-          Text(l10n.routeRetryTitle, style: theme.textTheme.titleSmall),
-          for (final stop in retry)
-            _OrderTile(
-              order: stop.order,
-              area: stop.area,
-              locale: locale,
+              isCurrent: index == 0,
+              onNumber: actionsEnabled && plan.total > 1
+                  ? () => onSetPosition(index)
+                  : null,
               onTap: () => onOpenOrder(stop.order),
             ),
         ],
@@ -634,17 +818,23 @@ final class _CurrentStopCard extends StatelessWidget {
     required this.stop,
     required this.locale,
     required this.actionsEnabled,
+    required this.canGoNext,
     required this.onOpen,
-    required this.onOpenOrder,
-    required this.onNoAnswer,
+    required this.onDetails,
+    required this.onStatus,
+    required this.onNext,
   });
 
   final TripStop stop;
   final String locale;
   final bool actionsEnabled;
+  final bool canGoNext;
   final Future<void> Function(Uri? uri) onOpen;
-  final VoidCallback onOpenOrder;
-  final VoidCallback onNoAnswer;
+  final VoidCallback onDetails;
+  final void Function(String status) onStatus;
+  final VoidCallback onNext;
+
+  static const _tall = Size.fromHeight(48);
 
   @override
   Widget build(BuildContext context) {
@@ -658,15 +848,17 @@ final class _CurrentStopCard extends StatelessWidget {
       (order.customerName ?? '').trim(),
       order.label,
     );
+    final place = [
+      area.areaName(locale),
+      area.emirateName(locale),
+    ].where((part) => part.isNotEmpty).join(' · ');
     return BluelineSectionCard(
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(l10n.routeCurrentStop, style: theme.textTheme.labelMedium),
-          Text(
-            '${area.areaName(locale)} · ${area.emirateName(locale)}',
-            style: theme.textTheme.titleMedium,
-          ),
+          if (place.isNotEmpty)
+            Text(place, style: theme.textTheme.titleMedium),
           const SizedBox(height: AppSpacing.xs),
           Text(order.label, style: theme.textTheme.titleLarge),
           if (order.customerName?.trim().isNotEmpty ?? false)
@@ -679,6 +871,7 @@ final class _CurrentStopCard extends StatelessWidget {
             ),
           const SizedBox(height: AppSpacing.sm),
           FilledButton.icon(
+            style: FilledButton.styleFrom(minimumSize: _tall),
             onPressed: () => onOpen(
               orderDirectionsUri(
                 address: address,
@@ -719,26 +912,129 @@ final class _CurrentStopCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: AppSpacing.sm),
+          const Divider(height: AppSpacing.lg),
+          FilledButton.icon(
+            key: const ValueKey('route-stop-delivered'),
+            style: FilledButton.styleFrom(
+              minimumSize: _tall,
+              backgroundColor: AppColors.success,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: actionsEnabled ? () => onStatus('delivered') : null,
+            icon: const Icon(Icons.check_circle_outline),
+            label: Text(l10n.delivered),
+          ),
+          const SizedBox(height: AppSpacing.xs),
           Row(
             children: [
               Expanded(
-                child: FilledButton.tonal(
-                  onPressed: onOpenOrder,
-                  child: Text(l10n.routeOpenOrder),
+                child: OutlinedButton.icon(
+                  key: const ValueKey('route-stop-hold'),
+                  style: OutlinedButton.styleFrom(minimumSize: _tall),
+                  onPressed: actionsEnabled ? () => onStatus('hold') : null,
+                  icon: const Icon(Icons.pause_circle_outline),
+                  label: Text(l10n.hold),
                 ),
               ),
-              const SizedBox(width: AppSpacing.sm),
+              const SizedBox(width: AppSpacing.xs),
               Expanded(
-                child: OutlinedButton(
-                  onPressed: actionsEnabled ? onNoAnswer : null,
-                  child: Text(l10n.routeNoAnswerNext),
+                child: OutlinedButton.icon(
+                  key: const ValueKey('route-stop-return'),
+                  style: OutlinedButton.styleFrom(minimumSize: _tall),
+                  onPressed: actionsEnabled
+                      ? () => onStatus('returned_to_branch')
+                      : null,
+                  icon: const Icon(Icons.undo),
+                  label: Text(
+                    l10n.returnToBranchAction,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.tonalIcon(
+                  key: const ValueKey('route-stop-next'),
+                  style: FilledButton.styleFrom(minimumSize: _tall),
+                  onPressed: actionsEnabled && canGoNext ? onNext : null,
+                  icon: const Icon(Icons.skip_next_rounded),
+                  label: Text(l10n.routeNext),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              TextButton.icon(
+                onPressed: onDetails,
+                icon: const Icon(Icons.description_outlined),
+                label: Text(l10n.routeDetails),
               ),
             ],
           ),
         ],
       ),
+    );
+  }
+}
+
+/// One numbered stop in the full route. The number is the stop's place;
+/// tapping it (or the swap button) gives the stop another number.
+final class _StopTile extends StatelessWidget {
+  const _StopTile({
+    required this.number,
+    required this.stop,
+    required this.locale,
+    required this.isCurrent,
+    required this.onNumber,
+    required this.onTap,
+  });
+
+  final int number;
+  final TripStop stop;
+  final String locale;
+  final bool isCurrent;
+  final VoidCallback? onNumber;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final order = stop.order;
+    return ListTile(
+      dense: true,
+      selected: isCurrent,
+      contentPadding: EdgeInsets.zero,
+      leading: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onNumber,
+        child: Tooltip(
+          message: l10n.routeChangeNumber,
+          child: CircleAvatar(
+            radius: 18,
+            backgroundColor: isCurrent ? AppColors.primary : null,
+            foregroundColor: isCurrent ? Colors.white : null,
+            child: Text('$number'),
+          ),
+        ),
+      ),
+      title: Text(order.label),
+      subtitle: Text(
+        [
+          if (stop.area.areaName(locale).isNotEmpty) stop.area.areaName(locale),
+          if (order.customerName?.trim().isNotEmpty ?? false)
+            order.customerName!.trim(),
+          if (order.noAnswerCount > 0)
+            '${l10n.routeNoAnswerCount} ×${order.noAnswerCount}',
+        ].join(' · '),
+      ),
+      trailing: IconButton(
+        tooltip: l10n.routeChangeNumber,
+        onPressed: onNumber,
+        icon: const Icon(Icons.swap_vert),
+      ),
+      onTap: order.id.isEmpty ? null : onTap,
     );
   }
 }
@@ -775,6 +1071,7 @@ final class _AreaTile extends StatelessWidget {
     required this.onOpenMaps,
     required this.onOpenOrder,
     required this.onMoveOrder,
+    this.onNumber,
     super.key,
   });
 
@@ -786,6 +1083,9 @@ final class _AreaTile extends StatelessWidget {
   final VoidCallback onOpenMaps;
   final void Function(RouteOrder order) onOpenOrder;
   final void Function(int orderIndex, int step) onMoveOrder;
+
+  /// Tapping the number gives the Area a new place in the route.
+  final VoidCallback? onNumber;
 
   @override
   Widget build(BuildContext context) {
@@ -805,12 +1105,21 @@ final class _AreaTile extends StatelessWidget {
         : null;
     return Card(
       child: ExpansionTile(
-        leading: CircleAvatar(
-          backgroundColor: area.isDone ? AppColors.success : AppColors.primary,
-          foregroundColor: Colors.white,
-          child: area.isDone
-              ? const Icon(Icons.check, size: 18)
-              : Text('${index + 1}'),
+        leading: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onNumber,
+          child: Tooltip(
+            message: l10n.routeChangeNumber,
+            child: CircleAvatar(
+              backgroundColor: area.isDone
+                  ? AppColors.success
+                  : AppColors.primary,
+              foregroundColor: Colors.white,
+              child: area.isDone
+                  ? const Icon(Icons.check, size: 18)
+                  : Text('${index + 1}'),
+            ),
+          ),
         ),
         title: Text(area.areaName(locale)),
         subtitle: Text(tag == null ? subtitle : '$subtitle · $tag'),
@@ -870,18 +1179,10 @@ final class _AreaTile extends StatelessWidget {
 }
 
 final class _OrderTile extends StatelessWidget {
-  const _OrderTile({
-    required this.order,
-    this.trailing,
-    this.onTap,
-    this.area,
-    this.locale = 'en',
-  });
+  const _OrderTile({required this.order, this.trailing, this.onTap});
   final RouteOrder order;
   final Widget? trailing;
   final VoidCallback? onTap;
-  final RouteArea? area;
-  final String locale;
 
   @override
   Widget build(BuildContext context) {
@@ -895,7 +1196,6 @@ final class _OrderTile extends StatelessWidget {
         [
           if (order.customerName?.trim().isNotEmpty ?? false)
             order.customerName!.trim(),
-          if (area case final place?) place.areaName(locale),
           if (order.noAnswerCount > 0)
             '${l10n.routeNoAnswerCount} ×${order.noAnswerCount}',
         ].join(' · '),

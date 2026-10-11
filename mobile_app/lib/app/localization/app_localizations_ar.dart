@@ -889,7 +889,7 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get routeArrangeHint =>
-      'اسحب المناطق لترتيبها كما تريد، واستخدم الأسهم لترتيب الطلبات داخل كل منطقة.';
+      'اضغط على الرقم لتغيير مكان المنطقة أو اسحبها، واستخدم الأسهم لترتيب الطلبات داخل كل منطقة.';
 
   @override
   String get routeReplanConfirm => 'هل تريد استبدال ترتيبك بالمسار المقترح؟';
@@ -951,4 +951,41 @@ class AppLocalizationsAr extends AppLocalizations {
   String routeOnMyWayMessage(String customer, String order) {
     return 'مرحباً $customer، أنا في الطريق إليك بطلبك رقم $order.';
   }
+
+  @override
+  String get routeNext => 'التالي';
+
+  @override
+  String get routeDetails => 'التفاصيل';
+
+  @override
+  String get routeFullRoute => 'المسار كاملاً';
+
+  @override
+  String get routeShowOnMap => 'عرض على الخريطة';
+
+  @override
+  String get routeChangeNumberHint => 'اضغط على الرقم لتغيير ترتيب المحطات.';
+
+  @override
+  String get routeChangeNumber => 'تغيير الرقم';
+
+  @override
+  String routeMoveToTitle(String item) {
+    return 'نقل $item إلى الرقم';
+  }
+
+  @override
+  String routePositionNumber(int number) {
+    return 'رقم $number';
+  }
+
+  @override
+  String get routeNoStartAreas => 'لا توجد مناطق للبدء منها حالياً.';
+
+  @override
+  String get routePlanFromAreaHint => 'اختر المنطقة التي ستذهب إليها أولاً، مثل المنطقة التي أنت فيها الآن، وسيتم ترتيب باقي المسار بعدها.';
+
+  @override
+  String get routeStopSaved => 'تم الحفظ. المحطة التالية جاهزة.';
 }

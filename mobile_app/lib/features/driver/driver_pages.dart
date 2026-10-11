@@ -411,7 +411,7 @@ final class _DriverOrderDetailsPageState
   /// Shared status-change flow for every Driver action — a plain confirm
   /// dialog for transitions that need no reason, or a reason-required
   /// `TextField` dialog (mirroring `operator_pages.dart`'s `changeStatus`
-  /// pattern) for `returned_to_branch`. A fresh idempotency key is generated
+  /// pattern) for Hold and Return to Branch. A fresh idempotency key is generated
   /// per attempt, never reused across separate actions. The offline-aware
   /// repository never throws for a genuinely-unreachable network — it
   /// durably queues the action and returns the optimistically-updated Order
@@ -509,7 +509,7 @@ final class _DriverOrderDetailsPageState
   Future<void> _returnToBranch() {
     final l10n = AppLocalizations.of(context);
     return _changeStatus(
-      target: 'returned_to_branch',
+      target: driverActionTargetStatus(DriverAction.returnToBranch),
       confirmTitle: l10n.confirmStatusChange,
       confirmButtonLabel: l10n.returnToBranchAction,
       successMessage: l10n.statusUpdateCompleted,

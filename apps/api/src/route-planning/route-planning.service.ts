@@ -95,6 +95,8 @@ export interface RouteRunView {
   readonly startedAt: string | null;
   /** True after the Driver put the route in his own order. */
   readonly manualOrder: boolean;
+  /** His own Order order across all Areas (empty until he arranges it). */
+  readonly orderSequence: readonly string[];
   readonly branchLatitude: number | null;
   readonly branchLongitude: number | null;
 }
@@ -105,6 +107,14 @@ export interface RouteResponse {
   /** True when the request carried an older revision; nothing was changed. */
   readonly stale: boolean;
   readonly run: RouteRunView | null;
+  /** Only before a run exists: the Areas a Driver may start from. */
+  readonly startAreas?: readonly {
+    readonly areaId: string;
+    readonly areaNameEn: string;
+    readonly areaNameAr: string | null;
+    readonly emirateNameEn: string;
+    readonly emirateNameAr: string;
+  }[];
   /** Start trip only: Orders moved to Out for Delivery, and any that could not be. */
   readonly trip?: { readonly changedCount: number; readonly failedOrderIds: readonly string[] };
 }
@@ -217,10 +227,23 @@ export class RoutePlanningService {
     const enabled = settings.companyEnabled && settings.platformEnabled;
     if (!settings.companyEnabled) return { enabled, stale: false, run: null };
     const run = await this.activeRun(this.database, scope);
+    if (run !== null) {
+      return { enabled, stale: false, run: await this.view(this.database, scope, run) };
+    }
+    // Before a run exists, the Areas of the Driver's own stops, so "Start
+    // from an Area" can offer them whatever kind of account he uses.
+    const areas = await this.stopAreas(scope);
     return {
       enabled,
       stale: false,
-      run: run === null ? null : await this.view(this.database, scope, run),
+      run: null,
+      startAreas: areas.map((area) => ({
+        areaId: area.id,
+        areaNameEn: area.nameEn,
+        areaNameAr: area.nameAr,
+        emirateNameEn: area.emirateNameEn,
+        emirateNameAr: area.emirateNameAr,
+      })),
     };
   }
 
@@ -459,9 +482,12 @@ export class RoutePlanningService {
             HttpStatus.BAD_REQUEST,
           );
         }
-        const stopOrderIds = new Set(
-          current.areas.flatMap((area) => area.orders.map((order) => order.id)),
-        );
+        // Deferred Orders are stops too: placing one puts it back in the
+        // Driver's order, so an explicit Order list clears the deferrals.
+        const stopOrderIds = new Set([
+          ...current.areas.flatMap((area) => area.orders.map((order) => order.id)),
+          ...current.deferredOrders.map((order) => order.id),
+        ]);
         const orderIds = input.orderIds ?? run.orderSequence;
         if (
           new Set(orderIds).size !== orderIds.length ||
@@ -483,6 +509,10 @@ export class RoutePlanningService {
            set revision = revision + 1,
                manual_order = true,
                order_sequence = ${JSON.stringify(orderIds)}::jsonb,
+               deferred_order_ids = case
+                 when ${input.orderIds !== undefined} then '[]'::jsonb
+                 else deferred_order_ids
+               end,
                updated_at = now()
          where company_id = ${scope.companyId}::uuid and id = ${run.id}::uuid
       `.execute(transaction);
@@ -560,6 +590,72 @@ export class RoutePlanningService {
       const latest = await this.requireActiveRun(scope);
       return this.respond(scope, settings.platformEnabled, latest, false);
     }
+  }
+
+  /**
+   * Change one stop's status from the trip screen: Delivered, Hold or
+   * Return to Branch. It goes through the normal Order status change (the
+   * same rules, reasons, history, audit and cash status as the Order screen)
+   * and only for an Order that is one of this Driver's own stops right now.
+   */
+  public async changeStopStatus(
+    input: {
+      readonly orderId: string;
+      readonly status: "delivered" | "hold" | "returned_to_branch";
+      readonly reason?: string;
+    },
+    idempotencyKey: string,
+    correlationId: string,
+  ): Promise<RouteResponse> {
+    const scope = await this.scope();
+    const settings = await this.requireEnabled(scope.companyId);
+    const order = await sql<{ id: string; deliveryStatus: string }>`
+      select o.id, o.delivery_status as "deliveryStatus"
+        from orders o
+       where o.company_id = ${scope.companyId}::uuid
+         and o.id = ${input.orderId}::uuid
+         and o.assigned_driver_id = ${scope.driverId}::uuid
+         and o.order_type <> 'gcc_international'
+         and o.delivery_status in ('assigned_to_driver', 'out_for_delivery')
+    `.execute(this.database);
+    const found = order.rows[0];
+    if (found === undefined) {
+      throw new ApplicationException(
+        "route_order_not_in_run",
+        "This Order is not a stop in your route",
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    // Delivered, Hold and Return to Branch are reached from Out for Delivery;
+    // an Order still Assigned is started first, as the Order screen does.
+    if (found.deliveryStatus === "assigned_to_driver") {
+      await this.operations.changeOrderStatus(
+        found.id,
+        { status: "out_for_delivery", expectedStatus: "assigned_to_driver" },
+        correlationId,
+        tripStatusKey(`${idempotencyKey}:start`, found.id),
+      );
+    }
+    // "Return to Branch" is the Order status `in_branch` (the parcel is back
+    // at the branch); `returned_to_branch` is not a target the status
+    // change accepts.
+    const target = input.status === "returned_to_branch" ? "in_branch" : input.status;
+    await this.operations.changeOrderStatus(
+      found.id,
+      {
+        status: target,
+        expectedStatus: "out_for_delivery",
+        ...(input.reason === undefined ? {} : { reason: input.reason }),
+      },
+      correlationId,
+      tripStatusKey(idempotencyKey, found.id),
+    );
+    const run = await this.activeRun(this.database, scope);
+    return {
+      enabled: settings.platformEnabled,
+      stale: false,
+      run: run === null ? null : await this.view(this.database, scope, run),
+    };
   }
 
   /**
@@ -1198,6 +1294,7 @@ export class RoutePlanningService {
       ),
       startedAt: run.startedAt,
       manualOrder: run.manualOrder,
+      orderSequence: run.orderSequence,
       branchLatitude: settings.branch?.latitude ?? null,
       branchLongitude: settings.branch?.longitude ?? null,
     };

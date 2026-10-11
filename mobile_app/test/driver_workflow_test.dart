@@ -12,7 +12,7 @@ void main() {
         'Branch', () {
       // No separate "report failure" concept — the backend's only reachable
       // targets from `out_for_delivery` are `delivered`, `hold`, and
-      // `returned_to_branch` (`operations.service.ts` `driverTransitions`
+      // `in_branch` (Return to Branch; `operations.service.ts` `driverTransitions`
       // inside `changeOrderStatus`). Hold is not a new backend status — it
       // is newly reachable by a Driver from this one source status only.
       expect(actionsForDriverStatus('out_for_delivery'), {

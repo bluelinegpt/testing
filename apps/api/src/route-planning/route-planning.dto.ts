@@ -5,12 +5,15 @@ import {
   ArrayMinSize,
   ArrayUnique,
   IsArray,
+  IsIn,
   IsInt,
   IsLatitude,
   IsLongitude,
   IsOptional,
+  IsString,
   IsUUID,
   Max,
+  MaxLength,
   Min,
 } from "class-validator";
 
@@ -96,6 +99,22 @@ export class ReorderRouteDto {
   @ArrayUnique()
   @IsUUID("all", { each: true })
   public orderIds?: string[];
+}
+
+export class RouteStopStatusDto {
+  @ApiProperty({ format: "uuid" })
+  @IsUUID()
+  public orderId!: string;
+
+  @ApiProperty({ enum: ["delivered", "hold", "returned_to_branch"] })
+  @IsIn(["delivered", "hold", "returned_to_branch"])
+  public status!: "delivered" | "hold" | "returned_to_branch";
+
+  @ApiPropertyOptional({ maxLength: 300 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  public reason?: string;
 }
 
 export class RouteOrderActionDto {

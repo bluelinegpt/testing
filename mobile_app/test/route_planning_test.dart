@@ -20,6 +20,7 @@ Map<String, dynamic> _runJson({
   List<String> deferred = const [],
   String? startedAt,
   int noAnswerOnFirst = 0,
+  Set<String> finished = const {},
 }) => {
   'id': 'run-1',
   'referenceNumber': 'RUN-000001',
@@ -53,24 +54,26 @@ Map<String, dynamic> _runJson({
       'latitude': 25.392,
       'longitude': 55.453,
       'orders': [
-        {
-          'id': 'order-1',
-          'orderNumber': 'ORD-000001',
-          'customerName': 'Customer A',
-          'deliveryStatus': 'assigned_to_driver',
-          'referenceNumber': '4501',
-          'customerMobile': '0506898604',
-          'customerAddress': 'Villa 3',
-          'amountDue': '450.00',
-          'noAnswerCount': noAnswerOnFirst,
-        },
-        {
-          'id': 'order-2',
-          'orderNumber': 'ORD-000002',
-          'customerName': 'Customer B',
-          'deliveryStatus': 'assigned_to_driver',
-          'referenceNumber': '4502',
-        },
+        if (!finished.contains('order-1'))
+          {
+            'id': 'order-1',
+            'orderNumber': 'ORD-000001',
+            'customerName': 'Customer A',
+            'deliveryStatus': 'assigned_to_driver',
+            'referenceNumber': '4501',
+            'customerMobile': '0506898604',
+            'customerAddress': 'Villa 3',
+            'amountDue': '450.00',
+            'noAnswerCount': noAnswerOnFirst,
+          },
+        if (!finished.contains('order-2'))
+          {
+            'id': 'order-2',
+            'orderNumber': 'ORD-000002',
+            'customerName': 'Customer B',
+            'deliveryStatus': 'assigned_to_driver',
+            'referenceNumber': '4502',
+          },
       ],
     },
     {
@@ -106,6 +109,7 @@ final class _FakeRoutes implements DriverRouteRepository {
   @override
   Future<RouteState> plan(String idempotencyKey, {String? startAreaId}) async {
     calls.add('plan');
+    if (startAreaId != null) calls.add('planFrom:$startAreaId');
     keys.add(idempotencyKey);
     return state = RouteState.fromJson({'enabled': true, 'run': _runJson()});
   }
@@ -174,6 +178,20 @@ final class _FakeRoutes implements DriverRouteRepository {
     return state = RouteState.fromJson({
       'enabled': true,
       'run': _runJson(startedAt: '2026-10-10 09:00:00+04', noAnswerOnFirst: 1),
+    });
+  }
+
+  @override
+  Future<RouteState> changeStopStatus(
+    String idempotencyKey,
+    String orderId,
+    String status, {
+    String? reason,
+  }) async {
+    calls.add('status:$orderId:$status:${reason ?? ''}');
+    return state = RouteState.fromJson({
+      'enabled': true,
+      'run': _runJson(startedAt: '2026-10-10 09:00:00+04', finished: {orderId}),
     });
   }
 }
@@ -401,6 +419,30 @@ void main() {
       expect(replan.onPressed, isNull);
     });
 
+    testWidgets('Start from an Area lists the server\'s Areas and plans', (
+      tester,
+    ) async {
+      _tall(tester);
+      final initial = RouteState.fromJson({
+        'enabled': true,
+        'run': null,
+        'startAreas': [
+          {
+            'areaId': 'area-hail',
+            'areaNameEn': 'Abu Hail',
+            'emirateNameEn': 'Dubai',
+          },
+        ],
+      });
+      final routes = _FakeRoutes(initial);
+      await tester.pumpWidget(_wrap(DriverRoutePage(initial: initial), routes));
+      await tester.tap(find.text('Start from an Area'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Abu Hail · Dubai'));
+      await tester.pumpAndSettle();
+      expect(routes.calls, contains('planFrom:area-hail'));
+    });
+
     testWidgets('renders in Arabic', (tester) async {
       _tall(tester);
       final state = RouteState.fromJson({'enabled': true, 'run': _runJson()});
@@ -417,17 +459,64 @@ void main() {
   });
 
   group('Trip plan', () {
-    test('works the stops in route order; a no-answer moves on but stays', () {
+    test('works the stops in route order; a no-answer does not move one', () {
       final run = RouteState.fromJson({
         'enabled': true,
         'run': _runJson(startedAt: 'x', noAnswerOnFirst: 1),
       }).run!;
       final plan = TripPlan.of(run);
       expect(plan.total, 2);
-      expect(plan.current!.order.id, 'order-2');
-      expect(plan.retry.single.order.id, 'order-1');
+      expect(plan.current!.order.id, 'order-1');
       expect(run.isStarted, isTrue);
       expect(run.cashHandoverAmount, '120.00');
+    });
+
+    test('Next sends the current stop to the end; numbers move a stop', () {
+      final run = RouteState.fromJson({
+        'enabled': true,
+        'run': _runJson(startedAt: 'x', deferred: ['order-9']),
+      }).run!;
+      final plan = TripPlan.of(run);
+      expect([for (final stop in plan.stops) stop.order.id], [
+        'order-1',
+        'order-2',
+        'order-9',
+      ]);
+      expect([for (final stop in plan.afterNext) stop.order.id], [
+        'order-2',
+        'order-9',
+        'order-1',
+      ]);
+      expect([for (final stop in plan.moved(2, 0)) stop.order.id], [
+        'order-9',
+        'order-1',
+        'order-2',
+      ]);
+    });
+
+    test('the Driver\'s own order is used across Areas', () {
+      final json = _runJson(startedAt: 'x');
+      final run = RouteState.fromJson({
+        'enabled': true,
+        'run': {
+          ...json,
+          'manualOrder': true,
+          'orderSequence': ['order-2', 'order-1'],
+        },
+      }).run!;
+      expect(TripPlan.of(run).current!.order.id, 'order-2');
+      expect(run.orderSequence, ['order-2', 'order-1']);
+    });
+
+    test('the whole route opens in Google Maps through each Area once', () {
+      final run = RouteState.fromJson({
+        'enabled': true,
+        'run': _runJson(startedAt: 'x'),
+      }).run!;
+      final uri = tripOverviewUri(TripPlan.of(run).stops)!;
+      expect(uri.host, 'www.google.com');
+      expect(uri.queryParameters['destination'], '25.392,55.453');
+      expect(uri.queryParameters.containsKey('waypoints'), isFalse);
     });
 
     test('order label prefers the reference number', () {
@@ -477,7 +566,7 @@ void main() {
       expect(find.widgetWithText(FilledButton, 'Navigate'), findsOneWidget);
     });
 
-    testWidgets('No answer moves on and keeps the Order to try again', (
+    testWidgets('Delivered on the trip screen moves to the next stop', (
       tester,
     ) async {
       _tall(tester);
@@ -488,11 +577,68 @@ void main() {
       final routes = _FakeRoutes(started);
       await tester.pumpWidget(_wrap(DriverRoutePage(initial: started), routes));
       expect(find.text('Customer A'), findsWidgets);
-      await tester.tap(find.text('No answer – next'));
+      await tester.tap(find.byKey(const ValueKey('route-stop-delivered')));
       await tester.pumpAndSettle();
-      expect(routes.calls, contains('noAnswer:order-1'));
-      expect(find.text('No answer – try again'), findsOneWidget);
-      expect(find.textContaining('No answer ×1'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, 'Delivered').last);
+      await tester.pumpAndSettle();
+      expect(routes.calls, contains('status:order-1:delivered:'));
+      expect(find.text('Saved. The next stop is ready.'), findsOneWidget);
+      expect(find.text('Customer A'), findsNothing);
+      expect(find.text('4502'), findsWidgets);
+    });
+
+    testWidgets('Hold asks for a reason and sends it', (tester) async {
+      _tall(tester);
+      final started = RouteState.fromJson({
+        'enabled': true,
+        'run': _runJson(startedAt: '2026-10-10 09:00:00+04'),
+      });
+      final routes = _FakeRoutes(started);
+      await tester.pumpWidget(_wrap(DriverRoutePage(initial: started), routes));
+      await tester.tap(find.byKey(const ValueKey('route-stop-hold')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'Customer asked tomorrow');
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Hold'));
+      await tester.pumpAndSettle();
+      expect(
+        routes.calls,
+        contains('status:order-1:hold:Customer asked tomorrow'),
+      );
+    });
+
+    testWidgets('Next puts the current stop at the end of the route', (
+      tester,
+    ) async {
+      _tall(tester);
+      final started = RouteState.fromJson({
+        'enabled': true,
+        'run': _runJson(startedAt: '2026-10-10 09:00:00+04'),
+      });
+      final routes = _FakeRoutes(started);
+      await tester.pumpWidget(_wrap(DriverRoutePage(initial: started), routes));
+      expect(find.text('Full route'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('route-stop-next')));
+      await tester.pumpAndSettle();
+      expect(routes.calls, contains('reorder:1:area-ajm:order-2,order-1'));
+    });
+
+    testWidgets('tapping a number gives the stop another number', (
+      tester,
+    ) async {
+      _tall(tester);
+      final started = RouteState.fromJson({
+        'enabled': true,
+        'run': _runJson(startedAt: '2026-10-10 09:00:00+04'),
+      });
+      final routes = _FakeRoutes(started);
+      await tester.pumpWidget(_wrap(DriverRoutePage(initial: started), routes));
+      await tester.tap(find.byTooltip('Change number').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Move 4502 to number'), findsOneWidget);
+      await tester.tap(find.text('Number 1'));
+      await tester.pumpAndSettle();
+      expect(routes.calls, contains('reorder:1:area-ajm:order-2,order-1'));
     });
 
     testWidgets('when every stop is done the trip ends at the branch', (
@@ -563,4 +709,11 @@ final class _Failing implements DriverRouteRepository {
   @override
   Future<RouteState> noAnswer(String idempotencyKey, String orderId) async =>
       throw error;
+  @override
+  Future<RouteState> changeStopStatus(
+    String idempotencyKey,
+    String orderId,
+    String status, {
+    String? reason,
+  }) async => throw error;
 }

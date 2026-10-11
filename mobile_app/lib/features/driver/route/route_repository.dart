@@ -37,6 +37,15 @@ abstract interface class DriverRouteRepository {
 
   /// Records that the customer did not answer. The Order is unchanged.
   Future<RouteState> noAnswer(String idempotencyKey, String orderId);
+
+  /// Delivered, Hold or Return to Branch for one stop, from the trip screen.
+  /// [status] is `delivered`, `hold` or `returned_to_branch`.
+  Future<RouteState> changeStopStatus(
+    String idempotencyKey,
+    String orderId,
+    String status, {
+    String? reason,
+  });
 }
 
 final class ApiDriverRouteRepository implements DriverRouteRepository {
@@ -94,6 +103,18 @@ final class ApiDriverRouteRepository implements DriverRouteRepository {
   @override
   Future<RouteState> noAnswer(String idempotencyKey, String orderId) =>
       _post('no-answer', idempotencyKey, {'orderId': orderId});
+
+  @override
+  Future<RouteState> changeStopStatus(
+    String idempotencyKey,
+    String orderId,
+    String status, {
+    String? reason,
+  }) => _post('status', idempotencyKey, {
+    'orderId': orderId,
+    'status': status,
+    'reason': ?reason,
+  });
 
   Future<RouteState> _post(
     String action,
@@ -182,6 +203,21 @@ final class CachedDriverRouteRepository implements DriverRouteRepository {
   @override
   Future<RouteState> noAnswer(String idempotencyKey, String orderId) =>
       _guard(() => inner.noAnswer(idempotencyKey, orderId));
+
+  @override
+  Future<RouteState> changeStopStatus(
+    String idempotencyKey,
+    String orderId,
+    String status, {
+    String? reason,
+  }) => _guard(
+    () => inner.changeStopStatus(
+      idempotencyKey,
+      orderId,
+      status,
+      reason: reason,
+    ),
+  );
 
   Future<RouteState> _guard(
     Future<RouteState> Function() call, {

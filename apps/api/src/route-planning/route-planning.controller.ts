@@ -24,6 +24,7 @@ import {
   ReplanRouteDto,
   ReverseRouteDto,
   RouteOrderActionDto,
+  RouteStopStatusDto,
 } from "./route-planning.dto.js";
 import { type RouteResponse, RoutePlanningService } from "./route-planning.service.js";
 
@@ -111,6 +112,21 @@ export class RoutePlanningController {
     @Headers("x-idempotency-key") idempotencyKey: string | undefined,
   ): Promise<RouteResponse> {
     return this.routes.start(
+      requireKey(idempotencyKey),
+      String(request.id ?? request.headers["x-correlation-id"] ?? "unknown"),
+    );
+  }
+
+  @ApiOperation({ summary: "Delivered, Hold or Return to Branch for one of my stops" })
+  @Post("status")
+  @HttpCode(HttpStatus.OK)
+  public changeStopStatus(
+    @Req() request: Request,
+    @Body() input: RouteStopStatusDto,
+    @Headers("x-idempotency-key") idempotencyKey: string | undefined,
+  ): Promise<RouteResponse> {
+    return this.routes.changeStopStatus(
+      input,
       requireKey(idempotencyKey),
       String(request.id ?? request.headers["x-correlation-id"] ?? "unknown"),
     );

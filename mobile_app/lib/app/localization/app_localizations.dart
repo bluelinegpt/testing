@@ -1781,7 +1781,7 @@ abstract class AppLocalizations {
   /// No description provided for @routeArrangeHint.
   ///
   /// In en, this message translates to:
-  /// **'Drag the Areas into the order you want. Use the arrows to order the orders inside an Area.'**
+  /// **'Tap a number to change an Area\'s place, or drag it. Use the arrows to order the orders inside an Area.'**
   String get routeArrangeHint;
 
   /// No description provided for @routeReplanConfirm.
@@ -1897,6 +1897,72 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Hello {customer}, I\'m on my way with your order {order}.'**
   String routeOnMyWayMessage(String customer, String order);
+
+  /// No description provided for @routeNext.
+  ///
+  /// In en, this message translates to:
+  /// **'Next'**
+  String get routeNext;
+
+  /// No description provided for @routeDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'Details'**
+  String get routeDetails;
+
+  /// No description provided for @routeFullRoute.
+  ///
+  /// In en, this message translates to:
+  /// **'Full route'**
+  String get routeFullRoute;
+
+  /// No description provided for @routeShowOnMap.
+  ///
+  /// In en, this message translates to:
+  /// **'Show on map'**
+  String get routeShowOnMap;
+
+  /// No description provided for @routeChangeNumberHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap a number to change the order of the stops.'**
+  String get routeChangeNumberHint;
+
+  /// No description provided for @routeChangeNumber.
+  ///
+  /// In en, this message translates to:
+  /// **'Change number'**
+  String get routeChangeNumber;
+
+  /// No description provided for @routeMoveToTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Move {item} to number'**
+  String routeMoveToTitle(String item);
+
+  /// No description provided for @routePositionNumber.
+  ///
+  /// In en, this message translates to:
+  /// **'Number {number}'**
+  String routePositionNumber(int number);
+
+  /// No description provided for @routeNoStartAreas.
+  ///
+  /// In en, this message translates to:
+  /// **'There are no Areas to start from right now.'**
+  String get routeNoStartAreas;
+
+  /// No description provided for @routePlanFromAreaHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose the Area you will go to first, for example the one you are in now. The rest of the route is arranged from there.'**
+  String get routePlanFromAreaHint;
+
+  /// No description provided for @routeStopSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved. The next stop is ready.'**
+  String get routeStopSaved;
 }
 
 class _AppLocalizationsDelegate
