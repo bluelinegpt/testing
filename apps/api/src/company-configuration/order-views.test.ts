@@ -10,6 +10,7 @@ import { ORDER_VIEWS_READ_PERMISSIONS, OrderViewsController } from "./order-view
 import {
   type OrderView,
   STANDARD_ACTIVE_STATUSES,
+  completeStandardViews,
   standardOrderViews,
   validateOrderViews,
 } from "./order-views.js";
@@ -34,7 +35,7 @@ const errorsOf = (views: unknown): string[] => {
 };
 
 describe("standard Orders menu", () => {
-  it("is today's 7 tabs, in today's order, Active first and Hold counted", () => {
+  it("is today's 7 tabs plus AI, in today's order, Active first and Hold counted", () => {
     const views = standard();
     expect(views.map((view) => view.key)).toEqual([
       "active",
@@ -44,6 +45,7 @@ describe("standard Orders menu", () => {
       "cancelled",
       "delivery",
       "accountant",
+      "ai",
     ]);
     expect(views.map((view) => view.labelEn)).toEqual([
       "Active Orders",
@@ -53,6 +55,7 @@ describe("standard Orders menu", () => {
       "Cancelled",
       "Operation Activity",
       "Accountant",
+      "AI",
     ]);
     expect(views.filter((view) => view.isDefault).map((view) => view.key)).toEqual(["active"]);
     expect(views.filter((view) => view.showCount).map((view) => view.key)).toEqual(["hold"]);
@@ -137,24 +140,24 @@ describe("validateOrderViews", () => {
 
   it("checks names", () => {
     expect(errorsOf([...standard(), custom({ labelEn: "   " })])).toContain(
-      "View 8: an English name is required",
+      "View 9: an English name is required",
     );
     expect(errorsOf([...standard(), custom({ labelEn: "x".repeat(41) })])).toContain(
-      "View 8: the English name is longer than 40 characters",
+      "View 9: the English name is longer than 40 characters",
     );
     const result = validateOrderViews([...standard(), custom({ labelAr: "  " })]);
-    expect(result.ok && result.views[7]!.labelAr).toBeNull();
+    expect(result.ok && result.views[8]!.labelAr).toBeNull();
   });
 
   it("rejects bad and duplicate keys", () => {
     expect(errorsOf([...standard(), custom({ key: "today" })])).toContain(
-      'View 8: key "today" is not a standard view or a valid custom key',
+      'View 9: key "today" is not a standard view or a valid custom key',
     );
     expect(errorsOf([...standard(), custom(), custom()])).toContain(
-      'View 9: key "custom_today" appears more than once',
+      'View 10: key "custom_today" appears more than once',
     );
     expect(errorsOf([...standard(), custom({ key: "active", kind: "custom" })])).toContain(
-      'View 8: key "active" appears more than once',
+      'View 9: key "active" appears more than once',
     );
   });
 
@@ -164,23 +167,23 @@ describe("validateOrderViews", () => {
       custom({ definition }),
     ];
     expect(errorsOf(withDefinition({ dateWindow: "next_week" }))).toContain(
-      'View 8: "next_week" is not a date window',
+      'View 9: "next_week" is not a date window',
     );
     expect(errorsOf(withDefinition({ dateField: "updated_at", dateWindow: "today" }))).toContain(
-      'View 8: "updated_at" is not a date field',
+      'View 9: "updated_at" is not a date field',
     );
     expect(errorsOf(withDefinition({ dateWindow: "last_n_days", lastNDays: 0 }))).toContain(
-      "View 8: Last N days must be a whole number from 1 to 365",
+      "View 9: Last N days must be a whole number from 1 to 365",
     );
     expect(errorsOf(withDefinition({ dateWindow: "range", dateFrom: "2026-10-09", dateTo: "2026-10-01" }))).toContain(
-      "View 8: the From date is after the To date",
+      "View 9: the From date is after the To date",
     );
     expect(errorsOf(withDefinition({ dateWindow: "range", dateFrom: "2026-02-30", dateTo: "2026-03-01" }))).toContain(
-      "View 8: a custom range needs valid From and To dates",
+      "View 9: a custom range needs valid From and To dates",
     );
-    expect(errorsOf(withDefinition({ statuses: ["lost"] }))).toContain('View 8: "lost" is not an allowed status');
+    expect(errorsOf(withDefinition({ statuses: ["lost"] }))).toContain('View 9: "lost" is not an allowed status');
     const ok = validateOrderViews(withDefinition({ dateWindow: "last_n_days", lastNDays: 7, statuses: ["closed", "new"] }));
-    expect(ok.ok && ok.views[7]!.definition).toEqual({
+    expect(ok.ok && ok.views[8]!.definition).toEqual({
       dateField: "order_date",
       dateWindow: "last_n_days",
       lastNDays: 7,
@@ -195,7 +198,7 @@ describe("validateOrderViews", () => {
 
   it("rejects input that is not a list of objects", () => {
     expect(errorsOf("nope")).toEqual(["views must be a list"]);
-    expect(errorsOf([...standard(), 5])).toContain("View 8: must be an object");
+    expect(errorsOf([...standard(), 5])).toContain("View 9: must be an object");
   });
 });
 
@@ -215,5 +218,17 @@ describe("OrderViewsController permissions", () => {
       "order_views.manage",
       "users_roles.manage",
     ]);
+  });
+});
+
+describe("menus saved before the AI tab", () => {
+  it("gain the AI tab at the end, hidden from nothing and never opening first", () => {
+    const old = standard().filter((view) => view.key !== "ai");
+    const completed = completeStandardViews(old) as OrderView[];
+    expect(completed.map((view) => view.key).at(-1)).toBe("ai");
+    expect(completed.find((view) => view.key === "ai")).toMatchObject({ isDefault: false, isVisible: true });
+    expect(validateOrderViews(completed).ok).toBe(true);
+    // A complete menu is returned as it is.
+    expect(completeStandardViews(standard())).toHaveLength(standard().length);
   });
 });

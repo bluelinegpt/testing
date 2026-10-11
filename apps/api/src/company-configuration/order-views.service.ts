@@ -7,9 +7,20 @@ import { KyselyTransactionManager } from "../infrastructure/database/transaction
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
-import { type OrderView, standardOrderViews, validateOrderViews } from "./order-views.js";
+import { companyOrdersAiEnabled } from "./orders-ai-settings.js";
+import {
+  completeStandardViews,
+  type OrderView,
+  standardOrderViews,
+  validateOrderViews,
+} from "./order-views.js";
 
 export interface OrderViewsMenu {
+  /**
+   * Orders AI switched on for this Company by the Platform. Off: the Orders
+   * screen hides the AI tab whatever the menu says.
+   */
+  readonly aiEnabled: boolean;
   /** False: the Orders screen uses the standard menu, exactly as before. */
   readonly enabled: boolean;
   /** True when the Company has never saved a menu (these are the defaults). */
@@ -51,7 +62,7 @@ export class OrderViewsService {
   public async save(input: SaveOrderViewsMenuInput, correlationId: string): Promise<OrderViewsMenu> {
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
-    const validation = validateOrderViews(input.views);
+    const validation = validateOrderViews(completeStandardViews(input.views));
     if (!validation.ok) {
       throw new ApplicationException(
         "order_views_invalid",
@@ -127,8 +138,10 @@ export class OrderViewsService {
       where m.company_id = ${companyId}::uuid
     `.execute(database);
     const row = result.rows[0];
+    const aiEnabled = await companyOrdersAiEnabled(database, companyId);
     if (row === undefined) {
       return {
+        aiEnabled,
         enabled: false,
         isStandard: true,
         updatedAt: null,
@@ -139,8 +152,9 @@ export class OrderViewsService {
     }
     // Stored menus were validated on save; re-validate on read so a menu
     // written by an older rule set can never reach the Orders screen broken.
-    const validation = validateOrderViews(row.views);
+    const validation = validateOrderViews(completeStandardViews(row.views));
     return {
+      aiEnabled,
       enabled: row.enabled && validation.ok,
       isStandard: false,
       updatedAt: row.updatedAt,

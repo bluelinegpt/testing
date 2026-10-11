@@ -307,6 +307,14 @@ describe.skipIf(!runHttpTests)("Orders ready questions", () => {
               .post("/api/v1/operations/orders/ask")
               .set("Authorization", `Bearer ${token}`)
               .send({ language: "en", question });
+          // Orders AI is off until the Platform switches it on for the Company.
+          const off = await ask("Which orders are ready to collect from the driver?");
+          expect(off.status).toBe(403);
+          expect(off.body.error?.code).toBe("order_question_ai_disabled");
+          await sql`
+            insert into company_ai_settings (company_id, orders_ai_enabled)
+            values (${companyId}::uuid, true)
+          `.execute(transaction);
           const library = await ask("Which orders are ready to collect from the driver?");
           expect(library.status).toBe(201);
           expect(library.body).toMatchObject({

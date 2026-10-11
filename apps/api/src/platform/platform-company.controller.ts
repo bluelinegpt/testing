@@ -9,6 +9,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   UseGuards,
@@ -41,6 +42,7 @@ import {
   ResetCompanyUsersDataDto,
   ResetCompanyUsersPreviewDto,
   SuspendCompanyDto,
+  UpdateCompanyOrdersAiDto,
   UpdateCompanyProfileDto,
   UpdateShipmentPrefixDto,
   ActivateShipmentSerialDto,
@@ -240,6 +242,26 @@ export class PlatformTargetCompanyController {
       input as unknown as Record<string, string | null>,
       this.actor(request),
     );
+  }
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Whether Orders AI (the AI tab) is on for the Company" })
+  @RequirePlatformPermissions(PLATFORM_COMPANIES_READ)
+  @Get("orders-ai")
+  public ordersAi(@Param("companyId") companyId: string): Promise<object> {
+    return this.companies.ordersAi(companyId);
+  }
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Switch Orders AI (the AI tab) on or off for the Company" })
+  @RequirePlatformPermissions(PLATFORM_COMPANIES_MANAGE)
+  @Put("orders-ai")
+  public updateOrdersAi(
+    @Param("companyId") companyId: string,
+    @Body() input: UpdateCompanyOrdersAiDto,
+    @Req() request: Request,
+  ): Promise<object> {
+    return this.companies.updateOrdersAi(companyId, input, this.actor(request));
   }
 
   @ApiBearerAuth()

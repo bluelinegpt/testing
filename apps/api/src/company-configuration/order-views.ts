@@ -25,11 +25,14 @@ export const SYSTEM_VIEW_KEYS = [
   "cancelled",
   "delivery",
   "accountant",
+  // Orders AI (11 Oct 2026): the question box. Lists all Orders; shown only
+  // when the Platform has switched Orders AI on for the Company.
+  "ai",
 ] as const;
 export type SystemViewKey = (typeof SYSTEM_VIEW_KEYS)[number];
 
 /** Rules that follow financial logic: name, order, visibility and count only. */
-export const FIXED_RULE_VIEW_KEYS: ReadonlySet<string> = new Set(["delivery", "accountant"]);
+export const FIXED_RULE_VIEW_KEYS: ReadonlySet<string> = new Set(["delivery", "accountant", "ai"]);
 /** Always shown. */
 export const ALWAYS_VISIBLE_VIEW_KEYS: ReadonlySet<string> = new Set(["all"]);
 
@@ -146,7 +149,25 @@ export function standardOrderViews(): OrderView[] {
     system("cancelled", "Cancelled", "ملغاة"),
     system("delivery", "Operation Activity", "نشاط العمليات"),
     system("accountant", "Accountant", "المحاسب"),
+    system("ai", "AI", "الذكاء الاصطناعي"),
   ];
+}
+
+/**
+ * A saved menu from before a standard view existed (the AI tab, 11 Oct 2026)
+ * gets that view appended, with its standard settings and never as the one
+ * that opens first, so older menus stay valid and gain the new tab. Anything
+ * that is not a list is returned unchanged for the validator to refuse.
+ */
+export function completeStandardViews(input: unknown): unknown {
+  if (!Array.isArray(input)) return input;
+  const present = new Set(
+    input.map((raw) => (isRecord(raw) && typeof raw.key === "string" ? raw.key.trim() : "")),
+  );
+  const missing = standardOrderViews()
+    .filter((view) => !present.has(view.key))
+    .map((view) => ({ ...view, isDefault: false }));
+  return missing.length === 0 ? input : [...input, ...missing];
 }
 
 export type OrderViewsValidation =

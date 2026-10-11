@@ -1,5 +1,6 @@
 import { Transform, Type } from "class-transformer";
 import {
+  IsBoolean,
   IsEmail,
   ArrayMaxSize,
   ArrayNotEmpty,
@@ -233,6 +234,18 @@ export class UpdateCompanyProfileDto {
   @IsString()
   @Length(0, 100)
   public taxRegistrationNumber?: string;
+}
+
+/** Orders AI (the AI tab) on or off for one Company. */
+export class UpdateCompanyOrdersAiDto {
+  @IsBoolean()
+  public isEnabled!: boolean;
+
+  /** Settings version last loaded (0 when never saved). */
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  public expectedVersion!: number;
 }
 
 export class UpdateShipmentPrefixDto {

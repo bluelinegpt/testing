@@ -218,6 +218,10 @@ export const PRESERVE_TABLES = new Set([
   "balance_override_audits",
   "chart_of_accounts",
   "companies",
+  // Reviewed 2026-10-11: Orders AI switch (`20261011030000_company_ai_settings`)
+  // -- set by the Platform for this Company. Configuration: a data reset keeps
+  // it, Company deletion removes it.
+  "company_ai_settings",
   "company_balance_policies",
   "company_bank_accounts",
   "company_business_day_configurations",

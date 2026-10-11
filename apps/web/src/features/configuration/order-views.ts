@@ -14,9 +14,12 @@ export const SYSTEM_VIEW_KEYS = [
   "cancelled",
   "delivery",
   "accountant",
+  // Orders AI tab (11 Oct 2026): all Orders plus the question box. Shown only
+  // when the Platform has switched Orders AI on for the Company.
+  "ai",
 ] as const;
 
-export const FIXED_RULE_VIEW_KEYS: ReadonlySet<string> = new Set(["delivery", "accountant"]);
+export const FIXED_RULE_VIEW_KEYS: ReadonlySet<string> = new Set(["delivery", "accountant", "ai"]);
 export const ALWAYS_VISIBLE_VIEW_KEYS: ReadonlySet<string> = new Set(["all"]);
 
 export const ORDER_VIEW_DELIVERY_STATUSES = [
@@ -87,6 +90,8 @@ export interface OrderView {
 }
 
 export interface OrderViewsMenu {
+  /** Orders AI switched on by the Platform; absent from older API versions. */
+  readonly aiEnabled?: boolean;
   readonly enabled: boolean;
   readonly isStandard: boolean;
   readonly updatedAt: string | null;
@@ -124,6 +129,7 @@ export function standardOrderViews(): OrderView[] {
     system("cancelled", "Cancelled", "ملغاة"),
     system("delivery", "Operation Activity", "نشاط العمليات"),
     system("accountant", "Accountant", "المحاسب"),
+    system("ai", "AI", "الذكاء الاصطناعي"),
   ];
 }
 

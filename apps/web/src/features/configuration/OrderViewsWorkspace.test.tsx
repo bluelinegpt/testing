@@ -47,7 +47,7 @@ function setup(options: { menu?: OrderViewsMenu; permissions?: readonly string[]
 }
 
 describe("Orders menu helpers", () => {
-  it("starts from today's 7 tabs with Active first and Hold counted", () => {
+  it("starts from today's 7 tabs plus AI with Active first and Hold counted", () => {
     const views = standardOrderViews();
     expect(views.map((view) => view.key)).toEqual([
       "active",
@@ -57,6 +57,7 @@ describe("Orders menu helpers", () => {
       "cancelled",
       "delivery",
       "accountant",
+      "ai",
     ]);
     expect(orderViewsProblems(views)).toEqual([]);
   });
@@ -91,7 +92,7 @@ describe("OrderViewsWorkspace", () => {
       await screen.findByText("Custom menu is OFF — the standard menu is in use"),
     ).toBeInTheDocument();
     const table = screen.getByRole("table");
-    expect(within(table).getAllByRole("row")).toHaveLength(8);
+    expect(within(table).getAllByRole("row")).toHaveLength(9);
     expect(screen.getByRole("switch", { name: /Use a custom Orders menu|Custom menu is OFF/ })).not.toBeChecked();
     expect(screen.getByRole("button", { name: "Save menu" })).toBeDisabled();
     // All Orders can never be hidden.

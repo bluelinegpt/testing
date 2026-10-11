@@ -23,6 +23,17 @@ import { i18nInstance } from "../../localization/i18n.js";
 import { standardOrderViews } from "../configuration/order-views.js";
 import { OrderDetailsWorkspace, OrdersModuleWorkspace } from "./OrdersModuleWorkspace.js";
 
+/** Orders menu with Orders AI switched on by the Platform (the AI tab). */
+const aiMenu = {
+  aiEnabled: true,
+  enabled: false,
+  isStandard: true,
+  updatedAt: null,
+  updatedBy: null,
+  version: 0,
+  views: standardOrderViews(),
+};
+
 const order = {
   amountCollected: "0.00",
   areaName: "Dubai",
@@ -304,10 +315,11 @@ describe("OrdersModuleWorkspace", () => {
       post: vi.fn().mockResolvedValue({}),
     };
     renderWithRouter(<OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />);
-    const serialCell = await screen.findByText("SER-000001");
+    const serialCell = await screen.findByText("Serial Number: SER-000001");
     const orderRow = serialCell.closest("tr");
     expect(orderRow).not.toBeNull();
-    expect(within(orderRow as HTMLElement).getByText("Ready for Carrier")).toBeInTheDocument();
+    // The stage shows under the status and in the workflow indicator.
+    expect(within(orderRow as HTMLElement).getAllByText("Ready for Carrier")[0]).toBeInTheDocument();
     expect(screen.getByText("Carrier stage")).toBeInTheDocument();
     const workflow = within(orderRow as HTMLElement).getByRole("button", {
       name: /needs a driver|ready for carrier/i,
@@ -333,7 +345,7 @@ describe("OrdersModuleWorkspace", () => {
       post: vi.fn().mockResolvedValue({}),
     };
     renderWithRouter(<OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />);
-    await screen.findByText("SER-000004");
+    await screen.findByText("Serial Number: SER-000004");
     fireEvent.click(screen.getByLabelText("Select Order SER-000001"));
     fireEvent.click(screen.getByLabelText("Select Order SER-000004"));
     fireEvent.click(screen.getByRole("button", { name: "Update carrier stage" }));
@@ -358,11 +370,11 @@ describe("OrdersModuleWorkspace", () => {
       post: vi.fn().mockResolvedValue({}),
     };
     renderWithRouter(<OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />);
-    const serialCell = await screen.findByText("SER-000001");
+    const serialCell = await screen.findByText(/: SER-000001$/u);
     const orderRow = serialCell.closest("tr");
     expect(orderRow).not.toBeNull();
     expect(screen.getByText("مرحلة شركة الشحن")).toBeInTheDocument();
-    expect(within(orderRow as HTMLElement).getByText("جاهز لشركة الشحن")).toBeInTheDocument();
+    expect(within(orderRow as HTMLElement).getAllByText("جاهز لشركة الشحن")[0]).toBeInTheDocument();
   });
 
   it("uses Active Orders server paging and supports selection across matching results", async () => {
@@ -401,7 +413,7 @@ describe("OrdersModuleWorkspace", () => {
       />,
     );
 
-    await screen.findByText("SER-000001");
+    await screen.findByText("Serial Number: SER-000001");
     expect(api.get).toHaveBeenCalledWith(expect.stringContaining("quickView=active"));
     expect(api.get).toHaveBeenCalledWith(expect.stringContaining("pageSize=25"));
     expect(screen.getByText("40 Active Orders")).toBeInTheDocument();
@@ -414,7 +426,8 @@ describe("OrdersModuleWorkspace", () => {
         expect.objectContaining({ selectionMode: "filter" }),
       ),
     );
-    fireEvent.click(screen.getByRole("button", { name: "SER-000001" }));
+    // The Order number opens the Order (the serial shows beneath it).
+    fireEvent.click(screen.getByRole("button", { name: "ORD-000001" }));
     expect(onNavigate).toHaveBeenCalledWith("/orders/ORD-000001");
   });
 
@@ -556,7 +569,7 @@ describe("OrdersModuleWorkspace", () => {
       />,
     );
 
-    await screen.findByText("7");
+    await screen.findByText("Serial Number: 7");
     fireEvent.click(screen.getByRole("button", { name: "Order actions" }));
 
     expect(screen.queryByRole("button", { name: "Trader settlements" })).not.toBeInTheDocument();
@@ -722,7 +735,7 @@ describe("OrdersModuleWorkspace", () => {
       />,
     );
 
-    await screen.findByText("SER-000001");
+    await screen.findByText("Serial Number: SER-000001");
     // Delivery Status and Financial Status (Driver Collection / Trader Settlement)
     // are separate columns — never merged into one general "Status" (§3).
     expect(screen.getByRole("columnheader", { name: "Delivery status" })).toBeVisible();
@@ -1010,7 +1023,7 @@ describe("OrdersModuleWorkspace", () => {
       />,
     );
 
-    await screen.findByText("SER-000001");
+    await screen.findByText("Serial Number: SER-000001");
     fireEvent.click(screen.getByRole("button", { name: "Grouping" }));
     fireEvent.click(screen.getByLabelText("Status"));
 
@@ -1029,7 +1042,7 @@ describe("OrdersModuleWorkspace", () => {
       ),
     );
 
-    expect(screen.getByText("SER-000002")).toBeVisible();
+    expect(screen.getByText("Serial Number: SER-000002")).toBeVisible();
     expect(holdGroupSelection).toBeChecked();
 
     fireEvent.click(screen.getByRole("button", { name: /Grouping/ }));
@@ -1065,7 +1078,7 @@ describe("OrdersModuleWorkspace", () => {
       />,
     );
 
-    await screen.findByText("SER-000002");
+    await screen.findByText("Serial Number: SER-000002");
     expect(screen.getByRole("tab", { name: /Hold.*1/ })).toBeVisible();
     expect(screen.getByText("Not provided")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Order actions" }));
@@ -1093,7 +1106,7 @@ describe("OrdersModuleWorkspace", () => {
       <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
       ["/orders?quickView=hold"],
     );
-    await screen.findByText("SER-000004");
+    await screen.findByText("Serial Number: SER-000004");
     fireEvent.click(screen.getByLabelText("Select all Orders on this page"));
     fireEvent.click(screen.getByRole("button", { name: "Reactivate Hold Orders" }));
     const dialog = screen.getByRole("dialog", { name: "Reactivate Hold Orders" });
@@ -1117,6 +1130,7 @@ describe("OrdersModuleWorkspace", () => {
   it("shows the ready questions with live counts and opens a question's Orders with one click", async () => {
     const api = {
       get: vi.fn((path: string) => {
+        if (path === "configuration/order-views") return Promise.resolve(aiMenu);
         if (path === "operations/orders/questions") {
           return Promise.resolve({
             items: [
@@ -1138,6 +1152,8 @@ describe("OrdersModuleWorkspace", () => {
     renderWithRouter(
       <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
     );
+    // The ready questions live on the AI tab.
+    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
     const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
     const collect = await questions.findByRole("button", { name: /Ready to collect from driver/u });
     await waitFor(() => expect(collect.textContent).toContain("45"));
@@ -1163,6 +1179,7 @@ describe("OrdersModuleWorkspace", () => {
   it("closes all ready Orders after a confirmation, and reports the ones skipped", async () => {
     const api = {
       get: vi.fn((path: string) => {
+        if (path === "configuration/order-views") return Promise.resolve(aiMenu);
         if (path === "operations/orders/questions") {
           return Promise.resolve({ items: [{ amount: null, count: 4, key: "ready_to_close" }] });
         }
@@ -1184,6 +1201,8 @@ describe("OrdersModuleWorkspace", () => {
     renderWithRouter(
       <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
     );
+    // The ready questions live on the AI tab.
+    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
     const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
     fireEvent.click(await questions.findByRole("button", { name: /Ready to close/u }));
     fireEvent.click(await questions.findByRole("button", { name: "Close all 4 ready orders" }));
@@ -1209,6 +1228,7 @@ describe("OrdersModuleWorkspace", () => {
   it("says nothing is waiting when every question is at 0", async () => {
     const api = {
       get: vi.fn((path: string) => {
+        if (path === "configuration/order-views") return Promise.resolve(aiMenu);
         if (path === "operations/orders/questions") {
           return Promise.resolve({ items: [{ amount: null, count: 0, key: "ready_to_close" }] });
         }
@@ -1223,6 +1243,8 @@ describe("OrdersModuleWorkspace", () => {
     renderWithRouter(
       <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
     );
+    // The ready questions live on the AI tab.
+    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
     const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
     expect(await questions.findByText("Nothing waiting")).toBeInTheDocument();
     expect(questions.queryByRole("button", { name: /Ready to close/u })).not.toBeInTheDocument();
@@ -1231,6 +1253,7 @@ describe("OrdersModuleWorkspace", () => {
   it("answers a typed question with its filters, shows how it was understood, and lets a part be removed", async () => {
     const api = {
       get: vi.fn((path: string) => {
+        if (path === "configuration/order-views") return Promise.resolve(aiMenu);
         if (path === "operations/orders/questions") {
           return Promise.resolve({ items: [{ amount: null, count: 1, key: "ready_to_close" }] });
         }
@@ -1262,6 +1285,8 @@ describe("OrdersModuleWorkspace", () => {
     renderWithRouter(
       <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
     );
+    // The question box lives on the AI tab.
+    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
     const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
     fireEvent.change(questions.getByRole("searchbox", { name: "Ask about orders" }), {
       target: { value: "orders with Ahmed not collected" },
@@ -1308,6 +1333,7 @@ describe("OrdersModuleWorkspace", () => {
       );
     const api = {
       get: vi.fn((path: string) => {
+        if (path === "configuration/order-views") return Promise.resolve(aiMenu);
         if (path === "operations/orders/questions") return Promise.resolve({ items: [] });
         if (path.startsWith("operations/orders?")) {
           return Promise.resolve({ filteredCount: 1, items: [order], page: 1, pageSize: 25, totalCount: 1 });
@@ -1320,6 +1346,8 @@ describe("OrdersModuleWorkspace", () => {
     renderWithRouter(
       <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
     );
+    // The question box lives on the AI tab.
+    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
     const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
     const box = questions.getByRole("searchbox", { name: "Ask about orders" });
     fireEvent.change(box, { target: { value: "what is the weather" } });
@@ -1344,6 +1372,7 @@ describe("OrdersModuleWorkspace", () => {
     };
     const api = {
       get: vi.fn((path: string) => {
+        if (path === "configuration/order-views") return Promise.resolve(aiMenu);
         if (path === "operations/orders/questions") return Promise.resolve({ items: [] });
         if (path.startsWith("operations/orders?")) {
           return Promise.resolve({ filteredCount: 1, items: [order], page: 1, pageSize: 25, totalCount: 1 });
@@ -1361,30 +1390,77 @@ describe("OrdersModuleWorkspace", () => {
         persistenceScope={{ companyId: "company-1", userId: "user-1" }}
       />,
     );
+    // The question box lives on the AI tab.
+    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
     const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
     const box = questions.getByRole("searchbox", { name: "Ask about orders" });
     fireEvent.change(box, { target: { value: "orders ready for payment" } });
     fireEvent.submit(box);
     fireEvent.click(await screen.findByRole("button", { name: "☆ Add to favourites" }));
     expect(screen.getByRole("button", { name: "★ In favourites (click to remove)" })).toBeInTheDocument();
-    expect(
-      JSON.parse(localStorage.getItem("blueline.orders.favouriteQuestions.company-1.user-1") ?? "[]"),
-    ).toEqual(["orders ready for payment"]);
+    const key = "blueline.orders.favouriteQuestions.v2.company-1.user-1";
+    // The ten ready-made questions are there from the start, then the new one.
+    const stored = JSON.parse(localStorage.getItem(key) ?? "[]") as string[];
+    expect(stored).toHaveLength(11);
+    expect(stored.at(-1)).toBe("orders ready for payment");
+
+    // The favourites list opens from the ★ next to the question box.
+    fireEvent.click(questions.getByRole("button", { name: "Favourite questions" }));
+    const list = within(screen.getByRole("group", { name: "Favourite questions" }));
+    expect(list.getByRole("button", { name: "Orders delivered yesterday" })).toBeInTheDocument();
 
     // Asked again from the favourite (fresh answer, so relative dates stay right).
-    const favourite = questions.getByRole("button", { name: "orders ready for payment" });
-    fireEvent.click(favourite);
+    fireEvent.click(list.getByRole("button", { name: "orders ready for payment" }));
     await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2));
     expect(api.post).toHaveBeenLastCalledWith("operations/orders/ask", {
       language: "en",
       question: "orders ready for payment",
     });
 
+    // × deletes a question, a ready-made one included, and it stays deleted.
+    fireEvent.click(questions.getByRole("button", { name: "Favourite questions" }));
+    const reopened = within(screen.getByRole("group", { name: "Favourite questions" }));
     fireEvent.click(
-      questions.getByRole("button", { name: "Remove from favourites: orders ready for payment" }),
+      reopened.getByRole("button", { name: "Remove from favourites: orders ready for payment" }),
     );
-    expect(questions.queryByRole("button", { name: "orders ready for payment" })).not.toBeInTheDocument();
-    expect(localStorage.getItem("blueline.orders.favouriteQuestions.company-1.user-1")).toBe("[]");
+    fireEvent.click(
+      reopened.getByRole("button", { name: "Remove from favourites: Orders delivered yesterday" }),
+    );
+    expect(reopened.queryByRole("button", { name: "orders ready for payment" })).not.toBeInTheDocument();
+    expect(reopened.queryByRole("button", { name: "Orders delivered yesterday" })).not.toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem(key) ?? "[]")).toHaveLength(9);
+  });
+
+
+  it("keeps the ready questions and the question box on the AI tab only", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path === "configuration/order-views") return Promise.resolve(aiMenu);
+        if (path === "operations/orders/questions") {
+          return Promise.resolve({ items: [{ amount: null, count: 2, key: "no_driver" }] });
+        }
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({ filteredCount: 1, items: [order], page: 1, pageSize: 25, totalCount: 1 });
+        }
+        if (path.startsWith("configuration/areas")) return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
+    );
+    await screen.findByText("Serial Number: SER-000001");
+    expect(screen.queryByRole("group", { name: "Quick questions" })).not.toBeInTheDocument();
+    expect(api.get).not.toHaveBeenCalledWith("operations/orders/questions");
+    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
+    const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
+    expect(await questions.findByRole("button", { name: /No driver/u })).toBeInTheDocument();
+    expect(questions.getByRole("searchbox", { name: "Ask about orders" })).toBeInTheDocument();
+    // The AI tab lists all Orders.
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith(expect.stringMatching(/^operations\/orders\?.*quickView=all/u)),
+    );
   });
 
   it("does not offer the question box to a Driver signed in for their own work", async () => {
@@ -1402,8 +1478,10 @@ describe("OrdersModuleWorkspace", () => {
     renderWithRouter(
       <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["orders.driver_self_service"]} />,
     );
-    const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
-    expect(questions.queryByRole("searchbox")).not.toBeInTheDocument();
+    // Even with Orders AI on, a Driver gets no AI tab content.
+    await screen.findByText("Serial Number: SER-000001");
+    expect(screen.queryByRole("searchbox", { name: "Ask about orders" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Quick questions" })).not.toBeInTheDocument();
   });
 
   it("puts the next action on each Driver / Trader group of a ready question", async () => {
@@ -1417,6 +1495,7 @@ describe("OrdersModuleWorkspace", () => {
     };
     const api = {
       get: vi.fn((path: string) => {
+        if (path === "configuration/order-views") return Promise.resolve(aiMenu);
         if (path === "operations/orders/questions") {
           return Promise.resolve({
             items: [
@@ -1437,6 +1516,8 @@ describe("OrdersModuleWorkspace", () => {
     renderWithRouter(
       <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={onNavigate} permissions={["users_roles.manage"]} />,
     );
+    // The ready questions live on the AI tab.
+    fireEvent.click(await screen.findByRole("tab", { name: "AI" }));
     const questions = within(await screen.findByRole("group", { name: "Quick questions" }));
 
     fireEvent.click(await questions.findByRole("button", { name: /Ready to collect from driver/u }));
@@ -1461,7 +1542,7 @@ describe("OrdersModuleWorkspace", () => {
         if (path.startsWith("configuration/areas")) return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
         return Promise.resolve([]);
       }),
-      post: vi.fn(),
+      post: vi.fn().mockResolvedValue({}),
     };
     renderWithRouter(
       <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
@@ -1529,10 +1610,12 @@ describe("OrdersModuleWorkspace", () => {
         permissions={["users_roles.manage"]}
       />,
     );
-    await screen.findByText("SER-000001");
+    await screen.findByText("Serial Number: SER-000001");
 
     // The Area filter is the shared Emirate-aware control, not a plain dropdown.
-    const emirate = screen.getByLabelText("Emirate");
+    const emirate = screen
+      .getAllByLabelText("Emirate")
+      .find((element) => element.tagName === "SELECT")!;
     fireEvent.change(emirate, { target: { value: "e1" } });
     expect(await screen.findByPlaceholderText("Search by Area name or code")).toBeInTheDocument();
 
@@ -1594,7 +1677,7 @@ describe("Driver self-service row actions", () => {
       />,
     );
 
-    await screen.findByText("SER-000001");
+    await screen.findByText("Serial Number: SER-000001");
     fireEvent.click(screen.getByRole("button", { name: "Order actions" }));
     expect(screen.getByRole("button", { name: "Send out for delivery" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Assign driver" })).not.toBeInTheDocument();
@@ -1636,7 +1719,7 @@ describe("Driver self-service row actions", () => {
       />,
     );
 
-    await screen.findByText("SER-000001");
+    await screen.findByText("Serial Number: SER-000001");
     fireEvent.click(screen.getByRole("button", { name: "Order actions" }));
     expect(screen.getByRole("button", { name: "Mark delivered" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Move to Hold" })).toBeVisible();
@@ -1672,7 +1755,7 @@ describe("Driver self-service row actions", () => {
       />,
     );
 
-    await screen.findByText("SER-000001");
+    await screen.findByText("Serial Number: SER-000001");
     fireEvent.click(screen.getByRole("button", { name: "Order actions" }));
     expect(screen.queryByRole("button", { name: "Mark item in branch" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Assign driver" })).not.toBeInTheDocument();
@@ -1750,7 +1833,7 @@ describe("Collect from Driver — consolidated into one workflow", () => {
   it("the per-row 'Collect from Driver' action navigates with just that one Order, opening no dialog here", async () => {
     const { onNavigate } = setup([collectableOrder]);
 
-    await screen.findByText("SER-000010");
+    await screen.findByText("Serial Number: SER-000010");
     fireEvent.click(screen.getByRole("button", { name: "Order actions" }));
     expect(screen.queryByRole("button", { name: "Close order" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Collect money from driver" }));
@@ -1763,7 +1846,7 @@ describe("Collect from Driver — consolidated into one workflow", () => {
 
   it("never renders the old duplicate Collect Money summary dialog from any entry point", async () => {
     setup([collectableOrder]);
-    await screen.findByText("SER-000010");
+    await screen.findByText("Serial Number: SER-000010");
     fireEvent.click(screen.getByLabelText("Select Order SER-000010"));
 
     // Neither entry point's fields (Traders Represented, Net Expected, ...)

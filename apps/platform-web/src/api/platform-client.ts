@@ -1157,6 +1157,13 @@ function toQuery(filters: object): string {
 }
 
 /** Platform → Company → Route planning (free stored-pin Area engine). */
+/** Orders AI (the AI tab) for one Company. Version 0 = never saved (off). */
+export interface CompanyOrdersAi {
+  readonly isEnabled: boolean;
+  readonly updatedAt: string | null;
+  readonly version: number;
+}
+
 export interface CompanyRouteOptimization {
   companyId: string;
   isEnabled: boolean;
@@ -1736,6 +1743,26 @@ export const platformApi = {
       { body: { enabled, ...(reason === undefined ? {} : { reason }) }, method: "PUT" },
     );
     if (result === undefined) throw new PlatformApiError("Empty WhatsApp response", "empty", 500);
+    return result;
+  },
+
+  async companyOrdersAi(companyId: string): Promise<CompanyOrdersAi> {
+    const result = await request<CompanyOrdersAi>(`platform/companies/${companyId}/orders-ai`, {
+      method: "GET",
+    });
+    if (result === undefined) throw new PlatformApiError("Empty Orders AI response", "empty", 500);
+    return result;
+  },
+
+  async updateCompanyOrdersAi(
+    companyId: string,
+    input: { isEnabled: boolean; expectedVersion: number },
+  ): Promise<CompanyOrdersAi> {
+    const result = await request<CompanyOrdersAi>(`platform/companies/${companyId}/orders-ai`, {
+      body: input,
+      method: "PUT",
+    });
+    if (result === undefined) throw new PlatformApiError("Empty Orders AI response", "empty", 500);
     return result;
   },
 

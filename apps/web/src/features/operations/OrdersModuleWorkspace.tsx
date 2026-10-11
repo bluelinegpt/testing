@@ -102,7 +102,7 @@ import {
  * backend expresses Delivery Activity through `deliveredOnly`, and sending an
  * unrecognised quick view would silently fall through to the Active predicate.
  */
-type QuickView = "active" | "all" | "hold" | "cancelled" | "closed" | "delivery" | "accountant";
+type QuickView = "active" | "all" | "hold" | "cancelled" | "closed" | "delivery" | "accountant" | "ai";
 
 /** Quick views the backend actually understands. */
 const backendQuickViews = new Set(["active", "all", "hold", "cancelled", "closed", "accountant"]);
@@ -124,6 +124,9 @@ function menuViewCountQuery(view: OrderView): string {
   const parameters = new URLSearchParams({ page: "1", pageSize: "25" });
   if (view.key === "delivery") {
     parameters.set("deliveredOnly", "true");
+  } else if (view.key === "ai") {
+    // The AI tab lists all Orders.
+    parameters.set("quickView", "all");
   } else {
     for (const [key, value] of Object.entries(menuViewFilters(view))) {
       if (value !== "") parameters.set(key, value);
@@ -341,21 +344,44 @@ const orderAskPermissions = [
  * remembers its filters. A favourite is asked again when clicked, so "yesterday"
  * always means yesterday.
  */
-const favouriteQuestionsLimit = 12;
+const favouriteQuestionsLimit = 30;
+/**
+ * Ten ready-made favourites every user starts with (Aiman, 11 Oct 2026),
+ * stored as `@default:<key>` and shown in the screen's language, so switching
+ * Arabic / English never leaves them in the other language. Each user can
+ * delete any of them; a deleted one does not come back.
+ */
+const defaultFavouriteQuestions = [
+  "delivered_today",
+  "delivered_yesterday",
+  "out_for_delivery",
+  "cash_with_driver",
+  "trader_not_paid",
+  "on_hold",
+  "no_driver",
+  "new_today",
+  "returned_this_week",
+  "cancelled_this_month",
+] as const;
+const defaultFavouritePrefix = "@default:";
 function favouriteQuestionsKey(scope: { readonly companyId: string; readonly userId: string }) {
-  return `blueline.orders.favouriteQuestions.${scope.companyId}.${scope.userId}`;
+  return `blueline.orders.favouriteQuestions.v2.${scope.companyId}.${scope.userId}`;
 }
 function readFavouriteQuestions(key: string | null): readonly string[] {
-  if (key === null) return [];
+  const seeded = defaultFavouriteQuestions.map((item) => `${defaultFavouritePrefix}${item}`);
+  if (key === null) return seeded;
   try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(key) ?? "[]");
+    const stored = window.localStorage.getItem(key);
+    // First visit: the ten ready-made questions.
+    if (stored === null) return seeded;
+    const parsed: unknown = JSON.parse(stored);
     return Array.isArray(parsed)
       ? parsed
           .filter((item): item is string => typeof item === "string" && item.trim() !== "")
           .slice(0, favouriteQuestionsLimit)
       : [];
   } catch {
-    return [];
+    return seeded;
   }
 }
 const sameQuestion = (left: string, right: string) =>
@@ -521,16 +547,43 @@ export function OrdersModuleWorkspace({
       // Storage blocked by the browser: the list still works until a reload.
     }
   };
-  const isFavourite = (question: string) => favourites.some((item) => sameQuestion(item, question));
+  /** A favourite's text: ready-made ones in the screen's language. */
+  const favouriteText = (item: string) =>
+    item.startsWith(defaultFavouritePrefix)
+      ? t(`operations.questions.defaults.${item.slice(defaultFavouritePrefix.length)}`)
+      : item;
+  const isFavourite = (question: string) =>
+    favourites.some((item) => sameQuestion(favouriteText(item), question));
+  const removeFavourite = (item: string) =>
+    saveFavourites(favourites.filter((current) => current !== item));
   const toggleFavourite = (question: string) => {
     const trimmed = question.trim();
     if (trimmed === "") return;
     saveFavourites(
       isFavourite(trimmed)
-        ? favourites.filter((item) => !sameQuestion(item, trimmed))
+        ? favourites.filter((item) => !sameQuestion(favouriteText(item), trimmed))
         : [...favourites, trimmed].slice(-favouriteQuestionsLimit),
     );
   };
+  const [favouritesOpen, setFavouritesOpen] = useState(false);
+  const favouritesRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!favouritesOpen) return;
+    const close = (event: MouseEvent) => {
+      if (!favouritesRef.current?.contains(event.target as Node)) setFavouritesOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setFavouritesOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [favouritesOpen]);
+  /* Orders AI, switched on per Company by the Platform (read with the menu). */
+  const [ordersAiEnabled, setOrdersAiEnabled] = useState(false);
   const persistenceKey =
     persistenceScope === undefined
       ? null
@@ -604,6 +657,9 @@ export function OrdersModuleWorkspace({
     // and quietly return the wrong Orders.
     if (backendQuickViews.has(filters.quickView)) {
       parameters.set("quickView", filters.quickView);
+    } else if (filters.quickView === "ai") {
+      // The AI tab is frontend-only: it lists all Orders (Aiman, 11 Oct 2026).
+      parameters.set("quickView", "all");
     }
     for (const [key, value] of Object.entries(filters)) {
       if (key !== "quickView" && value !== "") parameters.set(key, value);
@@ -705,6 +761,10 @@ export function OrdersModuleWorkspace({
      standard menu load exactly when they always did. A custom-menu Company may
      see one extra request on first open while its default tab is applied. */
   const menuNormalization = useMemo((): Record<string, string> | null => {
+    // The AI tab in a URL after the Platform switched Orders AI off.
+    if (orderMenu !== undefined && filters.quickView === "ai" && !ordersAiEnabled) {
+      return { quickView: "active", viewKey: "" };
+    }
     if (orderMenu === undefined || orderMenu === null) {
       // Back on the standard menu: a tab left over from the custom menu has
       // no meaning any more.
@@ -712,7 +772,9 @@ export function OrdersModuleWorkspace({
         ? { quickView: "active", viewKey: "" }
         : null;
     }
-    const visible = orderMenu.filter((view) => view.isVisible);
+    const visible = orderMenu.filter(
+      (view) => view.isVisible && (view.key !== "ai" || ordersAiEnabled),
+    );
     const fallback = visible.find((view) => view.isDefault) ?? visible[0];
     const target = (view: OrderView | undefined): Record<string, string> =>
       view === undefined ? { quickView: "active", viewKey: "" } : menuViewFilters(view);
@@ -727,7 +789,7 @@ export function OrdersModuleWorkspace({
     // Active Orders under a custom menu always follows the menu's statuses.
     if (filters.quickView === "active") return { viewKey: "active" };
     return null;
-  }, [filters.quickView, filters.viewKey, list.filters.quickView, orderMenu]);
+  }, [filters.quickView, filters.viewKey, list.filters.quickView, orderMenu, ordersAiEnabled]);
 
   useEffect(() => {
     if (orderMenu === undefined) return;
@@ -756,6 +818,9 @@ export function OrdersModuleWorkspace({
       .get<OrderViewsMenu>("configuration/order-views")
       .then((menu) => {
         if (!active) return;
+        setOrdersAiEnabled(
+          menu !== null && typeof menu === "object" && menu.aiEnabled === true,
+        );
         setOrderMenu(
           menu !== null &&
             typeof menu === "object" &&
@@ -930,6 +995,8 @@ export function OrdersModuleWorkspace({
   /* Ready-question counts, refreshed with every list load so a count never
      lags behind an action the operator just took (closing, collecting...). */
   useEffect(() => {
+    // The ready questions live on the AI tab only (Aiman, 11 Oct 2026).
+    if (filters.quickView !== "ai") return;
     let active = true;
     void api
       .get<{ items: readonly OrderQuestionCount[] }>("operations/orders/questions")
@@ -941,7 +1008,7 @@ export function OrdersModuleWorkspace({
     return () => {
       active = false;
     };
-  }, [api, data]);
+  }, [api, data, filters.quickView]);
 
   /* One click answers the question: the list shows exactly its Orders, grouped
      the way the next action works (per Driver to collect, per Trader to pay).
@@ -1014,6 +1081,8 @@ export function OrdersModuleWorkspace({
       list.setFilters({
         ...Object.fromEntries(orderFilterKeys.map((key) => [key, ""])),
         ...applied,
+        // The answer stays on the AI tab (it lists all Orders).
+        quickView: "ai",
       });
       const ready = orderQuestions.find((item) => item.key === applied.question);
       setGrouping(ready === undefined || ready.grouping === null ? "" : [ready.grouping]);
@@ -1037,7 +1106,7 @@ export function OrdersModuleWorkspace({
     );
     // Delivered dates live in the Delivery Activity view; without them the
     // answer goes back to all Orders.
-    if (chip.field === "deliveredDate") change.quickView = "all";
+    if (chip.field === "deliveredDate") change.quickView = "ai";
     if (chip.field === "question") setGrouping("");
     setFilters((current) => ({ ...current, ...change }));
   };
@@ -1131,8 +1200,11 @@ export function OrdersModuleWorkspace({
     () =>
       orderMenu === undefined || orderMenu === null
         ? null
-        : orderMenu.filter((view) => view.isVisible),
-    [orderMenu],
+        : orderMenu.filter(
+            // The AI tab needs Orders AI switched on by the Platform.
+            (view) => view.isVisible && (view.key !== "ai" || ordersAiEnabled),
+          ),
+    [orderMenu, ordersAiEnabled],
   );
   const selectedMenuKey = filters.viewKey !== "" ? filters.viewKey : filters.quickView;
   const selectedMenuView = menuTabs?.find((view) => view.key === selectedMenuKey);
@@ -1212,6 +1284,8 @@ export function OrdersModuleWorkspace({
   const canReconcile = isAdministrator || permissions.includes("reconciliations.create");
   const canSettle = isAdministrator || permissions.includes("settlements.create");
   const canAsk = permissions.some((permission) => orderAskPermissions.includes(permission));
+  /* The question box and favourites live on the AI tab only. */
+  const aiTab = filters.quickView === "ai" && ordersAiEnabled && canAsk;
   const selectedReportOrder = bulkSelectedOrders.length === 1 ? bulkSelectedOrders[0] : undefined;
   const traderReceivableOrders = bulkSelectedOrders.filter(
     (order) => Number(order.traderReceivableOutstanding ?? 0) > 0 && order.traderId,
@@ -1710,7 +1784,16 @@ export function OrdersModuleWorkspace({
                 );
               })
             : (
-                ["active", "hold", "all", "closed", "cancelled", "delivery", "accountant"] as const
+                [
+                  "active",
+                  "hold",
+                  "all",
+                  "closed",
+                  "cancelled",
+                  "delivery",
+                  "accountant",
+                  ...(ordersAiEnabled ? (["ai"] as const) : []),
+                ] as const
               ).map((view) => (
                 <button
                   aria-selected={filters.quickView === view}
@@ -1728,6 +1811,7 @@ export function OrdersModuleWorkspace({
                 </button>
               ))}
         </div>
+        {aiTab ? (
         <div
           aria-label={t("operations.questions.title")}
           className="order-questions"
@@ -1814,35 +1898,7 @@ export function OrdersModuleWorkspace({
               )}
             </span>
           ) : null}
-          {canAsk
-            ? favourites.map((favourite) => (
-                <span className="order-favourite-question" key={favourite}>
-                  <button
-                    className="order-question order-favourite-ask"
-                    disabled={askBusy}
-                    onClick={() => {
-                      setAskText(favourite);
-                      void askOrders(favourite);
-                    }}
-                    title={favourite}
-                    type="button"
-                  >
-                    <span aria-hidden="true">★ </span>
-                    {favourite}
-                  </button>
-                  <button
-                    aria-label={t("operations.questions.favouriteRemove", { question: favourite })}
-                    className="order-ask-chip-remove"
-                    onClick={() => toggleFavourite(favourite)}
-                    title={t("operations.questions.favouriteRemove", { question: favourite })}
-                    type="button"
-                  >
-                    ×
-                  </button>
-                </span>
-              ))
-            : null}
-          {canAsk ? (
+          {aiTab ? (
             <form
               className="order-questions-ask"
               onSubmit={(event) => {
@@ -1859,6 +1915,64 @@ export function OrdersModuleWorkspace({
                 type="search"
                 value={askText}
               />
+              <span className="order-favourites" ref={favouritesRef}>
+                <button
+                  aria-expanded={favouritesOpen}
+                  aria-label={t("operations.questions.favourites")}
+                  className="button button-secondary order-favourites-toggle"
+                  onClick={() => setFavouritesOpen((open) => !open)}
+                  title={t("operations.questions.favourites")}
+                  type="button"
+                >
+                  <span aria-hidden="true">★</span>
+                  <span className="tab-count">{favourites.length}</span>
+                </button>
+                {favouritesOpen ? (
+                  <div
+                    aria-label={t("operations.questions.favourites")}
+                    className="order-favourites-menu"
+                    role="group"
+                  >
+                    {favourites.length === 0 ? (
+                      <p className="order-favourites-empty">
+                        {t("operations.questions.favouritesEmpty")}
+                      </p>
+                    ) : (
+                      favourites.map((item) => {
+                        const text = favouriteText(item);
+                        return (
+                          <div className="order-favourite-row" key={item}>
+                            <button
+                              className="order-favourite-ask"
+                              disabled={askBusy}
+                              onClick={() => {
+                                setFavouritesOpen(false);
+                                setAskText(text);
+                                void askOrders(text);
+                              }}
+                              title={text}
+                              type="button"
+                            >
+                              {text}
+                            </button>
+                            <button
+                              aria-label={t("operations.questions.favouriteRemove", {
+                                question: text,
+                              })}
+                              className="order-ask-chip-remove"
+                              onClick={() => removeFavourite(item)}
+                              title={t("operations.questions.favouriteRemove", { question: text })}
+                              type="button"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                ) : null}
+              </span>
               <button
                 className="button button-primary"
                 disabled={askBusy || askText.trim().length < 2}
@@ -1869,7 +1983,8 @@ export function OrdersModuleWorkspace({
             </form>
           ) : null}
         </div>
-        {askError !== undefined || askResult !== undefined ? (
+        ) : null}
+        {aiTab && (askError !== undefined || askResult !== undefined) ? (
           <div aria-live="polite" className="order-questions-answer">
             {askError !== undefined ? (
               <span className="order-questions-answer-error" role="alert">
@@ -1960,7 +2075,7 @@ export function OrdersModuleWorkspace({
                 if (askResult !== undefined && !askResult.unsupported) {
                   list.setFilters({
                     ...Object.fromEntries(orderFilterKeys.map((key) => [key, ""])),
-                    quickView: "active",
+                    quickView: "ai",
                   });
                   setGrouping("");
                 }

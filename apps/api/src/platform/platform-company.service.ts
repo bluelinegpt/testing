@@ -741,6 +741,79 @@ export class PlatformCompanyService {
     });
   }
 
+  /** Orders AI (the AI tab and its question box) for one Company. No row = off. */
+  public async ordersAi(companyId: string): Promise<{
+    readonly isEnabled: boolean;
+    readonly updatedAt: string | null;
+    readonly version: number;
+  }> {
+    const company = await sql<{ id: string }>`
+      select id from companies where id = ${companyId}::uuid
+    `.execute(this.database);
+    if (company.rows[0] === undefined) throw this.notFound();
+    const result = await sql<{ isEnabled: boolean; updatedAt: string; version: number }>`
+      select orders_ai_enabled as "isEnabled", updated_at::text as "updatedAt", version
+        from company_ai_settings
+       where company_id = ${companyId}::uuid
+    `.execute(this.database);
+    const row = result.rows[0];
+    return {
+      isEnabled: row?.isEnabled ?? false,
+      updatedAt: row?.updatedAt ?? null,
+      version: row?.version ?? 0,
+    };
+  }
+
+  /**
+   * Switches Orders AI on or off. `expectedVersion` is the version the
+   * administrator saw (0 when never saved); a stale one is refused rather than
+   * silently overwriting someone else's change.
+   */
+  public async updateOrdersAi(
+    companyId: string,
+    input: { readonly isEnabled: boolean; readonly expectedVersion: number },
+    actor: { accountId: string; correlationId: string },
+  ): Promise<{ readonly isEnabled: boolean; readonly updatedAt: string | null; readonly version: number }> {
+    await this.transactions.execute(async (transaction) => {
+      const company = await sql<{ id: string }>`
+        select id from companies where id = ${companyId}::uuid
+      `.execute(transaction);
+      if (company.rows[0] === undefined) throw this.notFound();
+      const current = await sql<{ isEnabled: boolean; version: number }>`
+        select orders_ai_enabled as "isEnabled", version
+          from company_ai_settings
+         where company_id = ${companyId}::uuid
+         for update
+      `.execute(transaction);
+      const before = current.rows[0];
+      if ((before?.version ?? 0) !== input.expectedVersion) {
+        throw new ApplicationException(
+          "orders_ai_settings_stale",
+          "Orders AI settings changed since they were loaded. Reload and try again.",
+          HttpStatus.CONFLICT,
+        );
+      }
+      await sql`
+        insert into company_ai_settings (company_id, orders_ai_enabled, updated_by_account_id)
+        values (${companyId}::uuid, ${input.isEnabled}, ${actor.accountId}::uuid)
+        on conflict (company_id) do update
+          set orders_ai_enabled = excluded.orders_ai_enabled,
+              updated_by_account_id = excluded.updated_by_account_id,
+              updated_at = now(),
+              version = company_ai_settings.version + 1
+      `.execute(transaction);
+      await this.auditInTransaction(transaction, {
+        action: "platform.company.orders_ai_updated",
+        actorAccountId: actor.accountId,
+        after: { ordersAiEnabled: input.isEnabled },
+        before: before === undefined ? undefined : { ordersAiEnabled: before.isEnabled },
+        companyId,
+        correlationId: actor.correlationId,
+      });
+    });
+    return this.ordersAi(companyId);
+  }
+
   public async updateShipmentPrefix(
     companyId: string,
     input: { shipmentPrefix: string; expectedVersion: number },

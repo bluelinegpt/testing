@@ -9,6 +9,7 @@ import OpenAI from "openai";
 
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
+import { companyOrdersAiEnabled } from "../company-configuration/orders-ai-settings.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
@@ -99,7 +100,12 @@ const ready: readonly { readonly key: OrderQuestionKey; readonly patterns: reado
   { key: "ready_to_close", patterns: [/ready\s+to\s+close/i, /جاهز[ةه]?\s*(لل)?[إا]غلاق/u] },
   {
     key: "collect_from_driver",
-    patterns: [/ready\s+to\s+collect/i, /collect\s+from\s+(the\s+)?driver/i, /جاهز[ةه]?\s*للتحصيل/u, /تحصيل\s*من\s*المندوب/u],
+    patterns: [
+      /ready\s+to\s+(be\s+)?collect(ed)?(\s+from\s+(the\s+)?driver)?/i,
+      /collect\s+from\s+(the\s+)?driver/i,
+      /جاهز[ةه]?\s*للتحصيل(\s*من\s*المندوب)?/u,
+      /تحصيل\s*من\s*المندوب/u,
+    ],
   },
   {
     key: "pay_trader",
@@ -113,7 +119,10 @@ const ready: readonly { readonly key: OrderQuestionKey; readonly patterns: reado
   },
   { key: "confirm_trader_receipt", patterns: [/(trader\s+)?not\s+confirmed/i, /لم\s*يؤكد\s*التاجر/u] },
   { key: "trader_owes_fees", patterns: [/traders?\s+owe/i, /عليهم\s*رسوم/u, /رسوم\s*مستحقة\s*على\s*التاجر/u] },
-  { key: "no_driver", patterns: [/no\s+driver/i, /without\s+(a\s+)?driver/i, /بدون\s*مندوب/u] },
+  {
+    key: "no_driver",
+    patterns: [/(with\s+)?no\s+driver(\s+assigned)?/i, /without\s+(a\s+)?driver/i, /(have|has)\s+no\s+driver(\s+assigned)?/i, /بدون\s*مندوب/u],
+  },
   { key: "out_not_delivered", patterns: [/out\s+for\s+delivery.*not\s+delivered/i, /خارج\s*للتوصيل.*(لم|ما)/u] },
   { key: "on_hold", patterns: [/^\s*(which\s+orders\s+are\s+)?on\s+hold\??\s*$/i, /^\s*(أي\s*الطلبات\s*)?معلق[ةه]?؟?\s*$/u] },
 ];
@@ -426,6 +435,13 @@ export class OrderQuestionAskService {
 
   public async ask(question: string, language: "ar" | "en"): Promise<AskResult> {
     const { companyId } = this.tenants.current();
+    if (!(await companyOrdersAiEnabled(this.database, companyId))) {
+      throw new ApplicationException(
+        "order_question_ai_disabled",
+        "Orders AI is not switched on for this Company.",
+        HttpStatus.FORBIDDEN,
+      );
+    }
     const trimmed = question.trim();
     const libraryKey = matchReadyQuestion(trimmed);
     let result: AskResult;
