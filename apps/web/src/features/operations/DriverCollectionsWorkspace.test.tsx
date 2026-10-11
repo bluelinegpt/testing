@@ -283,6 +283,12 @@ describe("DriverCollectionsWorkspace", () => {
     const scrollArea = dialog.querySelector(".order-modal-scroll");
     expect(scrollArea).toContainElement(lastOrder);
     expect(within(scrollArea as HTMLElement).getAllByRole("row")).toHaveLength(15);
+    // The summary ends with the cash actually collected, not Net Expected /
+    // Actual Received / Difference.
+    expect(within(dialog).getByText("Cash Collected from Driver").nextElementSibling?.textContent).toBe(
+      "2800.00",
+    );
+    expect(within(dialog).queryByText("Net Expected from Driver")).not.toBeInTheDocument();
   });
 
   it("shows the renamed Driver Collections title, not the old Drivers list", async () => {

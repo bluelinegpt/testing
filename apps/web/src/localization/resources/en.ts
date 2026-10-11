@@ -2197,6 +2197,7 @@ export const englishTranslations = {
       cashNetExpected: "Cash net expected from Driver",
       companyPaysDriver: "Company pays Driver",
       companyPaysDriverHint: "Expenses are higher than the cash collected. Pay the Driver AED {{amount}} in cash, or remove or reduce an expense.",
+      cashCollectedFromDriver: "Cash Collected from Driver",
       cashPaidToDriver: "Cash paid to Driver",
       payoutDifference: "Cash paid to Driver must be exactly AED {{amount}}.",
       noCashToHandOver: "No cash to hand over.",

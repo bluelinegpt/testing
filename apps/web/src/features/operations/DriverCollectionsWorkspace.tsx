@@ -120,14 +120,20 @@ interface ReportData {
   readonly orders: readonly ReportDataOrder[];
   readonly summary: {
     readonly actualReceived: string;
+    /** Cash the Driver handed over; negative when the Company paid the Driver. */
+    readonly cashNetExpected?: string;
+    readonly cashOrderCount?: number;
     readonly cashTotal: string;
+    readonly companyPaidDriver?: string;
     readonly difference: string;
     readonly driverFeeOffset: string;
     readonly driverExpenses: string;
     readonly grossCollections: string;
     readonly netExpected: string;
     readonly orderCount: number;
+    readonly visaOrderCount?: number;
     readonly visaTotal: string;
+    readonly zeroOrderCount?: number;
   };
 }
 
@@ -2403,22 +2409,38 @@ export function DriverCollectionDetailDialog({
               </>
             )}
             <div className="detail-line">
-              <dt>{t("operations.grossCollections")}</dt>
-              <dd>{money(data.summary.grossCollections)}</dd>
+              <dt>
+                {t("operations.collectionSplit.cashOrders")} ({data.summary.cashOrderCount ?? 0})
+              </dt>
+              <dd>{money(data.summary.cashTotal)}</dd>
             </div>
-            <div className="detail-line detail-line-total">
-              <dt>{t("operations.netExpected")}</dt>
+            <div className="detail-line">
+              <dt>
+                {t("operations.collectionSplit.visaOrders")} ({data.summary.visaOrderCount ?? 0})
+              </dt>
+              <dd>{money(data.summary.visaTotal)}</dd>
+            </div>
+            {(data.summary.zeroOrderCount ?? 0) === 0 ? null : (
+              <div className="detail-line">
+                <dt>{t("operations.collectionSplit.nothingToCollect")}</dt>
+                <dd>{data.summary.zeroOrderCount}</dd>
+              </div>
+            )}
+            {/* The last line is the cash that actually changed hands, the same
+                as the PDF: collected from the Driver, or paid to the Driver. */}
+            <div className="detail-line detail-line-total" style={{ color: "#c62828" }}>
+              <dt>
+                {Number(data.summary.companyPaidDriver ?? 0) > 0
+                  ? t("operations.collectionSplit.cashPaidToDriver")
+                  : t("operations.collectionSplit.cashCollectedFromDriver")}
+              </dt>
               <dd>
-                <strong>{money(data.summary.netExpected)}</strong>
+                <strong>
+                  {Number(data.summary.companyPaidDriver ?? 0) > 0
+                    ? money(data.summary.companyPaidDriver)
+                    : money(Math.max(0, Number(data.summary.cashNetExpected ?? data.summary.cashTotal)))}
+                </strong>
               </dd>
-            </div>
-            <div className="detail-line">
-              <dt>{t("operations.actualReceived")}</dt>
-              <dd>{money(data.summary.actualReceived)}</dd>
-            </div>
-            <div className="detail-line">
-              <dt>{t("operations.difference")}</dt>
-              <dd>{money(data.summary.difference)}</dd>
             </div>
           </dl>
 

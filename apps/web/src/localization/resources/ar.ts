@@ -2233,6 +2233,7 @@ export const arabicTranslations = {
       cashNetExpected: "صافي النقد المتوقع من المندوب",
       companyPaysDriver: "الشركة تدفع للمندوب",
       companyPaysDriverHint: "المصروفات أعلى من النقد المحصّل. ادفع للمندوب {{amount}} درهم نقدًا، أو احذف مصروفًا أو قلّل قيمته.",
+      cashCollectedFromDriver: "النقد المحصّل من المندوب",
       cashPaidToDriver: "النقد المدفوع للمندوب",
       payoutDifference: "يجب أن يكون النقد المدفوع للمندوب {{amount}} درهم بالضبط.",
       noCashToHandOver: "لا يوجد نقد للتسليم.",

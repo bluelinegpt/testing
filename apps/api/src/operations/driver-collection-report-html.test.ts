@@ -86,8 +86,9 @@ describe("buildDriverCollectionReportHtml", () => {
     expect(html).toContain('lang="en"');
     expect(html).toContain("Driver Collection Report");
     expect(html).toContain("REC-000123");
-    expect(html).toContain("SER-1");
+    // One Reference column: the External Reference Number when present.
     expect(html).toContain("REF-1");
+    expect(html).not.toContain("SER-1");
     expect(html).toContain("Test Trader");
     expect(html).toContain("Test Customer");
     expect(html).toContain("Dubai");
@@ -110,11 +111,12 @@ describe("buildDriverCollectionReportHtml", () => {
     const html = buildDriverCollectionReportHtml(sample, "ar", "٢٧/٠٧/٢٠٢٦");
     expect(html).toContain('dir="rtl"');
     expect(html).toContain('lang="ar"');
-    expect(html).toContain("تقرير تحصيل السائق");
+    expect(html).toContain("تقرير تحصيل المندوب");
+    // Arabic says المندوب, never السائق (Aiman, 11 Oct 2026).
+    expect(html).not.toContain("السائق");
     // Arabic Company name used when available.
     expect(html).toContain("شركة الاختبار");
-    // Serial numbers, references and amounts are never translated.
-    expect(html).toContain("SER-1");
+    // References and amounts are never translated.
     expect(html).toContain("REF-1");
     expect(html).toContain("AED 100.00");
   });
@@ -174,9 +176,10 @@ describe("buildDriverCollectionReportHtml", () => {
       ...sample,
       header: { ...sample.header, collectionPaymentMethod: "mixed" },
       orders: [
-        { ...base, serialNumber: "SER-C", customerAmountToCollect: "110.00", paymentMethod: "cash" },
-        { ...base, serialNumber: "SER-V", customerAmountToCollect: "267.00", paymentMethod: "visa" },
-        { ...base, serialNumber: "SER-Z", customerAmountToCollect: "0.00", paymentMethod: "none" },
+        { ...base, referenceNumber: "REF-C", customerAmountToCollect: "110.00", paymentMethod: "cash" },
+        { ...base, referenceNumber: "REF-V", customerAmountToCollect: "267.00", paymentMethod: "visa" },
+        // No External Reference: the Order Number is shown instead.
+        { ...base, orderNumber: "ORD-Z", referenceNumber: null, customerAmountToCollect: "0.00", paymentMethod: "none" },
       ],
       summary: {
         ...sample.summary,
@@ -194,22 +197,67 @@ describe("buildDriverCollectionReportHtml", () => {
     expect(html).toContain("Cash Orders (1) &middot; AED 110.00");
     expect(html).toContain("Visa Orders (1) &middot; AED 267.00");
     expect(html).toContain("Nothing to collect (1) &middot; AED 0.00");
-    expect(html.indexOf("SER-C")).toBeLessThan(html.indexOf("SER-V"));
-    expect(html.indexOf("SER-V")).toBeLessThan(html.indexOf("SER-Z"));
-    expect(html).toContain("Visa to Bank");
+    expect(html.indexOf("REF-C")).toBeLessThan(html.indexOf("REF-V"));
+    expect(html.indexOf("REF-V")).toBeLessThan(html.indexOf("ORD-Z"));
+    // Visa Total already shows the bank amount; no repeated Visa to Bank line.
+    expect(html).not.toContain("Visa to Bank");
+    // Short statuses: "Rec Driver" for collected Orders, "Nothing" for 0.00.
+    const zeroRow = html.slice(html.indexOf("ORD-Z"));
+    expect(zeroRow.slice(0, zeroRow.indexOf("</tr>"))).toContain("<td>Nothing</td>");
+    const cashRow = html.slice(html.indexOf("REF-C"));
+    expect(cashRow.slice(0, cashRow.indexOf("</tr>"))).toContain("<td>Rec Driver</td>");
+    expect(html).not.toContain("Money Received from Driver");
     const arabic = buildDriverCollectionReportHtml(mixed, "ar", "11/10/2026, 12:00 (UAE)");
     expect(arabic).toContain("مختلط (نقدي + فيزا)");
-    expect(arabic).toContain("لا يوجد تحصيل");
+    expect(arabic).toContain("طلبات بدون تحصيل");
+    expect(arabic).toContain("لاشي");
+    expect(arabic).toContain("تحصيل مندوب");
   });
 
-  it("shows Company Paid Driver instead of Cash Net Expected when the Company paid the Driver", () => {
+  it("ends the summary with the cash collected from the Driver, in red, without the confusing totals", () => {
+    const html = buildDriverCollectionReportHtml(sample, "en", "11/10/2026, 12:00 (UAE)");
+    const summary = html.slice(html.indexOf('class="summary-section"'), html.indexOf('class="signatures"'));
+    expect(summary).toContain(
+      '<div class="summary-line summary-final"><span>Cash Collected from Driver</span><span>AED 100.00</span></div>',
+    );
+    expect(summary).not.toContain("Net Expected");
+    expect(summary).not.toContain("Difference");
+    expect(summary).not.toContain(">Amount<");
+    expect(html).toContain(".summary-final { color: #c62828;");
+  });
+
+  it("keeps the Order columns short: Fees combined, no VAT, Total Deductions or Serial Number", () => {
+    const order = { ...sample.orders[0]!, additionalFees: "5.00", serviceFee: "18.00" };
+    const html = buildDriverCollectionReportHtml({ ...sample, orders: [order] }, "en", "now");
+    const head = html.slice(html.indexOf("<thead>"), html.indexOf("</thead>"));
+    expect(head).toContain("<th>Reference</th>");
+    expect(head).toContain("<th>Fees</th>");
+    expect(head).toContain("<th>COD</th>");
+    expect(head).toContain("<th>Collected</th>");
+    expect(head).toContain("<th>Trader Amount</th>");
+    expect(head).toContain("<th>Visa/Cash</th>");
+    expect(head).toContain("<th>Delivered</th>");
+    expect(head).toContain("<th>Status</th>");
+    for (const removed of ["VAT", "Total Deductions", "Order Serial Number", "Service Fee", "Additional Fees", "External Reference", "Amount Due", "Customer Amount"]) {
+      expect(head).not.toContain(removed);
+    }
+    // Table amounts carry no currency and every cell stays on one line.
+    const row = html.slice(html.indexOf("<tbody>"), html.indexOf("</tbody>"));
+    expect(row).toContain('<td class="num">23.00</td>');
+    expect(row).not.toContain("AED");
+    expect(row).toContain("<td>Cash</td>");
+    expect(html).toContain("table.grid.orders th, table.grid.orders td { white-space: nowrap; }");
+  });
+
+  it("ends with Cash Paid to Driver when the Company paid the Driver", () => {
     const payout: DriverCollectionReportData = {
       ...sample,
       summary: { ...sample.summary, cashNetExpected: "-30.00", companyPaidDriver: "30.00" },
     };
     const html = buildDriverCollectionReportHtml(payout, "en", "11/10/2026, 12:00 (UAE)");
-    expect(html).toContain("Company Paid Driver");
-    expect(html).toContain("AED 30.00");
-    expect(html).not.toContain("Cash Net Expected");
+    expect(html).toContain(
+      '<div class="summary-line summary-final"><span>Cash Paid to Driver</span><span>AED 30.00</span></div>',
+    );
+    expect(html).not.toContain("Cash Collected from Driver");
   });
 });

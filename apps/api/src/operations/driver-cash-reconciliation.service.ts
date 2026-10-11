@@ -355,6 +355,8 @@ export interface DriverCollectionReportData {
     readonly driverReconciliationStatus: string;
     readonly driverReconciliationStatusLabel: string;
     readonly emirateName: string | null;
+    /** Shown when the Order has no External Reference Number. */
+    readonly orderNumber?: string;
     readonly paymentMethod: LineMethod | null;
     readonly referenceNumber: string | null;
     readonly serialNumber: string;
@@ -2368,7 +2370,11 @@ export class DriverCashReconciliationService {
         customerName: row.customerName,
         deliveryDate: row.deliveryDate,
         driverReconciliationStatus: row.driverReconciliationStatus,
-        driverReconciliationStatusLabel: driverCashStatusLabel(row.driverReconciliationStatus),
+        // Nothing to collect: the collection closed the Order without money.
+        driverReconciliationStatusLabel:
+          lineMethodOf(row) === "none" && row.driverReconciliationStatus === "reconciled"
+            ? "Nothing"
+            : driverCashStatusLabel(row.driverReconciliationStatus),
         emirateName: row.emirateName,
         paymentMethod: lineMethodOf(row),
         orderNumber: row.orderNumber,

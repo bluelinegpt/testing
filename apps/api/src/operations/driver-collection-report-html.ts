@@ -20,6 +20,11 @@ interface Labels {
   readonly cashNetExpected: string;
   readonly cashOrders: string;
   readonly cashTotal: string;
+  readonly fees: string;
+  readonly methodColumn: string;
+  readonly methodVisaShort: string;
+  readonly statusRecDriver: string;
+  readonly closedNothingToCollect: string;
   readonly cod: string;
   readonly companyPaidDriver: string;
   readonly collectionStatus: string;
@@ -81,15 +86,20 @@ const LABELS: Record<ReportLanguage, Labels> = {
   ar: {
     additionalFees: "رسوم إضافية",
     amount: "المبلغ",
-    amountDueToTrader: "المستحق للتاجر",
+    amountDueToTrader: "مبلغ التاجر",
     area: "المنطقة",
     businessDate: "تاريخ التحصيل",
-    cashNetExpected: "صافي النقدي المتوقع",
+    cashNetExpected: "النقد المحصّل من المندوب",
     cashOrders: "طلبات نقدية",
     cashTotal: "إجمالي النقدي",
-    cod: "الدفع عند الاستلام",
-    companyPaidDriver: "دفعت الشركة للسائق",
-    collectionStatus: "حالة تحصيل السائق",
+    closedNothingToCollect: "لاشي",
+    fees: "الرسوم",
+    methodColumn: "فيزا/نقدي",
+    methodVisaShort: "فيزا",
+    statusRecDriver: "تحصيل مندوب",
+    cod: "COD",
+    companyPaidDriver: "النقد المدفوع للمندوب",
+    collectionStatus: "حالة تحصيل المندوب",
     companyApprover: "المعتمد",
     companyReceiver: "أمين الصندوق / موظف العمليات",
     confirmedBy: "أكده",
@@ -97,15 +107,15 @@ const LABELS: Record<ReportLanguage, Labels> = {
     createdBy: "أنشأه",
     createdDate: "تاريخ الإنشاء",
     customer: "العميل",
-    customerAmountToCollect: "المبلغ المطلوب تحصيله",
-    deliveryDate: "تاريخ التسليم",
+    customerAmountToCollect: "المحصّل",
+    deliveryDate: "التسليم",
     description: "الوصف",
     difference: "الفرق",
-    driver: "السائق",
-    driverExpenses: "مصاريف السائق",
-    driverFeeOffset: "خصم رسوم السائق الخارجي",
-    driverSignature: "توقيع السائق",
-    driverType: "نوع السائق",
+    driver: "المندوب",
+    driverExpenses: "مصاريف المندوب",
+    driverFeeOffset: "خصم رسوم المندوب الخارجي",
+    driverSignature: "توقيع المندوب",
+    driverType: "نوع المندوب",
     driverTypeEmployee: "موظف",
     driverTypeOutsourced: "خارجي",
     emirate: "الإمارة",
@@ -115,7 +125,7 @@ const LABELS: Record<ReportLanguage, Labels> = {
     generatedAt: "تاريخ ووقت إنشاء التقرير",
     grossCollections: "إجمالي التحصيلات من العملاء",
     lineNumber: "#",
-    netExpected: "الصافي المتوقع من السائق",
+    netExpected: "الصافي المتوقع من المندوب",
     notes: "ملاحظات",
     numberOfOrders: "عدد الطلبات",
     orderSerial: "الرقم التسلسلي للطلب",
@@ -134,7 +144,7 @@ const LABELS: Record<ReportLanguage, Labels> = {
     status: "الحالة",
     statusConfirmed: "مؤكد",
     statusDraft: "مسودة",
-    title: "تقرير تحصيل السائق",
+    title: "تقرير تحصيل المندوب",
     totalDeductions: "إجمالي الخصومات",
     trader: "التاجر",
     vat: "ضريبة القيمة المضافة",
@@ -146,14 +156,19 @@ const LABELS: Record<ReportLanguage, Labels> = {
   en: {
     additionalFees: "Additional Fees",
     amount: "Amount",
-    amountDueToTrader: "Amount Due to Trader",
+    amountDueToTrader: "Trader Amount",
     area: "Area",
     businessDate: "Business/Collection Date",
-    cashNetExpected: "Cash Net Expected",
+    cashNetExpected: "Cash Collected from Driver",
     cashOrders: "Cash Orders",
     cashTotal: "Cash Total",
-    cod: "COD Amount",
-    companyPaidDriver: "Company Paid Driver",
+    closedNothingToCollect: "Nothing",
+    fees: "Fees",
+    methodColumn: "Visa/Cash",
+    methodVisaShort: "Visa",
+    statusRecDriver: "Rec Driver",
+    cod: "COD",
+    companyPaidDriver: "Cash Paid to Driver",
     collectionStatus: "Driver Reconciliation Status",
     companyApprover: "Approver",
     companyReceiver: "Cashier/Operations User",
@@ -162,8 +177,8 @@ const LABELS: Record<ReportLanguage, Labels> = {
     createdBy: "Created By",
     createdDate: "Created Date",
     customer: "Customer",
-    customerAmountToCollect: "Customer Amount to Collect",
-    deliveryDate: "Delivery Date",
+    customerAmountToCollect: "Collected",
+    deliveryDate: "Delivered",
     description: "Description",
     difference: "Difference",
     driver: "Driver",
@@ -259,36 +274,50 @@ export function buildDriverCollectionReportHtml(
   // sections, each with its own count and subtotal (11 Oct 2026).
   const sectionOf = (order: (typeof data.orders)[number]) =>
     order.paymentMethod === "visa" ? "visa" : order.paymentMethod === "none" ? "none" : "cash";
+  // Order columns, kept short (Aiman, 11 Oct 2026): one Reference column
+  // (External Reference, else the Order Number), Service Fee + Additional Fees
+  // combined as Fees, no VAT or Total Deductions, and a short status.
+  const cents = (value: string) => Math.round(Number(value) * 100);
+  // Amounts inside the Order tables carry no currency (the section titles and
+  // summary say AED), so every row fits on one line.
+  const plain = (value: string) => escapeHtml(value);
+  const shortMethod = (method: (typeof data.orders)[number]["paymentMethod"]) =>
+    method === "visa" ? labels.methodVisaShort : method === "cash" ? labels.paymentMethodCash : "—";
+  const referenceOf = (order: (typeof data.orders)[number]) =>
+    order.referenceNumber !== null && order.referenceNumber.trim() !== ""
+      ? order.referenceNumber
+      : (order.orderNumber ?? order.serialNumber);
+  const orderStatusLabel = (order: (typeof data.orders)[number]) => {
+    if (order.driverReconciliationStatus !== "reconciled") {
+      return order.driverReconciliationStatusLabel;
+    }
+    return order.paymentMethod === "none" ? labels.closedNothingToCollect : labels.statusRecDriver;
+  };
   const orderRowsFor = (orders: typeof data.orders) => orders
     .map(
       (order, index) =>
         "<tr>" +
         `<td class="num">${index + 1}</td>` +
-        `<td class="mono">${escapeHtml(order.serialNumber)}</td>` +
-        `<td class="mono">${order.referenceNumber === null ? "" : escapeHtml(order.referenceNumber)}</td>` +
+        `<td class="mono">${escapeHtml(referenceOf(order))}</td>` +
         `<td>${order.deliveryDate === null ? "" : escapeHtml(order.deliveryDate.slice(0, 10))}</td>` +
         `<td>${escapeHtml(order.traderName)}</td>` +
         `<td>${escapeHtml(order.customerName)}</td>` +
         `<td>${order.emirateName === null ? "" : escapeHtml(order.emirateName)}</td>` +
         `<td>${escapeHtml(order.areaName)}</td>` +
-        `<td class="num">${money(order.codAmount)}</td>` +
-        `<td class="num">${money(order.customerAmountToCollect)}</td>` +
-        `<td class="num">${money(order.serviceFee)}</td>` +
-        `<td class="num">${money(order.additionalFees)}</td>` +
-        `<td class="num">${money(order.vatAmount)}</td>` +
-        `<td class="num">${money(order.totalDeductions)}</td>` +
-        `<td class="num">${money(order.traderPayable)}</td>` +
-        `<td>${paymentMethodLabel(labels, order.paymentMethod)}</td>` +
-        `<td>${escapeHtml(order.driverReconciliationStatusLabel)}</td>` +
+        `<td class="num">${plain(order.codAmount)}</td>` +
+        `<td class="num">${plain(order.customerAmountToCollect)}</td>` +
+        `<td class="num">${plain(((cents(order.serviceFee) + cents(order.additionalFees)) / 100).toFixed(2))}</td>` +
+        `<td class="num">${plain(order.traderPayable)}</td>` +
+        `<td>${escapeHtml(shortMethod(order.paymentMethod))}</td>` +
+        `<td>${escapeHtml(orderStatusLabel(order))}</td>` +
         "</tr>",
     )
     .join("");
   const orderTableFor = (orders: typeof data.orders) =>
-    `<table class="grid"><thead><tr>` +
+    `<table class="grid orders"><thead><tr>` +
     [
       labels.lineNumber,
-      labels.orderSerial,
-      labels.externalReference,
+      labels.reference,
       labels.deliveryDate,
       labels.trader,
       labels.customer,
@@ -296,13 +325,10 @@ export function buildDriverCollectionReportHtml(
       labels.area,
       labels.cod,
       labels.customerAmountToCollect,
-      labels.serviceFee,
-      labels.additionalFees,
-      labels.vat,
-      labels.totalDeductions,
+      labels.fees,
       labels.amountDueToTrader,
-      labels.paymentMethod,
-      labels.collectionStatus,
+      labels.methodColumn,
+      labels.status,
     ]
       .map((label) => `<th>${escapeHtml(label)}</th>`)
       .join("") +
@@ -407,8 +433,8 @@ export function buildDriverCollectionReportHtml(
       : `<div class="notes-block"><strong>${escapeHtml(labels.notes)}:</strong> ${escapeHtml(data.header.notes)}</div>`) +
     `</header>`;
 
-  const summaryLine = (label: string, value: string) =>
-    `<div class="summary-line"><span>${escapeHtml(label)}</span><span>${value}</span></div>`;
+  const summaryLine = (label: string, value: string, className = "summary-line") =>
+    `<div class="${className}"><span>${escapeHtml(label)}</span><span>${value}</span></div>`;
   const summary =
     `<section class="summary-section">` +
     `<h2 class="section-title">${escapeHtml(labels.numberOfOrders)}: ${data.summary.orderCount}</h2>` +
@@ -420,13 +446,18 @@ export function buildDriverCollectionReportHtml(
       : "") +
     summaryLine(labels.driverExpenses, money(data.summary.driverExpenses)) +
     summaryLine(labels.driverFeeOffset, money(data.summary.driverFeeOffset ?? "0")) +
+    // The last line is the cash that actually changed hands (Aiman, 11 Oct
+    // 2026): collected from the Driver, or paid to the Driver when expenses
+    // were higher than the cash. Confirmation only succeeds when the cash
+    // entered equals this amount, so it is the actual figure, not an estimate.
+    // Visa Total above already shows what went to the bank.
     (Number(data.summary.companyPaidDriver) > 0
-      ? summaryLine(labels.companyPaidDriver, money(data.summary.companyPaidDriver))
-      : summaryLine(labels.cashNetExpected, money(data.summary.cashNetExpected))) +
-    summaryLine(labels.visaToBank, money(data.summary.visaTotal)) +
-    summaryLine(labels.netExpected, money(data.summary.netExpected)) +
-    summaryLine(labels.amount, money(data.summary.actualReceived)) +
-    summaryLine(labels.difference, money(data.summary.difference)) +
+      ? summaryLine(labels.companyPaidDriver, money(data.summary.companyPaidDriver), "summary-line summary-final")
+      : summaryLine(
+          labels.cashNetExpected,
+          money(Number(data.summary.cashNetExpected) < 0 ? "0.00" : data.summary.cashNetExpected),
+          "summary-line summary-final",
+        )) +
     `</section>`;
 
   const signatures =
@@ -457,9 +488,11 @@ export function buildDriverCollectionReportHtml(
     table.grid thead { display: table-header-group; }
     table.grid thead th { background: #f0f0f0; }
     table.grid td.num, table.grid th.num { text-align: end; white-space: nowrap; }
+    table.grid.orders th, table.grid.orders td { white-space: nowrap; }
     .mono { font-variant-numeric: tabular-nums; }
     .summary-section { margin-top: 12px; max-width: 360px; }
     .summary-line { display: flex; justify-content: space-between; border-bottom: 1px solid #ddd; padding: 4px 0; font-size: 12px; }
+    .summary-final { color: #c62828; font-weight: 800; font-size: 13px; border-top: 2px solid #c62828; border-bottom: 2px solid #c62828; margin-top: 4px; }
     .signatures { display: flex; justify-content: space-between; gap: 24px; margin-top: 48px; }
     .sign-box { flex: 1; text-align: center; font-size: 11px; }
     .sign-line { border-top: 1px solid #333; margin-bottom: 6px; height: 40px; }
