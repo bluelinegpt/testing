@@ -12904,3 +12904,21 @@ tr.row-highlighted {
   color: var(--text-muted);
   font-size: 0.85rem;
 }
+
+/* Read-only order (closed / locked): every field stays disabled so nothing can
+   be changed, but it is shown at full strength instead of the dulled disabled
+   look. Only the fieldset is affected — the footer Save button is outside it
+   and keeps its disabled appearance; Cancel stays active. */
+.modal .order-form-readonly :disabled,
+:root:not([data-theme="dark"]) .modal .order-form-readonly :disabled,
+:root[data-theme="dark"] .modal .order-form-readonly :disabled {
+  opacity: 1;
+  color: var(--text-primary);
+  -webkit-text-fill-color: var(--text-primary);
+  cursor: default;
+}
+.modal .order-form-readonly input:disabled,
+.modal .order-form-readonly select:disabled,
+.modal .order-form-readonly textarea:disabled {
+  background-color: var(--surface-color);
+}

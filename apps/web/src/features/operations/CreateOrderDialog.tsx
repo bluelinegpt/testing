@@ -958,7 +958,7 @@ export function CreateOrderDialog({
             onSubmit={(event) => void submit(event)}
             ref={formRef}
           >
-            <fieldset disabled={readOnly}>
+            <fieldset className={readOnly ? "order-form-readonly" : undefined} disabled={readOnly}>
             <div className="order-modal-scroll">
               <div className="order-form-columns">
                 <section className="order-form-group" aria-labelledby="order-customer-heading">

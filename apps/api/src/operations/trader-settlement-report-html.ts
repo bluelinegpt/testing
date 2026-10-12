@@ -314,6 +314,14 @@ export function buildTraderSettlementStatementHtml(
   // table and in the summary. Every other Company keeps the full invoice.
   const isCompactInvoiceCompany = data.companyId === "dd28829b-2b7c-4851-a0be-181b92673e84";
   const showFullColumns = !isCompactInvoiceCompany;
+  // Additional Fees are deducted from the Trader's payable exactly like the
+  // Service Fee. Without their own column an Order such as COD 230.00, Service
+  // Fee 16.00, Additional Fees 16.00, Paid 198.00 does not add up on paper, and
+  // neither do the summary totals. Shown only when at least one Order carries
+  // them, so invoices without Additional Fees keep their current layout.
+  const totalAdditionalFees = data.orders
+    .reduce((sum, order) => sum.plus(order.additionalFees), new Decimal(0));
+  const showAdditionalFees = showFullColumns && totalAdditionalFees.gt(0);
 
   const orderRows = data.orders
     .map(
@@ -329,7 +337,8 @@ export function buildTraderSettlementStatementHtml(
         `<td>${escapeHtml(language === "ar" ? (order.areaNameAr ?? order.areaName) : order.areaName)}</td>` +
         (showFullColumns
           ? `<td class="num">${tableMoney(order.codAmount)}</td>` +
-            `<td class="num">${tableMoney(order.serviceFee)}</td>`
+            `<td class="num">${tableMoney(order.serviceFee)}</td>` +
+            (showAdditionalFees ? `<td class="num">${tableMoney(order.additionalFees)}</td>` : "")
           : "") +
         `<td class="num">${tableMoney(order.amountPaidNow)}</td>` +
         "</tr>",
@@ -352,6 +361,7 @@ export function buildTraderSettlementStatementHtml(
       ? [
           { label: labels.cod, numeric: true },
           { label: labels.serviceFee, numeric: true },
+          ...(showAdditionalFees ? [{ label: labels.additionalFees, numeric: true }] : []),
         ]
       : []),
     { label: labels.amountPaidNow, numeric: true },
@@ -386,10 +396,11 @@ export function buildTraderSettlementStatementHtml(
         (showFullColumns
           ? `<td class="num">${ZERO_CELL}</td>` +
             `<td class="num negative">${tableMoney(line.amountApplied, true)}</td>` +
+            (showAdditionalFees ? `<td class="num">${ZERO_CELL}</td>` : "") +
             `<td class="num">${ZERO_CELL}</td>`
           : `<td class="num negative">${tableMoney(line.amountApplied, true)}</td>`) +
         // NOTE: the cell count must equal headerColumns.length (eleven full,
-        // eight compact). There was once a twelfth empty <td> here, so every
+        // twelve with Additional Fees, eight compact). There was once a twelfth empty <td> here, so every
         // deduction row was one cell wider than the head and the table laid
         // out an extra 13px column -- the misalignment visible on SET-000011.
         "</tr>",
@@ -523,7 +534,8 @@ export function buildTraderSettlementStatementHtml(
         summaryLine(
           labels.serviceFee,
           money(new Decimal(data.summary.totalServiceFees).plus(data.summary.traderFeeDeductions).toFixed(2)),
-        )
+        ) +
+        (showAdditionalFees ? summaryLine(labels.additionalFees, money(totalAdditionalFees.toFixed(2))) : "")
       : "") +
     ((data.creditApplications ?? []).length === 0
       ? ""
