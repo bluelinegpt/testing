@@ -941,7 +941,7 @@ export class PlatformCompanyService {
 
   /**
    * Mobile app access for one Company: one switch for all its mobile users.
-   * On by default. The web portal is never affected.
+   * Off until the Platform turns it on. The web portal is never affected.
    */
   public async mobileApp(companyId: string): Promise<{
     readonly isEnabled: boolean;

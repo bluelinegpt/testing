@@ -67,9 +67,9 @@ export function CompanyMobileAppPanel({ companyId }: { companyId: string }): Rea
         <div>
           <h3 id="company-mobile-heading">Mobile app</h3>
           <p className="platform-muted">
-            One switch for all of this Company&apos;s users of the TawseelHub app. When it is off, the app
-            refuses to sign in with a clear message and anyone already signed in is stopped on their next
-            action. The web portal keeps working.
+            One switch for all of this Company&apos;s users of the TawseelHub app. It is off until you turn it
+            on here. When it is off, the app refuses to sign in with a clear message and anyone already
+            signed in is stopped on their next action. The web portal keeps working.
           </p>
         </div>
       </div>
