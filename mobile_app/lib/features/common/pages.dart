@@ -592,7 +592,13 @@ final class _ChangePasswordPageState extends ConsumerState<ChangePasswordPage> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(l10n.passwordChanged)));
-      context.pop();
+      // A forced change is reached by redirect, with nothing underneath to
+      // go back to (GoError "There is nothing to pop", 11 Oct 2026).
+      if (context.canPop()) {
+        context.pop();
+      } else {
+        context.go('/dashboard');
+      }
     }
   }
 }

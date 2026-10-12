@@ -842,6 +842,15 @@ interface InsertOrderInput extends Omit<CreateOrderDto, "customerMobileNumber" |
   readonly importBatchId?: string;
 }
 
+/** Delivery statuses after which an International Order's carrier stage is history. */
+const INTERNATIONAL_CARRIER_FINISHED_STATUSES: ReadonlySet<string> = new Set([
+  "delivered",
+  "closed",
+  "cancelled",
+  "returned_to_branch",
+  "returned_to_trader",
+]);
+
 @Injectable()
 export class OperationsService {
   public constructor(
@@ -7230,13 +7239,25 @@ export class OperationsService {
       throw new ApplicationException("permission_denied", "The authenticated account does not have permission for this operation", HttpStatus.FORBIDDEN);
     }
     await this.transactions.execute(async (transaction) => {
-      const current = await sql<{ orderType: string; status: string | null }>`
-        select order_type as "orderType", international_carrier_status as status
+      const current = await sql<{ orderType: string; status: string | null; deliveryStatus: string }>`
+        select order_type as "orderType", international_carrier_status as status,
+               delivery_status as "deliveryStatus"
           from orders where id = ${orderId}::uuid and company_id = ${companyId}::uuid for update
       `.execute(transaction);
       const row = current.rows[0];
       if (row === undefined) throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
       if (row.orderType !== "gcc_international") throw new ApplicationException("international_carrier_status_not_allowed", "Carrier status applies only to International orders", HttpStatus.CONFLICT);
+      // A finished Order keeps its carrier stage as history. Marking a closed,
+      // cancelled or returned Order "Delivered" would reopen its money
+      // (settlement back to unsettled); the database stopped one such attempt
+      // on a closed Order (orders_explicit_close_check, 11 Oct 2026).
+      if (INTERNATIONAL_CARRIER_FINISHED_STATUSES.has(row.deliveryStatus)) {
+        throw new ApplicationException(
+          "international_carrier_status_order_finished",
+          "This Order is already finished, so its carrier status can no longer change.",
+          HttpStatus.CONFLICT,
+        );
+      }
       if (input.status === "delivered") {
         if (row.status !== "in_transit") {
           throw new ApplicationException("international_carrier_status_transition_invalid", "Only an International order in transit can be marked Delivered", HttpStatus.CONFLICT);
