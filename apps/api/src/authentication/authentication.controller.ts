@@ -88,6 +88,8 @@ export class AuthenticationController {
           );
     const result = await this.authentication.loginCompany({
       companySubdomain,
+      // Only the app signs in with a Company Mobile Code.
+      clientChannel: mobileCode !== undefined ? "mobile" : "web",
       createdIp,
       identifier: input.identifier,
       password: input.password,

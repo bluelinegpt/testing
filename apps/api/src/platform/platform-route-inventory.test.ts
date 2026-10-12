@@ -247,6 +247,7 @@ describe("Platform route inventory", () => {
       "executePayrollRepair", // Repair Center: READY Payroll period repair (Phase 5 Prompt 1).
       "updateAvatarSettings", // Website AI Avatar settings (PATCH, agent manage).
       "updateOrdersAi", // Orders AI switch per Company (PUT, companies manage).
+      "updateMobileApp", // Mobile app switch per Company (PUT, companies manage).
     ];
     const bad: string[] = [];
     for (const route of routes) {

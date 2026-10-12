@@ -271,6 +271,7 @@ final class _LoginPageState extends ConsumerState<LoginPage> {
 
   String _failureMessage(AppLocalizations l10n, String code) => switch (code) {
     'invalid_credentials' || 'unauthorized' => l10n.invalidCredentials,
+    'mobile_app_disabled' => l10n.mobileAppDisabled,
     'unsupportedRole' => l10n.unsupportedRole,
     'missingCompany' => l10n.missingCompany,
     'missingProfile' => l10n.missingProfile,

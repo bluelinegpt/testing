@@ -1046,6 +1046,13 @@ function toQuery(filters: object): string {
 }
 
 /** Platform → Company → Route planning (free stored-pin Area engine). */
+/** Mobile app access for one Company (all its mobile users). */
+export interface CompanyMobileApp {
+  readonly isEnabled: boolean;
+  readonly changedAt: string | null;
+  readonly activeMobileSessions: number;
+}
+
 /** Orders AI (the AI tab) for one Company. Version 0 = never saved (off). */
 export interface CompanyOrdersAi {
   readonly isEnabled: boolean;
@@ -2799,6 +2806,26 @@ export const platformApi = {
       { body: { enabled, ...(reason === undefined ? {} : { reason }) }, method: "PUT" },
     );
     if (result === undefined) throw new PlatformApiError("Empty WhatsApp response", "empty", 500);
+    return result;
+  },
+
+  async companyMobileApp(companyId: string): Promise<CompanyMobileApp> {
+    const result = await request<CompanyMobileApp>(`platform/companies/${companyId}/mobile-app`, {
+      method: "GET",
+    });
+    if (result === undefined) throw new PlatformApiError("Empty mobile app response", "empty", 500);
+    return result;
+  },
+
+  async updateCompanyMobileApp(
+    companyId: string,
+    input: { isEnabled: boolean; reason?: string },
+  ): Promise<CompanyMobileApp> {
+    const result = await request<CompanyMobileApp>(`platform/companies/${companyId}/mobile-app`, {
+      body: input,
+      method: "PUT",
+    });
+    if (result === undefined) throw new PlatformApiError("Empty mobile app response", "empty", 500);
     return result;
   },
 

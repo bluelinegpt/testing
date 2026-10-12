@@ -10,6 +10,7 @@ import 'package:bluelinegpt_mobile/shared/widgets/mobile_ui_components.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 final class RoleDashboardPage extends ConsumerStatefulWidget {
   const RoleDashboardPage({super.key});
@@ -185,6 +186,8 @@ final class _RoleDashboardPageState extends ConsumerState<RoleDashboardPage> {
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
+          const SizedBox(height: AppSpacing.lg),
+          const AppVersionFooter(),
         ],
       ),
     );
@@ -460,4 +463,35 @@ final class _RoleDashboardPageState extends ConsumerState<RoleDashboardPage> {
 String _formatTime(DateTime value) {
   String two(int n) => n.toString().padLeft(2, '0');
   return '${two(value.hour)}:${two(value.minute)}';
+}
+
+/// The app version and the commit it was built from, at the bottom of the
+/// home page, so a support check can see at a glance which build a phone
+/// runs (e.g. "TawseelHub 1.0.1+7 · 49f62cc").
+final class AppVersionFooter extends ConsumerWidget {
+  const AppVersionFooter({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = AppLocalizations.of(context);
+    final commit = ref.watch(configurationProvider).appCommit;
+    return FutureBuilder<PackageInfo>(
+      future: PackageInfo.fromPlatform(),
+      builder: (context, snapshot) {
+        final info = snapshot.data;
+        final version = info == null
+            ? '…'
+            : '${info.version}+${info.buildNumber}';
+        return Center(
+          child: Text(
+            '${l10n.appVersion}: $version · $commit',
+            key: const ValueKey('app-version-footer'),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        );
+      },
+    );
+  }
 }

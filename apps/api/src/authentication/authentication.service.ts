@@ -78,6 +78,8 @@ export class AuthenticationService {
 
   public async loginCompany(input: {
     companySubdomain: string | undefined;
+    /** `mobile` when the sign-in came from the app (Company Mobile Code). */
+    clientChannel?: "web" | "mobile" | undefined;
     createdIp?: string | undefined;
     identifier: string;
     password: string;
@@ -195,6 +197,7 @@ export class AuthenticationService {
   private async login(
     account: AccountLoginRecord | undefined,
     input: {
+      clientChannel?: "web" | "mobile" | undefined;
       createdIp?: string | undefined;
       identifier: string;
       password: string;
@@ -236,6 +239,15 @@ export class AuthenticationService {
     ) {
       throw this.invalidCredentials();
     }
+    // The Platform's mobile app switch. Checked only after the password is
+    // right, so the message never tells a stranger anything about a Company.
+    if (input.clientChannel === "mobile" && account.companyMobileAppEnabled === false) {
+      throw new ApplicationException(
+        "mobile_app_disabled",
+        "The mobile app is turned off for your Company. Please contact your administrator.",
+        HttpStatus.FORBIDDEN,
+      );
+    }
 
     const expiresAt = new Date(Date.now() + this.sessionTtlMinutes * 60_000);
     const sessionToken = this.sessionTokens.create();
@@ -256,6 +268,7 @@ export class AuthenticationService {
       tokenHash: sessionToken.hash,
       userAgent: input.userAgent,
       profile,
+      clientChannel: input.clientChannel ?? "web",
     });
     const permissions = await this.repository.findPermissions(account.id);
     return {

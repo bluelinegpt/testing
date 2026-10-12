@@ -168,6 +168,58 @@ describe("AuthenticationService", () => {
     ).rejects.toMatchObject({ errorCode: "invalid_credentials", status: 401 });
   });
 
+  it("refuses an app sign-in when the Company's mobile app is off, after the password", async () => {
+    const { repository, service } = createService({
+      account: { ...account, companyMobileAppEnabled: false },
+    });
+    await expect(
+      service.loginCompany({
+        clientChannel: "mobile",
+        companySubdomain: "acme",
+        password: "valid-password",
+        identifier: "operator",
+      }),
+    ).rejects.toMatchObject({ errorCode: "mobile_app_disabled", status: 403 });
+    expect(repository.createSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps web sign-in working when the mobile app is off, and marks app sessions", async () => {
+    const off = createService({ account: { ...account, companyMobileAppEnabled: false } });
+    await off.service.loginCompany({
+      companySubdomain: "acme",
+      password: "valid-password",
+      identifier: "operator",
+    });
+    expect(off.repository.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ clientChannel: "web" }),
+    );
+    const on = createService({ account: { ...account, companyMobileAppEnabled: true } });
+    await on.service.loginCompany({
+      clientChannel: "mobile",
+      companySubdomain: "acme",
+      password: "valid-password",
+      identifier: "operator",
+    });
+    expect(on.repository.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ clientChannel: "mobile" }),
+    );
+  });
+
+  it("does not reveal the mobile app switch when the password is wrong", async () => {
+    const { service } = createService({
+      account: { ...account, companyMobileAppEnabled: false },
+      passwordMatches: false,
+    });
+    await expect(
+      service.loginCompany({
+        clientChannel: "mobile",
+        companySubdomain: "acme",
+        password: "wrong",
+        identifier: "operator",
+      }),
+    ).rejects.toMatchObject({ errorCode: "invalid_credentials", status: 401 });
+  });
+
   it("rejects an expired temporary password even when the credential is correct", async () => {
     const { service } = createService({
       account: {

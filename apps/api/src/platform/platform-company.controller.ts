@@ -43,6 +43,7 @@ import {
   LifecycleActionDto,
   ResetCompanyUsersPreviewDto,
   SuspendCompanyDto,
+  UpdateCompanyMobileAppDto,
   UpdateCompanyOrdersAiDto,
   UpdateCompanyProfileDto,
   UpdateShipmentPrefixDto,
@@ -306,6 +307,26 @@ export class PlatformTargetCompanyController {
     @Req() request: Request,
   ): Promise<object> {
     return this.companies.updateOrdersAi(companyId, input, this.actor(request));
+  }
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Whether the mobile app is on for the Company's users" })
+  @RequirePlatformPermissions(PLATFORM_COMPANIES_READ)
+  @Get("mobile-app")
+  public mobileApp(@Param("companyId") companyId: string): Promise<object> {
+    return this.companies.mobileApp(companyId);
+  }
+
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Turn the mobile app on or off for all of the Company's users" })
+  @RequirePlatformPermissions(PLATFORM_COMPANIES_MANAGE)
+  @Put("mobile-app")
+  public updateMobileApp(
+    @Param("companyId") companyId: string,
+    @Body() input: UpdateCompanyMobileAppDto,
+    @Req() request: Request,
+  ): Promise<object> {
+    return this.companies.updateMobileApp(companyId, input, this.actor(request));
   }
 
   @ApiBearerAuth()

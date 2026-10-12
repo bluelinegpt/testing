@@ -9,6 +9,8 @@ export interface AccountLoginRecord {
   readonly accountStatus: string;
   readonly companyId: string | null;
   readonly companyStatus: string | null;
+  /** Company accounts only: whether the Company allows the mobile app. */
+  readonly companyMobileAppEnabled?: boolean | null;
   readonly displayName?: string;
   readonly failedLoginAttempts: number;
   readonly id: string;
@@ -77,7 +79,8 @@ export class AuthenticationRepository {
              a.locked_until as "lockedUntil",
              a.force_password_change as "forcePasswordChange",
              a.temporary_password_expires_at as "temporaryPasswordExpiresAt",
-             c.status as "companyStatus"
+             c.status as "companyStatus",
+             c.mobile_app_enabled as "companyMobileAppEnabled"
         from accounts a
         join companies c on c.id = a.company_id
        where lower(c.subdomain) = lower(${companySubdomain})
@@ -197,11 +200,12 @@ export class AuthenticationRepository {
     tokenHash: string;
     userAgent?: string | undefined;
     profile?: ActiveProfileRecord | undefined;
+    clientChannel?: "web" | "mobile" | undefined;
   }): Promise<string> {
     const result = await sql<{ id: string }>`
       insert into account_sessions (
         account_id, company_id, token_hash, expires_at, created_ip, user_agent,
-        profile_link_id,profile_type,profile_id
+        profile_link_id,profile_type,profile_id,client_channel
       ) values (
         ${input.accountId}::uuid,
         ${input.companyId}::uuid,
@@ -209,7 +213,8 @@ export class AuthenticationRepository {
         ${input.expiresAt},
         ${input.createdIp ?? null}::inet,
         ${input.userAgent?.slice(0, 1_000) ?? null},
-        ${input.profile?.linkId ?? null}::uuid,${input.profile?.profileType ?? null},${input.profile?.profileId ?? null}::uuid
+        ${input.profile?.linkId ?? null}::uuid,${input.profile?.profileType ?? null},${input.profile?.profileId ?? null}::uuid,
+        ${input.clientChannel ?? "web"}
       )
       returning id
     `.execute(this.database);
@@ -250,6 +255,9 @@ export class AuthenticationRepository {
          and s.expires_at > now()
          and a.status = 'active'
          and (a.company_id is null or c.status = 'active')
+         -- The Platform's per-Company mobile app switch: an app session stops
+         -- working the moment the Company's mobile app access is turned off.
+         and (s.client_channel <> 'mobile' or coalesce(c.mobile_app_enabled, true))
          and (
            (s.profile_link_id is null and a.account_kind not in ('driver','trader'))
            or l.id is not null

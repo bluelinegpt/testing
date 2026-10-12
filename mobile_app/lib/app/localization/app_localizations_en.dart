@@ -1020,4 +1020,8 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get routeThen => 'Then';
+
+  @override
+  String get mobileAppDisabled =>
+      'The mobile app is turned off for your company. Please contact your administrator.';
 }

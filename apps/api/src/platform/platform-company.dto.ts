@@ -272,6 +272,18 @@ export class UpdateCompanyOrdersAiDto {
   public expectedVersion!: number;
 }
 
+/** Mobile app access on or off for one Company (all its mobile users). */
+export class UpdateCompanyMobileAppDto {
+  @IsBoolean()
+  public isEnabled!: boolean;
+
+  /** Required when turning the mobile app off; kept in the audit trail. */
+  @IsOptional()
+  @IsString()
+  @Length(0, 300)
+  public reason?: string;
+}
+
 export class UpdateShipmentPrefixDto {
   @Transform(({ value }: { value: unknown }) =>
     typeof value === "string" ? value.trim().toUpperCase() : value,

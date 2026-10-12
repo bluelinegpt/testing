@@ -939,6 +939,78 @@ export class PlatformCompanyService {
     return this.ordersAi(companyId);
   }
 
+  /**
+   * Mobile app access for one Company: one switch for all its mobile users.
+   * On by default. The web portal is never affected.
+   */
+  public async mobileApp(companyId: string): Promise<{
+    readonly isEnabled: boolean;
+    readonly changedAt: string | null;
+    readonly activeMobileSessions: number;
+  }> {
+    const result = await sql<{ isEnabled: boolean; changedAt: string | null; sessions: number }>`
+      select c.mobile_app_enabled as "isEnabled",
+             c.mobile_app_changed_at::text as "changedAt",
+             (select count(*)::int from account_sessions s
+               where s.company_id = c.id and s.client_channel = 'mobile'
+                 and s.revoked_at is null and s.expires_at > now()) as sessions
+        from companies c
+       where c.id = ${companyId}::uuid
+    `.execute(this.database);
+    const row = result.rows[0];
+    if (row === undefined) throw this.notFound();
+    return {
+      isEnabled: row.isEnabled,
+      changedAt: row.changedAt,
+      activeMobileSessions: row.sessions,
+    };
+  }
+
+  /**
+   * Turns the mobile app on or off for a Company. Off takes effect at once:
+   * app sign-ins are refused and app sessions stop on their next request.
+   * A reason is required to turn it off and is kept in the audit trail.
+   */
+  public async updateMobileApp(
+    companyId: string,
+    input: { readonly isEnabled: boolean; readonly reason?: string | undefined },
+    actor: { accountId: string; correlationId: string },
+  ): Promise<{ readonly isEnabled: boolean; readonly changedAt: string | null; readonly activeMobileSessions: number }> {
+    const reason = input.reason?.trim() ?? "";
+    if (!input.isEnabled && reason.length === 0) {
+      throw new ApplicationException(
+        "mobile_app_reason_required",
+        "Enter a reason for turning off the mobile app.",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    await this.transactions.execute(async (transaction) => {
+      const current = await sql<{ isEnabled: boolean }>`
+        select mobile_app_enabled as "isEnabled" from companies
+         where id = ${companyId}::uuid
+         for update
+      `.execute(transaction);
+      const before = current.rows[0];
+      if (before === undefined) throw this.notFound();
+      if (before.isEnabled === input.isEnabled) return;
+      await sql`
+        update companies
+           set mobile_app_enabled = ${input.isEnabled},
+               mobile_app_changed_at = now()
+         where id = ${companyId}::uuid
+      `.execute(transaction);
+      await this.auditInTransaction(transaction, {
+        action: "platform.company.mobile_app_updated",
+        actorAccountId: actor.accountId,
+        after: { mobileAppEnabled: input.isEnabled, ...(reason ? { reason } : {}) },
+        before: { mobileAppEnabled: before.isEnabled },
+        companyId,
+        correlationId: actor.correlationId,
+      });
+    });
+    return this.mobileApp(companyId);
+  }
+
   public async updateShipmentPrefix(
     companyId: string,
     input: { shipmentPrefix: string; expectedVersion: number },

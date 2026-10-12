@@ -1009,4 +1009,8 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get routeThen => 'بعدها';
+
+  @override
+  String get mobileAppDisabled =>
+      'تم إيقاف تطبيق الجوال لشركتك. يرجى التواصل مع المسؤول.';
 }

@@ -12,6 +12,8 @@ type OrderTable = UntypedTable & {
 type CompanyTable = UntypedTable & {
   shipment_prefix: string | null;
   shipment_serial_enabled_at: TimestampColumn | null;
+  mobile_app_enabled: Generated<boolean>;
+  mobile_app_changed_at: TimestampColumn | null;
 };
 type ShipmentPrefixReservationTable = UntypedTable & {
   prefix: string;
@@ -92,6 +94,7 @@ interface AccountSessionTable {
   profile_link_id: string | null;
   profile_type: "employee" | "driver" | "trader" | null;
   profile_id: string | null;
+  client_channel: Generated<"web" | "mobile">;
 }
 
 interface PasswordResetTokenTable {

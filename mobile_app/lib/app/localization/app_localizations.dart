@@ -1999,6 +1999,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Then'**
   String get routeThen;
+
+  /// No description provided for @mobileAppDisabled.
+  ///
+  /// In en, this message translates to:
+  /// **'The mobile app is turned off for your company. Please contact your administrator.'**
+  String get mobileAppDisabled;
 }
 
 class _AppLocalizationsDelegate
