@@ -958,6 +958,11 @@ export function CreateOrderDialog({
             onSubmit={(event) => void submit(event)}
             ref={formRef}
           >
+            {readOnly ? (
+              <div className="order-readonly-banner" role="status">
+                {t("operations.readOnlyOrder")}
+              </div>
+            ) : null}
             <fieldset className={readOnly ? "order-form-readonly" : undefined} disabled={readOnly}>
             <div className="order-modal-scroll">
               <div className="order-form-columns">

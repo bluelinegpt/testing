@@ -2422,6 +2422,7 @@ export const arabicTranslations = {
     },
     inlineCustomerHint: "يؤدي هذا إلى إنشاء سجل عميل رئيسي واستخدامه لهذا الطلب.",
     editOrder: "تعديل الطلب",
+    readOnlyOrder: "للعرض فقط — هذا الطلب تم تسليمه أو إغلاقه ولا يمكن تعديله.",
     serviceFeeOverriddenHint: "تم تعديل رسوم هذا الطلب (السعر المعتمد: {{configured}})",
     reopenDelivery: "إعادة فتح التوصيل",
     reopenDeliveryReason: "سبب إعادة فتح هذا الطلب المُسلّم",

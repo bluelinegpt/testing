@@ -133,7 +133,7 @@ describe("buildTraderSettlementStatementHtml", () => {
     expect(html).toContain("100.00");
   });
 
-  it("shows an Additional Fees column and summary line when an Order carries them, so the invoice adds up", () => {
+  it("combines Service Fee and Additional Fees into one column and one summary line, so the invoice adds up", () => {
     // Lahthza SET-000063 / ORD-000316: COD 230.00 - Service Fee 16.00 -
     // Additional Fees 16.00 = 198.00 paid. The invoice used to print only the
     // Service Fee, so neither the row nor the totals added up.
@@ -153,19 +153,23 @@ describe("buildTraderSettlementStatementHtml", () => {
     };
     const html = buildTraderSettlementStatementHtml(withAdditional, "en");
     const head = html.slice(html.indexOf("<thead>"), html.indexOf("</thead>"));
-    expect(head).toContain("Additional Fees");
+    expect(head).toContain("Service Fee + Additional Fees");
+    // One combined column, not two.
+    expect(head.match(/Additional Fees/g)?.length).toBe(1);
     const headCells = (head.match(/<th/g) ?? []).length;
     const firstRow = html.slice(html.indexOf("<tbody>") + 7, html.indexOf("</tr>", html.indexOf("<tbody>")));
     expect((firstRow.match(/<td/g) ?? []).length).toBe(headCells);
+    expect(firstRow).toContain("32.00");
     const summary = html.slice(
       html.indexOf('<section class="summary-section">'),
       html.indexOf('<div class="signatures">'),
     );
-    expect(summary).toContain("Additional Fees");
+    expect(summary).toContain("Service Fee + Additional Fees");
+    expect(summary).toContain("32.00");
     expect(summary).toContain("198.00");
   });
 
-  it("keeps the original layout when no Order has Additional Fees", () => {
+  it("keeps the plain Service Fee heading when no Order has Additional Fees", () => {
     const html = buildTraderSettlementStatementHtml(sample, "en");
     expect(html.slice(html.indexOf("<thead>"), html.indexOf("</thead>"))).not.toContain("Additional Fees");
   });

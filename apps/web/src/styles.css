@@ -12922,3 +12922,25 @@ tr.row-highlighted {
 .modal .order-form-readonly textarea:disabled {
   background-color: var(--surface-color);
 }
+
+/* "Read only" label at the top of a delivered / closed order. */
+.order-readonly-banner {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border: 1px solid #f0c36d;
+  border-radius: 6px;
+  background: #fff8e6;
+  color: #7a5200;
+  font-weight: 600;
+}
+:root[data-theme="dark"] .order-readonly-banner {
+  border-color: #8a6a1f;
+  background: #3a2f12;
+  color: #ffe2a0;
+}
+/* Read-only values must be fully legible, not just un-faded. */
+.modal .order-form-readonly input:disabled,
+.modal .order-form-readonly select:disabled,
+.modal .order-form-readonly textarea:disabled {
+  font-weight: 500;
+}

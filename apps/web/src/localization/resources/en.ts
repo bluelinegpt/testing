@@ -2427,6 +2427,7 @@ export const englishTranslations = {
     },
     inlineCustomerHint: "This creates a Customer master record and uses it for this Order.",
     editOrder: "Edit order",
+    readOnlyOrder: "Read only — this order is delivered or closed and cannot be changed.",
     serviceFeeOverriddenHint: "Fee overridden on this order (configured price: {{configured}})",
     reopenDelivery: "Reopen delivery",
     reopenDeliveryReason: "Reason for reopening this delivered order",
