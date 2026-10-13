@@ -88,7 +88,10 @@ import {
   OrdersWorkflowService,
 } from "./orders-workflow.service.js";
 import { DriverShipmentManifestService } from "./driver-shipment-manifest.service.js";
-import { TraderReturnedItemsService } from "./trader-returned-items.service.js";
+import {
+  type ReturnedItemsTraders,
+  TraderReturnedItemsService,
+} from "./trader-returned-items.service.js";
 import type { ReturnedItemsData } from "./trader-returned-items-html.js";
 import { type AskResult, OrderQuestionAskService } from "./order-question-ask.js";
 import type { ManifestData } from "./driver-shipment-manifest-html.js";
@@ -1075,13 +1078,30 @@ export class OperationsController {
     "users_roles.manage",
   )
   @ApiOperation({
+    summary: "Trader Returned Items: the selection split by Trader (one report each)",
+  })
+  @Post("orders/trader-returned-items/traders")
+  public traderReturnedItemsTraders(
+    @Body() input: GenerateShipmentManifestDto,
+  ): Promise<ReturnedItemsTraders> {
+    return this.returnedItems.traders(input);
+  }
+
+  @RequireAnyPermission(
+    "reports.export",
+    "orders.assign_driver",
+    "orders.update_delivery_status",
+    "users_roles.manage",
+  )
+  @ApiOperation({
     summary: "Trader Returned Items: Cancelled / Returned Orders of one Trader (data)",
   })
   @Post("orders/trader-returned-items/data")
   public traderReturnedItemsData(
     @Body() input: GenerateShipmentManifestDto,
+    @Query("traderId") traderId: string | undefined,
   ): Promise<ReturnedItemsData> {
-    return this.returnedItems.data(input);
+    return this.returnedItems.data(input, traderId);
   }
 
   @RequireAnyPermission(
@@ -1095,11 +1115,13 @@ export class OperationsController {
   public async traderReturnedItemsPdf(
     @Body() input: GenerateShipmentManifestDto,
     @Query("language") language: string | undefined,
+    @Query("traderId") traderId: string | undefined,
     @Res() response: Response,
   ): Promise<void> {
     const { bytes, filename } = await this.returnedItems.pdfReport(
       input,
       language === "ar" ? "ar" : "en",
+      traderId,
     );
     response.setHeader("Content-Type", "application/pdf");
     response.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
@@ -1119,9 +1141,14 @@ export class OperationsController {
   public async traderReturnedItemsExcel(
     @Body() input: GenerateShipmentManifestDto,
     @Query("language") language: string | undefined,
+    @Query("traderId") traderId: string | undefined,
     @Res() response: Response,
   ): Promise<void> {
-    const report = await this.returnedItems.excelReport(input, language === "ar" ? "ar" : "en");
+    const report = await this.returnedItems.excelReport(
+      input,
+      language === "ar" ? "ar" : "en",
+      traderId,
+    );
     response.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

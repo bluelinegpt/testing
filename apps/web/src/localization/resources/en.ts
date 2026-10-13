@@ -2453,6 +2453,8 @@ export const englishTranslations = {
     manifestPreviewFailed: "The Driver Shipment Manifest could not be generated.",
     returnedItemsFailed: "The Trader Returned Items report could not be generated.",
     returnedItemsTotalValue: "Total Order Value",
+    returnedItemsPerTrader: "The selected Orders belong to {{count}} Traders. Each Trader gets a separate report.",
+    returnedItemsDownloadAll: "Download all ({{count}} PDFs)",
     manifestTotalAmountToCollect: "Total Amount to Collect",
     manifestTotalPackages: "Total Packages",
     collectionConfirmed: "Collection {{number}} confirmed.",

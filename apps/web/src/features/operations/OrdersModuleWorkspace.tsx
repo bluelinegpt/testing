@@ -5326,12 +5326,20 @@ function BulkStatusDialog({
   );
 }
 
-interface ReturnedItemsPreview {
-  readonly header: { readonly orderCount: number; readonly traderName: string };
-  readonly summary: { readonly totalPackages: number; readonly totalValue: string };
+interface ReturnedItemsTraderRow {
+  readonly orderCount: number;
+  readonly totalPackages: number;
+  readonly totalValue: string;
+  readonly traderId: string;
+  readonly traderName: string;
 }
 
-/** Trader Returned Items: same flow as the Driver Shipment Manifest dialog. */
+/**
+ * Trader Returned Items. One report per Trader (Aiman, 13 Oct 2026): a
+ * selection spanning several Traders lists each Trader on its own row with its
+ * own Preview / Print / PDF / Excel, and "Download all" saves one separate PDF
+ * per Trader -- never one combined PDF.
+ */
 function TraderReturnedItemsDialog({
   api,
   onClose,
@@ -5343,56 +5351,76 @@ function TraderReturnedItemsDialog({
 }) {
   const { i18n, t } = useTranslation();
   const locale = normalizeLocale(i18n.resolvedLanguage);
-  const [preview, setPreview] = useState<ReturnedItemsPreview>();
+  const [traders, setTraders] = useState<readonly ReturnedItemsTraderRow[]>();
   const [error, setError] = useState<string>();
+  const [busyTrader, setBusyTrader] = useState<string>();
   const pdf = useReconciliationPdfActions(api);
 
-  const loadPreview = useCallback(async () => {
+  const loadTraders = useCallback(async () => {
     setError(undefined);
     try {
-      setPreview(
-        await api.post<ReturnedItemsPreview>("operations/orders/trader-returned-items/data", selection),
+      const result = await api.post<{ traders: readonly ReturnedItemsTraderRow[] }>(
+        "operations/orders/trader-returned-items/traders",
+        selection,
       );
+      setTraders(result.traders);
     } catch (requestError) {
       setError(message(requestError, t("operations.returnedItemsFailed")));
     }
   }, [api, selection, t]);
 
   useEffect(() => {
-    void loadPreview();
-  }, [loadPreview]);
+    void loadTraders();
+  }, [loadTraders]);
 
-  const stem = `Trader-Returned-Items-${(preview?.header.traderName ?? "Trader").replaceAll(/[^A-Za-z0-9]+/g, "-")}`;
+  const stem = (row: ReturnedItemsTraderRow) =>
+    `Trader-Returned-Items-${row.traderName.replaceAll(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "") || "Trader"}`;
+  const query = (row: ReturnedItemsTraderRow) =>
+    `language=${locale}&traderId=${encodeURIComponent(row.traderId)}`;
 
-  const run = async (mode: PdfAction) => {
+  const run = async (row: ReturnedItemsTraderRow, mode: PdfAction): Promise<boolean> => {
     setError(undefined);
+    setBusyTrader(row.traderId);
     const requestError = await pdf.run(
-      `operations/orders/trader-returned-items/pdf?language=${locale}`,
-      `${stem}.pdf`,
+      `operations/orders/trader-returned-items/pdf?${query(row)}`,
+      `${stem(row)}.pdf`,
       mode,
       selection,
     );
+    setBusyTrader(undefined);
     if (requestError !== undefined) {
-      setError(message(requestError, t("operations.returnedItemsFailed")));
+      setError(`${row.traderName}: ${message(requestError, t("operations.returnedItemsFailed"))}`);
+      return false;
+    }
+    return true;
+  };
+  const downloadAll = async () => {
+    // One file per Trader, one after another, so each keeps its own name.
+    for (const row of traders ?? []) {
+      if (!(await run(row, "download"))) return;
     }
   };
-  const exportExcel = async () => {
+  const exportExcel = async (row: ReturnedItemsTraderRow) => {
     setError(undefined);
+    setBusyTrader(row.traderId);
     try {
       const blob = await api.postBinary(
-        `operations/orders/trader-returned-items/xlsx?language=${locale}`,
+        `operations/orders/trader-returned-items/xlsx?${query(row)}`,
         selection,
       );
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `${stem}.xlsx`;
+      anchor.download = `${stem(row)}.xlsx`;
       anchor.click();
       URL.revokeObjectURL(url);
     } catch (requestError) {
-      setError(message(requestError, t("operations.returnedItemsFailed")));
+      setError(`${row.traderName}: ${message(requestError, t("operations.returnedItemsFailed"))}`);
+    } finally {
+      setBusyTrader(undefined);
     }
   };
+  const busy = pdf.busy !== undefined || busyTrader !== undefined;
 
   return (
     <Modal
@@ -5401,14 +5429,14 @@ function TraderReturnedItemsDialog({
       title={t("operations.actions.printReturnedItems")}
       titleId="trader-returned-items-title"
     >
-      {preview === undefined ? (
+      {traders === undefined ? (
         error === undefined ? (
           <div className="loading-row">{t("common.loading")}</div>
         ) : (
           <>
             <div className="alert alert-error">{error}</div>
             <div className="modal-actions">
-              <button onClick={() => void loadPreview()} type="button">
+              <button onClick={() => void loadTraders()} type="button">
                 {t("common.refresh")}
               </button>
               <button className="button button-primary" onClick={onClose} type="button">
@@ -5419,34 +5447,59 @@ function TraderReturnedItemsDialog({
         )
       ) : (
         <>
-          <dl className="reconciliation-summary">
-            <div>
-              <dt>{t("operations.trader")}</dt>
-              <dd>{preview.header.traderName}</dd>
-            </div>
-            <div>
-              <dt>{t("operations.selectedOrders")}</dt>
-              <dd>{preview.header.orderCount}</dd>
-            </div>
-            <div>
-              <dt>{t("operations.returnedItemsTotalValue")}</dt>
-              <dd>{formatCurrency(preview.summary.totalValue, "AED", locale)}</dd>
-            </div>
-          </dl>
+          {traders.length > 1 ? (
+            <p className="field-hint">
+              {t("operations.returnedItemsPerTrader", { count: traders.length })}
+            </p>
+          ) : null}
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th scope="col">{t("operations.trader")}</th>
+                  <th scope="col">{t("operations.selectedOrders")}</th>
+                  <th scope="col">{t("operations.returnedItemsTotalValue")}</th>
+                  <th scope="col">
+                    <span className="visually-hidden">{t("common.actions")}</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {traders.map((row) => (
+                  <tr key={row.traderId}>
+                    <td>{row.traderName}</td>
+                    <td>{row.orderCount}</td>
+                    <td>{formatCurrency(row.totalValue, "AED", locale)}</td>
+                    <td>
+                      <div className="row-actions">
+                        <button disabled={busy} onClick={() => void run(row, "preview")} type="button">
+                          {busyTrader === row.traderId && pdf.busy === "preview"
+                            ? t("common.loading")
+                            : t("operations.previewReport")}
+                        </button>
+                        <button disabled={busy} onClick={() => void run(row, "print")} type="button">
+                          {t("common.print")}
+                        </button>
+                        <button disabled={busy} onClick={() => void run(row, "download")} type="button">
+                          {t("operations.downloadPdf")}
+                        </button>
+                        <button disabled={busy} onClick={() => void exportExcel(row)} type="button">
+                          {t("operations.exportExcel")}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {error === undefined ? null : <div className="alert alert-error">{error}</div>}
           <div className="modal-actions">
-            <button disabled={pdf.busy !== undefined} onClick={() => void run("preview")} type="button">
-              {pdf.busy === "preview" ? t("common.loading") : t("operations.previewReport")}
-            </button>
-            <button disabled={pdf.busy !== undefined} onClick={() => void run("print")} type="button">
-              {pdf.busy === "print" ? t("common.loading") : t("common.print")}
-            </button>
-            <button disabled={pdf.busy !== undefined} onClick={() => void run("download")} type="button">
-              {pdf.busy === "download" ? t("common.loading") : t("operations.downloadPdf")}
-            </button>
-            <button disabled={pdf.busy !== undefined} onClick={() => void exportExcel()} type="button">
-              {t("operations.exportExcel")}
-            </button>
+            {traders.length > 1 ? (
+              <button disabled={busy} onClick={() => void downloadAll()} type="button">
+                {t("operations.returnedItemsDownloadAll", { count: traders.length })}
+              </button>
+            ) : null}
             <button className="button button-primary" onClick={onClose} type="button">
               {t("common.close")}
             </button>

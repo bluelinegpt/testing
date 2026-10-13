@@ -645,10 +645,13 @@ describe("OrdersModuleWorkspace", () => {
         if (path === "operations/orders/selection-summary") {
           return Promise.resolve({ eligibleCount: 1, ineligible: [], selectedAmountToCollect: "0.00", selectedCount: 1 });
         }
-        if (path === "operations/orders/trader-returned-items/data") {
+        if (path === "operations/orders/trader-returned-items/traders") {
+          // Two Traders in one selection: one report each, never combined.
           return Promise.resolve({
-            header: { orderCount: 1, traderName: "فيصل عبايا" },
-            summary: { totalPackages: 1, totalValue: "85.00" },
+            traders: [
+              { orderCount: 1, totalPackages: 1, totalValue: "85.00", traderId: "t-1", traderName: "فيصل عبايا" },
+              { orderCount: 1, totalPackages: 1, totalValue: "279.00", traderId: "t-2", traderName: "جلال abyay" },
+            ],
           });
         }
         return Promise.resolve({});
@@ -661,12 +664,16 @@ describe("OrdersModuleWorkspace", () => {
     fireEvent.click(screen.getByRole("button", { name: "Print Trader Returned Items" }));
     await screen.findByRole("dialog", { name: "Print Trader Returned Items" });
     await waitFor(() =>
-      expect(api.post).toHaveBeenCalledWith("operations/orders/trader-returned-items/data", {
+      expect(api.post).toHaveBeenCalledWith("operations/orders/trader-returned-items/traders", {
         orderIds: [cancelledOrder.id],
         selectionMode: "ids",
       }),
     );
     expect(await screen.findByText("فيصل عبايا")).toBeInTheDocument();
+    expect(screen.getByText("جلال abyay")).toBeInTheDocument();
+    // One set of report buttons per Trader, plus one "Download all".
+    expect(screen.getAllByRole("button", { name: "Download PDF" })).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Download all (2 PDFs)" })).toBeInTheDocument();
   });
 
   it("lets a Cancelled Order be returned to the Trader, with a reason", async () => {

@@ -2447,6 +2447,8 @@ export const arabicTranslations = {
     manifestPreviewFailed: "تعذّر إنشاء كشف شحنات المندوب.",
     returnedItemsFailed: "تعذّر إنشاء كشف المرتجعات للتاجر.",
     returnedItemsTotalValue: "إجمالي قيمة الطلبات",
+    returnedItemsPerTrader: "الطلبات المحددة تخص {{count}} تجار. لكل تاجر كشف منفصل.",
+    returnedItemsDownloadAll: "تنزيل الكل ({{count}} ملفات PDF)",
     // Kept alongside manifestTotalAmountToCollect: the committed
     // OrdersModuleWorkspace still calls manifestTotalCod, because the
     // component rename and its API field (totalCod ->

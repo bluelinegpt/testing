@@ -23,6 +23,19 @@ import {
   type ReturnedItemsOrder,
 } from "./trader-returned-items-html.js";
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The selection grouped by Trader, for the dialog's one-row-per-Trader list. */
+export interface ReturnedItemsTraders {
+  readonly traders: readonly {
+    readonly orderCount: number;
+    readonly totalPackages: number;
+    readonly totalValue: string;
+    readonly traderId: string;
+    readonly traderName: string;
+  }[];
+}
+
 interface ReturnedOrderRow {
   readonly areaName: string;
   readonly codAmount: string;
@@ -159,10 +172,11 @@ export class TraderReturnedItemsService {
     return result.rows;
   }
 
-  private async buildData(
+  /** The selection, validated: at least one Order, every one Cancelled / Returned. */
+  private async selectedReturnedOrders(
     companyId: string,
     input: GenerateShipmentManifestDto,
-  ): Promise<ReturnedItemsData> {
+  ): Promise<readonly ReturnedOrderRow[]> {
     this.assertAnyPermission([
       "reports.export",
       "orders.assign_driver",
@@ -191,11 +205,44 @@ export class TraderReturnedItemsService {
         notReturned.map((row) => row.orderNumber),
       );
     }
+    return orders;
+  }
+
+  /**
+   * One report is ONE Trader's (Aiman, 13 Oct 2026: a selection spanning
+   * several Traders produces one separate PDF per Trader, never a combined
+   * one). `traderId` picks that Trader's Orders out of the selection; without
+   * it the selection must already be a single Trader's.
+   */
+  private async buildData(
+    companyId: string,
+    input: GenerateShipmentManifestDto,
+    requestedTraderId?: string,
+  ): Promise<ReturnedItemsData> {
+    const selected = await this.selectedReturnedOrders(companyId, input);
+    if (requestedTraderId !== undefined && !UUID.test(requestedTraderId)) {
+      throw new ApplicationException(
+        "returned_items_trader_invalid",
+        "The Trader is not valid",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const orders =
+      requestedTraderId === undefined
+        ? selected
+        : selected.filter((row) => row.traderId === requestedTraderId);
+    if (orders.length === 0) {
+      throw new ApplicationException(
+        "returned_items_trader_not_in_selection",
+        "None of the selected Orders belongs to this Trader",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
     const traderIds = new Set(orders.map((row) => row.traderId));
     if (traderIds.size !== 1) {
       throw new ApplicationException(
         "returned_items_trader_mismatch",
-        "Select Orders of one Trader only.",
+        "The selected Orders belong to several Traders; print one report per Trader.",
         HttpStatus.CONFLICT,
       );
     }
@@ -287,17 +334,50 @@ export class TraderReturnedItemsService {
     return `Trader-Returned-Items-${trader === "" ? "Trader" : trader}-${date}`;
   }
 
-  public async data(input: GenerateShipmentManifestDto): Promise<ReturnedItemsData> {
+  /** The selection split by Trader: one row, and later one report, per Trader. */
+  public async traders(input: GenerateShipmentManifestDto): Promise<ReturnedItemsTraders> {
     const { companyId } = this.tenants.current();
-    return this.buildData(companyId, input);
+    const orders = await this.selectedReturnedOrders(companyId, input);
+    const ids = [...new Set(orders.map((row) => row.traderId))];
+    const names = await sql<{ id: string; nameEn: string }>`
+      select id, name_en as "nameEn" from traders
+       where company_id = ${companyId}::uuid
+         and id in (${sql.join(ids.map((id) => sql`${id}::uuid`))})
+    `.execute(this.database);
+    const nameOf = new Map(names.rows.map((row) => [row.id, row.nameEn]));
+    return {
+      traders: ids
+        .map((traderId) => {
+          const own = orders.filter((row) => row.traderId === traderId);
+          return {
+            orderCount: own.length,
+            totalPackages: own.reduce((sum, row) => sum + Number(row.packageCount), 0),
+            totalValue: own
+              .reduce((sum, row) => sum.plus(row.codAmount), new Decimal(0))
+              .toFixed(2),
+            traderId,
+            traderName: nameOf.get(traderId) ?? "—",
+          };
+        })
+        .sort((left, right) => left.traderName.localeCompare(right.traderName)),
+    };
+  }
+
+  public async data(
+    input: GenerateShipmentManifestDto,
+    traderId?: string,
+  ): Promise<ReturnedItemsData> {
+    const { companyId } = this.tenants.current();
+    return this.buildData(companyId, input, traderId);
   }
 
   public async pdfReport(
     input: GenerateShipmentManifestDto,
     language: ReportLanguage,
+    traderId?: string,
   ): Promise<{ bytes: Buffer; filename: string }> {
     const { companyId } = this.tenants.current();
-    const data = await this.buildData(companyId, input);
+    const data = await this.buildData(companyId, input, traderId);
     const html = buildTraderReturnedItemsHtml(data, language, `${this.generatedAt()} (UAE)`);
     const footerTemplate =
       language === "ar"
@@ -310,9 +390,10 @@ export class TraderReturnedItemsService {
   public async excelReport(
     input: GenerateShipmentManifestDto,
     language: ReportLanguage = "en",
+    traderId?: string,
   ): Promise<{ bytes: Buffer; filename: string }> {
     const { companyId } = this.tenants.current();
-    const data = await this.buildData(companyId, input);
+    const data = await this.buildData(companyId, input, traderId);
     const columns = [...returnedItemsColumns(language)];
     const rows = data.orders.map((row) =>
       Object.fromEntries(
