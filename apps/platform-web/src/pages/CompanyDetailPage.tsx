@@ -16,6 +16,7 @@ import {
 } from "../api/platform-client.js";
 import { usePlatformSession } from "../app/PlatformSession.js";
 import { companyPortalUrl } from "../config/company-portal.js";
+import { CompanyAccountingModePanel } from "./CompanyAccountingModePanel.js";
 import { CompanyAdministrators } from "./CompanyAdministrators.js";
 import { CompanyMobileAppPanel } from "./CompanyMobileAppPanel.js";
 import { CompanyOrdersAiPanel } from "./CompanyOrdersAiPanel.js";
@@ -783,6 +784,8 @@ export function CompanyDetailPage(): ReactElement {
           Currency, timezone and language are set at creation. Changing them after a Company has
           posted is an accounting decision rather than a profile edit, and is not offered here.
         </p>
+
+        <CompanyAccountingModePanel companyCode={company.code} companyId={company.id} />
 
         <h3>Accounting Setup</h3>
         {setup.templateCode === null ? (

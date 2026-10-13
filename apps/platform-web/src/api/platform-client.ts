@@ -1053,6 +1053,33 @@ export interface CompanyMobileApp {
   readonly activeMobileSessions: number;
 }
 
+/** GL Accounting mode of one Company (Configuration & Accounting tab). */
+export interface CompanyAccountingModeBlocker {
+  readonly code: string;
+  readonly detail?: string;
+}
+
+export interface CompanyAccountingModeStatus {
+  readonly accountingMode: "enabled" | "disabled";
+  readonly accountingEnabled: boolean;
+  readonly automaticPostingEnabled: boolean;
+  readonly configurationVersion: string | null;
+  readonly unresolved: {
+    readonly pending: number;
+    readonly failed: number;
+    readonly otherUnresolved: number;
+  };
+}
+
+export interface CompanyAccountingModePreview {
+  readonly action: "enable" | "disable";
+  readonly blockers: readonly CompanyAccountingModeBlocker[];
+  readonly warnings?: readonly unknown[];
+  readonly executable: boolean;
+  readonly confirmation: string;
+  readonly expectedConfigurationVersion: string | null;
+}
+
 /** Orders AI (the AI tab) for one Company. Version 0 = never saved (off). */
 export interface CompanyOrdersAi {
   readonly isEnabled: boolean;
@@ -2827,6 +2854,38 @@ export const platformApi = {
     });
     if (result === undefined) throw new PlatformApiError("Empty mobile app response", "empty", 500);
     return result;
+  },
+
+  async companyAccountingMode(companyId: string): Promise<CompanyAccountingModeStatus> {
+    const result = await request<CompanyAccountingModeStatus>(
+      `platform/companies/${companyId}/accounting-mode`,
+      { method: "GET" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty accounting mode response", "empty", 500);
+    return result;
+  },
+
+  async companyAccountingModePreview(
+    companyId: string,
+    action: "enable" | "disable",
+  ): Promise<CompanyAccountingModePreview> {
+    const result = await request<CompanyAccountingModePreview>(
+      `platform/companies/${companyId}/accounting-mode/${action}-preview`,
+      { method: "GET" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty accounting mode preview", "empty", 500);
+    return result;
+  },
+
+  async changeCompanyAccountingMode(
+    companyId: string,
+    action: "enable" | "disable",
+    input: { reason: string; confirmation: string; expectedConfigurationVersion: string | null },
+  ): Promise<void> {
+    await request<unknown>(`platform/companies/${companyId}/accounting-mode/${action}`, {
+      body: input,
+      method: "POST",
+    });
   },
 
   async companyOrdersAi(companyId: string): Promise<CompanyOrdersAi> {
