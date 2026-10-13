@@ -149,14 +149,14 @@ describe("buildTraderSettlementStatementHtml", () => {
           totalDeductions: "32.00",
         },
       ],
-      summary: { ...sample.summary, totalAdditionalFees: "16.00", totalCod: "230.00", netPayment: "198.00" },
+      summary: { ...sample.summary, totalAdditionalFees: "16.00", totalCod: "230.00", totalServiceFees: "16.00", netPayment: "198.00" },
     };
     const html = buildTraderSettlementStatementHtml(withAdditional, "en");
     const head = html.slice(html.indexOf("<thead>"), html.indexOf("</thead>"));
     expect(head).toContain("Service Fee + Additional Fees");
     // One combined column, not two.
     expect(head.match(/Additional Fees/g)?.length).toBe(1);
-    const headCells = (head.match(/<th/g) ?? []).length;
+    const headCells = (head.match(/<th[\s>]/g) ?? []).length;
     const firstRow = html.slice(html.indexOf("<tbody>") + 7, html.indexOf("</tr>", html.indexOf("<tbody>")));
     expect((firstRow.match(/<td/g) ?? []).length).toBe(headCells);
     expect(firstRow).toContain("32.00");

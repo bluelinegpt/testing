@@ -882,7 +882,20 @@ export class PlatformAccountingRepairAdapter {
         HttpStatus.CONFLICT,
       );
     }
-    return this.posting.process(transaction, record);
+    const outcome = await this.posting.process(transaction, record);
+    if (outcome === null) {
+      // The Event needed no Journal (a Driver Collection that moved no money)
+      // and was settled as ignored_no_accounting_required. This repair's
+      // contract is "a Journal was posted"; refusing rolls the transaction
+      // back, so nothing changes here. The Company's own Reprocess action
+      // settles it.
+      throw new ApplicationException(
+        "accounting_no_posting_required",
+        "This Accounting Event has nothing to post; use Reprocess on the Company's Accounting Events screen",
+        HttpStatus.CONFLICT,
+      );
+    }
+    return outcome;
   }
 
   /**
