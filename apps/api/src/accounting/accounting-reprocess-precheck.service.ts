@@ -361,13 +361,25 @@ export class AccountingReprocessPrecheckService {
       facts = await this.attempt(blockers, () => this.sources.load(database, record));
       if (facts !== undefined) {
         if (facts.components.length === 0) {
-          // The loader dropped every component as zero: nothing to post. For
-          // an Order this IS the No Accounting Required answer, and no
-          // zero-value Journal may ever be manufactured to fill the gap.
-          blockers.push({
-            code: "accounting_no_posting_required",
-            message: "The source has no financial components to post",
-          });
+          if (event.eventType === "driver_collection_confirmed") {
+            // A Driver Collection that moved no money: Reprocess settles it as
+            // ignored_no_accounting_required in the posting pipeline (no
+            // Journal is ever written). Allowed, so the Company can clear a
+            // failure it could not otherwise resolve (REC-000091 / REC-000093).
+            warnings.push({
+              code: "accounting_no_posting_required",
+              message:
+                "Nothing to post: reprocessing records this Driver Collection as No Accounting Required",
+            });
+          } else {
+            // The loader dropped every component as zero: nothing to post. For
+            // an Order this IS the No Accounting Required answer, and no
+            // zero-value Journal may ever be manufactured to fill the gap.
+            blockers.push({
+              code: "accounting_no_posting_required",
+              message: "The source has no financial components to post",
+            });
+          }
         }
         if (facts.accountingDate.length !== 10) {
           blockers.push({

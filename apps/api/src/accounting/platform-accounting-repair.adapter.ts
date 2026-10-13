@@ -819,7 +819,13 @@ export class PlatformAccountingRepairAdapter {
         entryIntent: mapping.entryIntent,
       })),
     };
-    if (blockers.some((blocker) => NOT_REQUIRED_CODES.has(blocker.code))) {
+    // A zero-money Driver Collection is now a precheck WARNING (the Company's
+    // Reprocess settles it), not a blocker -- for this Platform repair, which
+    // only ever posts a Journal, it is still "posting not required".
+    if (
+      blockers.some((blocker) => NOT_REQUIRED_CODES.has(blocker.code)) ||
+      warnings.some((warning) => warning.code === "accounting_no_posting_required")
+    ) {
       return { ...base, blockers, classificationCode: "ACCOUNTING_POSTING_NOT_REQUIRED", precheck: details, repairability: "NOT_REQUIRED", warnings };
     }
     if (blockers.some((blocker) => AMBIGUOUS_CODES.has(blocker.code))) {
