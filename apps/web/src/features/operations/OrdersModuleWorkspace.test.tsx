@@ -631,6 +631,63 @@ describe("OrdersModuleWorkspace", () => {
     );
   });
 
+  it("offers Trader Returned Items only for Cancelled / Returned Orders and sends the selection", async () => {
+    const cancelledOrder = { ...heldOrder, deliveryStatus: "cancelled", returnStatus: "not_applicable" };
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({ filteredCount: 1, items: [cancelledOrder], page: 1, pageSize: 25, totalCount: 1 });
+        }
+        if (path.startsWith("configuration/areas")) return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        return Promise.resolve([]);
+      }),
+      post: vi.fn((path: string) => {
+        if (path === "operations/orders/selection-summary") {
+          return Promise.resolve({ eligibleCount: 1, ineligible: [], selectedAmountToCollect: "0.00", selectedCount: 1 });
+        }
+        if (path === "operations/orders/trader-returned-items/data") {
+          return Promise.resolve({
+            header: { orderCount: 1, traderName: "فيصل عبايا" },
+            summary: { totalPackages: 1, totalValue: "85.00" },
+          });
+        }
+        return Promise.resolve({});
+      }),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
+    );
+    fireEvent.click(await screen.findByLabelText("Select Order SER-000002"));
+    fireEvent.click(screen.getByRole("button", { name: "Print Trader Returned Items" }));
+    await screen.findByRole("dialog", { name: "Print Trader Returned Items" });
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith("operations/orders/trader-returned-items/data", {
+        orderIds: [cancelledOrder.id],
+        selectionMode: "ids",
+      }),
+    );
+    expect(await screen.findByText("فيصل عبايا")).toBeInTheDocument();
+  });
+
+  it("does not offer Trader Returned Items for an Order that is not returned", async () => {
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({ filteredCount: 1, items: [heldOrder], page: 1, pageSize: 25, totalCount: 1 });
+        }
+        if (path.startsWith("configuration/areas")) return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        return Promise.resolve([]);
+      }),
+      post: vi.fn().mockResolvedValue({ eligibleCount: 1, ineligible: [], selectedAmountToCollect: "0.00", selectedCount: 1 }),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
+    );
+    fireEvent.click(await screen.findByLabelText("Select Order SER-000002"));
+    expect(screen.getByRole("button", { name: "Print Driver Shipment Manifest" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Print Trader Returned Items" })).not.toBeInTheDocument();
+  });
+
   it("previews bulk driver assignment with a clean selected-order payload", async () => {
     const api = {
       get: vi.fn((path: string) => {

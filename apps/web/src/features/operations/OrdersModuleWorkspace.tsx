@@ -134,7 +134,15 @@ function menuViewCountQuery(view: OrderView): string {
   }
   return parameters.toString();
 }
-type BulkAction = "assign" | "carrier" | "manifest" | "reactivate" | "status";
+type BulkAction = "assign" | "carrier" | "manifest" | "reactivate" | "returnedItems" | "status";
+
+/** Goods going back to the Trader: what the Trader Returned Items report accepts. */
+function isReturnedToTraderOrder(order: { deliveryStatus: string; returnStatus: string }): boolean {
+  return (
+    ["cancelled", "returned_to_branch", "returned_to_trader"].includes(order.deliveryStatus) ||
+    order.returnStatus === "returned_to_trader"
+  );
+}
 
 interface OrderFilters {
   areaId: string;
@@ -2704,6 +2712,20 @@ export function OrdersModuleWorkspace({
                         {t("operations.actions.printManifest")}
                       </button>
                     ) : null}
+                    {/* Cancelled / Returned to Trader Orders only (Aiman, 13 Oct
+                        2026): offered on the Cancelled view, on a Returned
+                        delivery-status filter, or when every selected Order
+                        is one. The server checks again. */}
+                    {canManifest &&
+                    (filters.quickView === "cancelled" ||
+                      /cancelled|returned_to_trader|returned_to_branch/.test(filters.deliveryStatus) ||
+                      (bulkSelectedOrders.length > 0 &&
+                        bulkSelectedOrders.every(isReturnedToTraderOrder))) ? (
+                      <button onClick={() => setBulkAction("returnedItems")} type="button">
+                        <Printer aria-hidden="true" size={17} />
+                        {t("operations.actions.printReturnedItems")}
+                      </button>
+                    ) : null}
                   </div>
                 ) : null}
                 <div className="bulk-action-group">
@@ -2983,6 +3005,13 @@ export function OrdersModuleWorkspace({
       ) : null}
       {bulkAction === "manifest" ? (
         <DriverShipmentManifestDialog
+          api={api}
+          onClose={() => setBulkAction(undefined)}
+          selection={manifestSelection}
+        />
+      ) : null}
+      {bulkAction === "returnedItems" ? (
+        <TraderReturnedItemsDialog
           api={api}
           onClose={() => setBulkAction(undefined)}
           selection={manifestSelection}
@@ -5293,6 +5322,137 @@ function BulkStatusDialog({
           {saving ? t("common.working") : t("common.confirm")}
         </button>
       </div>
+    </Modal>
+  );
+}
+
+interface ReturnedItemsPreview {
+  readonly header: { readonly orderCount: number; readonly traderName: string };
+  readonly summary: { readonly totalPackages: number; readonly totalValue: string };
+}
+
+/** Trader Returned Items: same flow as the Driver Shipment Manifest dialog. */
+function TraderReturnedItemsDialog({
+  api,
+  onClose,
+  selection,
+}: {
+  api: ApiClient;
+  onClose: () => void;
+  selection: ManifestSelectionPayload;
+}) {
+  const { i18n, t } = useTranslation();
+  const locale = normalizeLocale(i18n.resolvedLanguage);
+  const [preview, setPreview] = useState<ReturnedItemsPreview>();
+  const [error, setError] = useState<string>();
+  const pdf = useReconciliationPdfActions(api);
+
+  const loadPreview = useCallback(async () => {
+    setError(undefined);
+    try {
+      setPreview(
+        await api.post<ReturnedItemsPreview>("operations/orders/trader-returned-items/data", selection),
+      );
+    } catch (requestError) {
+      setError(message(requestError, t("operations.returnedItemsFailed")));
+    }
+  }, [api, selection, t]);
+
+  useEffect(() => {
+    void loadPreview();
+  }, [loadPreview]);
+
+  const stem = `Trader-Returned-Items-${(preview?.header.traderName ?? "Trader").replaceAll(/[^A-Za-z0-9]+/g, "-")}`;
+
+  const run = async (mode: PdfAction) => {
+    setError(undefined);
+    const requestError = await pdf.run(
+      `operations/orders/trader-returned-items/pdf?language=${locale}`,
+      `${stem}.pdf`,
+      mode,
+      selection,
+    );
+    if (requestError !== undefined) {
+      setError(message(requestError, t("operations.returnedItemsFailed")));
+    }
+  };
+  const exportExcel = async () => {
+    setError(undefined);
+    try {
+      const blob = await api.postBinary(
+        `operations/orders/trader-returned-items/xlsx?language=${locale}`,
+        selection,
+      );
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${stem}.xlsx`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (requestError) {
+      setError(message(requestError, t("operations.returnedItemsFailed")));
+    }
+  };
+
+  return (
+    <Modal
+      closeLabel={t("common.close")}
+      onRequestClose={onClose}
+      title={t("operations.actions.printReturnedItems")}
+      titleId="trader-returned-items-title"
+    >
+      {preview === undefined ? (
+        error === undefined ? (
+          <div className="loading-row">{t("common.loading")}</div>
+        ) : (
+          <>
+            <div className="alert alert-error">{error}</div>
+            <div className="modal-actions">
+              <button onClick={() => void loadPreview()} type="button">
+                {t("common.refresh")}
+              </button>
+              <button className="button button-primary" onClick={onClose} type="button">
+                {t("common.close")}
+              </button>
+            </div>
+          </>
+        )
+      ) : (
+        <>
+          <dl className="reconciliation-summary">
+            <div>
+              <dt>{t("operations.trader")}</dt>
+              <dd>{preview.header.traderName}</dd>
+            </div>
+            <div>
+              <dt>{t("operations.selectedOrders")}</dt>
+              <dd>{preview.header.orderCount}</dd>
+            </div>
+            <div>
+              <dt>{t("operations.returnedItemsTotalValue")}</dt>
+              <dd>{formatCurrency(preview.summary.totalValue, "AED", locale)}</dd>
+            </div>
+          </dl>
+          {error === undefined ? null : <div className="alert alert-error">{error}</div>}
+          <div className="modal-actions">
+            <button disabled={pdf.busy !== undefined} onClick={() => void run("preview")} type="button">
+              {pdf.busy === "preview" ? t("common.loading") : t("operations.previewReport")}
+            </button>
+            <button disabled={pdf.busy !== undefined} onClick={() => void run("print")} type="button">
+              {pdf.busy === "print" ? t("common.loading") : t("common.print")}
+            </button>
+            <button disabled={pdf.busy !== undefined} onClick={() => void run("download")} type="button">
+              {pdf.busy === "download" ? t("common.loading") : t("operations.downloadPdf")}
+            </button>
+            <button disabled={pdf.busy !== undefined} onClick={() => void exportExcel()} type="button">
+              {t("operations.exportExcel")}
+            </button>
+            <button className="button button-primary" onClick={onClose} type="button">
+              {t("common.close")}
+            </button>
+          </div>
+        </>
+      )}
     </Modal>
   );
 }

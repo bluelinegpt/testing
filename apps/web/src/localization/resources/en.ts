@@ -2451,6 +2451,8 @@ export const englishTranslations = {
     collectSkippedOrders:
       "{{count}} selected Order(s) could not be included — already collected or no longer eligible for this Driver.",
     manifestPreviewFailed: "The Driver Shipment Manifest could not be generated.",
+    returnedItemsFailed: "The Trader Returned Items report could not be generated.",
+    returnedItemsTotalValue: "Total Order Value",
     manifestTotalAmountToCollect: "Total Amount to Collect",
     manifestTotalPackages: "Total Packages",
     collectionConfirmed: "Collection {{number}} confirmed.",
@@ -2765,6 +2767,7 @@ export const englishTranslations = {
       markOutForDelivery: "Send out for delivery",
       moneyOut: "Trader settlements",
       printManifest: "Print Driver Shipment Manifest",
+      printReturnedItems: "Print Trader Returned Items",
       traderCollectionReport: "Trader Collection Report",
       traderSettlementReport: "Trader Settlement Report",
       traderBulkReport: "Combined Trader Reports",

@@ -88,6 +88,8 @@ import {
   OrdersWorkflowService,
 } from "./orders-workflow.service.js";
 import { DriverShipmentManifestService } from "./driver-shipment-manifest.service.js";
+import { TraderReturnedItemsService } from "./trader-returned-items.service.js";
+import type { ReturnedItemsData } from "./trader-returned-items-html.js";
 import { type AskResult, OrderQuestionAskService } from "./order-question-ask.js";
 import type { ManifestData } from "./driver-shipment-manifest-html.js";
 import {
@@ -171,6 +173,8 @@ export class OperationsController {
     private readonly reconciliations: DriverCashReconciliationService,
     @Inject(DriverShipmentManifestService)
     private readonly manifest: DriverShipmentManifestService,
+    @Inject(TraderReturnedItemsService)
+    private readonly returnedItems: TraderReturnedItemsService,
     @Inject(TraderSettlementService)
     private readonly traderSettlementService: TraderSettlementService,
     @Inject(TraderAccountStatementService)
@@ -1062,6 +1066,69 @@ export class OperationsController {
     response.setHeader("X-Content-Type-Options", "nosniff");
     response.setHeader("Cache-Control", "private, max-age=0, must-revalidate");
     response.send(bytes);
+  }
+
+  @RequireAnyPermission(
+    "reports.export",
+    "orders.assign_driver",
+    "orders.update_delivery_status",
+    "users_roles.manage",
+  )
+  @ApiOperation({
+    summary: "Trader Returned Items: Cancelled / Returned Orders of one Trader (data)",
+  })
+  @Post("orders/trader-returned-items/data")
+  public traderReturnedItemsData(
+    @Body() input: GenerateShipmentManifestDto,
+  ): Promise<ReturnedItemsData> {
+    return this.returnedItems.data(input);
+  }
+
+  @RequireAnyPermission(
+    "reports.export",
+    "orders.assign_driver",
+    "orders.update_delivery_status",
+    "users_roles.manage",
+  )
+  @ApiOperation({ summary: "Trader Returned Items as a downloadable PDF file" })
+  @Post("orders/trader-returned-items/pdf")
+  public async traderReturnedItemsPdf(
+    @Body() input: GenerateShipmentManifestDto,
+    @Query("language") language: string | undefined,
+    @Res() response: Response,
+  ): Promise<void> {
+    const { bytes, filename } = await this.returnedItems.pdfReport(
+      input,
+      language === "ar" ? "ar" : "en",
+    );
+    response.setHeader("Content-Type", "application/pdf");
+    response.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("Cache-Control", "private, max-age=0, must-revalidate");
+    response.send(bytes);
+  }
+
+  @RequireAnyPermission(
+    "reports.export",
+    "orders.assign_driver",
+    "orders.update_delivery_status",
+    "users_roles.manage",
+  )
+  @ApiOperation({ summary: "Trader Returned Items as an Excel file" })
+  @Post("orders/trader-returned-items/xlsx")
+  public async traderReturnedItemsExcel(
+    @Body() input: GenerateShipmentManifestDto,
+    @Query("language") language: string | undefined,
+    @Res() response: Response,
+  ): Promise<void> {
+    const report = await this.returnedItems.excelReport(input, language === "ar" ? "ar" : "en");
+    response.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    response.setHeader("Content-Disposition", `attachment; filename="${report.filename}"`);
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.send(report.bytes);
   }
 
   @RequireAnyPermission("orders.update_delivery_status", "users_roles.manage")

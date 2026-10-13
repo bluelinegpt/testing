@@ -2445,6 +2445,8 @@ export const arabicTranslations = {
     collectSkippedOrders:
       "تعذّر تضمين {{count}} من الطلبات المحددة — تم تحصيلها بالفعل أو لم تعد مؤهلة لهذا المندوب.",
     manifestPreviewFailed: "تعذّر إنشاء كشف شحنات المندوب.",
+    returnedItemsFailed: "تعذّر إنشاء كشف المرتجعات للتاجر.",
+    returnedItemsTotalValue: "إجمالي قيمة الطلبات",
     // Kept alongside manifestTotalAmountToCollect: the committed
     // OrdersModuleWorkspace still calls manifestTotalCod, because the
     // component rename and its API field (totalCod ->
@@ -2760,6 +2762,7 @@ export const arabicTranslations = {
       markOutForDelivery: "إرسال للتوصيل",
       moneyOut: "تسويات التجار",
       printManifest: "طباعة كشف شحنات المندوب",
+      printReturnedItems: "طباعة كشف المرتجعات للتاجر",
       traderCollectionReport: "تقرير تحصيل التاجر",
       traderSettlementReport: "تقرير تسوية التاجر",
       traderBulkReport: "تقارير التجار المجمعة",

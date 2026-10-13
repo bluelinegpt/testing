@@ -44,6 +44,7 @@ import { DailyOperationsSummaryService } from "./daily-operations-summary.servic
 import { DriverCashReconciliationService } from "./driver-cash-reconciliation.service.js";
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
 import { DriverShipmentManifestService } from "./driver-shipment-manifest.service.js";
+import { TraderReturnedItemsService } from "./trader-returned-items.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import { WhatsAppOutboxWriter } from "../whatsapp/whatsapp-outbox-writer.service.js";
 import { OperationsService } from "./operations.service.js";
@@ -101,6 +102,7 @@ import { CompanyOrderHealthService } from "./company-order-health.service.js";
     DriverCashReconciliationService,
     DriverCollectionPdfService,
     DriverShipmentManifestService,
+    TraderReturnedItemsService,
     OperationsHistoryWriter,
     WhatsAppOutboxWriter,
     OperationsService,
