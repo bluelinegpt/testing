@@ -328,87 +328,160 @@ export function buildTraderSettlementStatementHtml(
     ? `${labels.serviceFee} + ${labels.additionalFees}`
     : labels.serviceFee;
 
-  const orderRows = data.orders
-    .map(
-      (order, index) =>
-        "<tr>" +
-        `<td class="num">${index + 1}</td>` +
-        `<td class="mono">${escapeHtml(order.orderNumber)}</td>` +
-        `<td class="mono">${order.referenceNumber === null ? "" : escapeHtml(order.referenceNumber)}</td>` +
-        (showFullColumns ? `<td>${dateOnly(order.deliveryDate)}</td>` : "") +
-        `<td>${escapeHtml(order.customerName)}</td>` +
-        `<td>${escapeHtml(order.customerMobileNumber)}</td>` +
-        `<td>${escapeHtml(language === "ar" ? (order.emirateNameAr ?? order.emirateName ?? "") : (order.emirateName ?? ""))}</td>` +
-        `<td>${escapeHtml(language === "ar" ? (order.areaNameAr ?? order.areaName) : order.areaName)}</td>` +
-        (showFullColumns
-          ? `<td class="num">${tableMoney(order.codAmount)}</td>` +
-            `<td class="num">${tableMoney(new Decimal(order.serviceFee).plus(order.additionalFees).toFixed(2))}</td>`
-          : "") +
-        `<td class="num">${tableMoney(order.amountPaidNow)}</td>` +
-        "</tr>",
-    )
-    .join("");
-  // Money headers take `num` too, so a header and the figures beneath it
-  // resolve to the SAME edge. They previously disagreed: `text-align: end` on
-  // the cells resolves to LEFT under dir="rtl" while the plain headers used
-  // `start`, i.e. right.
-  const headerColumns: readonly { readonly label: string; readonly numeric: boolean }[] = [
-    { label: labels.lineNumber, numeric: false },
-    { label: labels.orderNumber, numeric: false },
-    { label: labels.externalReference, numeric: false },
-    ...(showFullColumns ? [{ label: labels.deliveryDate, numeric: false }] : []),
-    { label: labels.customer, numeric: false },
-    { label: labels.customerMobile, numeric: false },
-    { label: labels.emirate, numeric: false },
-    { label: labels.area, numeric: false },
+  // Columns are built from one list so a header and every row's cell can never
+  // disagree in count. Per Aiman (13 Oct 2026):
+  //  - a column that has no data on THIS invoice (empty, or 0.00 on every row)
+  //    is left off; #, Reference and Amount Paid Now always print;
+  //  - there is no separate Order Number column -- a row without a Reference
+  //    Number shows its Order Number in the Reference column instead;
+  //  - an Order paid across several Settlements shows "Previously Paid" (what
+  //    earlier Settlements paid before this one) and "Remaining Outstanding"
+  //    (what was still owed right after this one). ORD-000649 (104.00): 60.00
+  //    on SET-000101 (remaining 44.00), 44.00 on SET-000102 (previously 60.00).
+  type Row =
+    | { readonly kind: "order"; readonly order: (typeof data.orders)[number] }
+    | { readonly kind: "deduction"; readonly line: (typeof data.receivableOffsets)[number] };
+  interface Column {
+    readonly label: string;
+    readonly numeric: boolean;
+    readonly cell: (row: Row) => string;
+    /** True when this row has something to print in the column. */
+    readonly has: (row: Row) => boolean;
+    readonly always?: boolean;
+  }
+  const rows: Row[] = [
+    ...data.orders.map((order) => ({ kind: "order" as const, order })),
+    ...data.receivableOffsets.map((line) => ({ kind: "deduction" as const, line })),
+  ];
+  const nonZero = (value: string | null | undefined) => value != null && new Decimal(value).gt(0);
+  const text = (value: string | null | undefined) => value != null && value.trim() !== "";
+  const textColumn = (
+    label: string,
+    pick: (row: Row) => string | null | undefined,
+    className = "",
+  ): Column => ({
+    cell: (row) => `<td${className === "" ? "" : ` class="${className}"`}>${escapeHtml(pick(row) ?? "")}</td>`,
+    has: (row) => text(pick(row)),
+    label,
+    numeric: false,
+  });
+  const orderFee = (order: (typeof data.orders)[number]) =>
+    new Decimal(order.serviceFee).plus(order.additionalFees).toFixed(2);
+  const paidBefore = (order: (typeof data.orders)[number]) => order.paidBeforeThisPayment ?? "0.00";
+  const remainingAfter = (order: (typeof data.orders)[number]) => order.remainingAfterThisPayment ?? "0.00";
+  const columns: Column[] = [
+    {
+      always: true,
+      cell: (row) => `<td class="num">${rows.indexOf(row) + 1}</td>`,
+      has: () => true,
+      label: labels.lineNumber,
+      numeric: false,
+    },
+    {
+      always: true,
+      cell: (row) =>
+        `<td class="mono">${escapeHtml(
+          row.kind === "order"
+            ? (row.order.referenceNumber ?? row.order.orderNumber)
+            : (row.line.referenceNumber ?? row.line.orderNumber ?? row.line.sourceReference ?? ""),
+        )}</td>`,
+      has: () => true,
+      label: labels.externalReference,
+      numeric: false,
+    },
     ...(showFullColumns
       ? [
-          { label: labels.cod, numeric: true },
-          { label: feeLabel, numeric: true },
+          textColumn(labels.deliveryDate, (row) =>
+            row.kind === "order" ? dateOnly(row.order.deliveryDate) : dateOnly(row.line.businessDate),
+          ),
         ]
       : []),
-    { label: labels.amountPaidNow, numeric: true },
+    textColumn(labels.customer, (row) => (row.kind === "order" ? row.order.customerName : row.line.customerName)),
+    textColumn(
+      labels.customerMobile,
+      (row) => (row.kind === "order" ? row.order.customerMobileNumber : row.line.customerMobileNumber),
+      "mono",
+    ),
+    textColumn(labels.emirate, (row) => {
+      const source = row.kind === "order" ? row.order : row.line;
+      return language === "ar" ? (source.emirateNameAr ?? source.emirateName ?? "") : (source.emirateName ?? "");
+    }),
+    textColumn(labels.area, (row) => {
+      const source = row.kind === "order" ? row.order : row.line;
+      return language === "ar" ? (source.areaNameAr ?? source.areaName ?? "") : (source.areaName ?? "");
+    }),
+    ...(showFullColumns
+      ? [
+          {
+            cell: (row: Row) =>
+              `<td class="num">${row.kind === "order" ? tableMoney(row.order.codAmount) : ZERO_CELL}</td>`,
+            has: (row: Row) => row.kind === "order" && nonZero(row.order.codAmount),
+            label: labels.cod,
+            numeric: true,
+          },
+          // Full invoice: a receivable deduction sits under the fee column.
+          {
+            cell: (row: Row) =>
+              row.kind === "order"
+                ? `<td class="num">${tableMoney(orderFee(row.order))}</td>`
+                : `<td class="num negative">${tableMoney(row.line.amountApplied, true)}</td>`,
+            has: (row: Row) => (row.kind === "order" ? nonZero(orderFee(row.order)) : nonZero(row.line.amountApplied)),
+            label: feeLabel,
+            numeric: true,
+          },
+          {
+            cell: (row: Row) =>
+              `<td class="num">${row.kind === "order" ? tableMoney(paidBefore(row.order)) : ZERO_CELL}</td>`,
+            has: (row: Row) => row.kind === "order" && nonZero(paidBefore(row.order)),
+            label: labels.previouslyPaid,
+            numeric: true,
+          },
+        ]
+      : []),
+    {
+      always: true,
+      // Compact invoice has no fee column, so a deduction shows as a negative
+      // Amount Paid Now -- the column still adds up to the summary.
+      cell: (row) =>
+        row.kind === "order"
+          ? `<td class="num">${tableMoney(row.order.amountPaidNow)}</td>`
+          : showFullColumns
+            ? `<td class="num">${ZERO_CELL}</td>`
+            : `<td class="num negative">${tableMoney(row.line.amountApplied, true)}</td>`,
+      has: () => true,
+      label: labels.amountPaidNow,
+      numeric: true,
+    },
+    ...(showFullColumns
+      ? [
+          {
+            cell: (row: Row) =>
+              `<td class="num">${row.kind === "order" ? tableMoney(remainingAfter(row.order)) : ZERO_CELL}</td>`,
+            has: (row: Row) => row.kind === "order" && nonZero(remainingAfter(row.order)),
+            label: labels.remainingOutstanding,
+            numeric: true,
+          },
+        ]
+      : []),
   ];
+  const visibleColumns = columns.filter((column) => column.always === true || rows.some(column.has));
+
+  // Money headers take `num` too, so a header and the figures beneath it
+  // resolve to the SAME edge (`text-align: end` resolves to LEFT under
+  // dir="rtl" while plain headers used `start`, i.e. right).
   const orderTable =
     `<table class="grid"><thead><tr>` +
-    headerColumns
+    visibleColumns
       .map((column) =>
         column.numeric
           ? `<th class="num">${escapeHtml(column.label)}</th>`
           : `<th>${escapeHtml(column.label)}</th>`,
       )
       .join("") +
-    `</tr></thead><tbody>${orderRows}`;
-
-  const deductionRows = data.receivableOffsets
-    .map(
-      (line, index) =>
-        "<tr>" +
-        `<td class="num">${data.orders.length + index + 1}</td>` +
-        `<td class="mono">${escapeHtml(line.orderNumber ?? line.sourceReference ?? "")}</td>` +
-        `<td class="mono">${escapeHtml(line.referenceNumber ?? "")}</td>` +
-        (showFullColumns ? `<td>${dateOnly(line.businessDate)}</td>` : "") +
-        `<td>${escapeHtml(line.customerName ?? "")}</td>` +
-        `<td class="mono">${escapeHtml(line.customerMobileNumber ?? "")}</td>` +
-        `<td>${escapeHtml(language === "ar" ? (line.emirateNameAr ?? line.emirateName ?? "") : (line.emirateName ?? ""))}</td>` +
-        `<td>${escapeHtml(language === "ar" ? (line.areaNameAr ?? line.areaName ?? "") : (line.areaName ?? ""))}</td>` +
-        // Full invoice: the deduction sits under Service Fee and Amount Paid
-        // Now shows 0.00. Compact invoice has no Service Fee column, so the
-        // deduction shows as a negative Amount Paid Now -- the column then
-        // still adds up to the summary's Amount Paid Now.
-        (showFullColumns
-          ? `<td class="num">${ZERO_CELL}</td>` +
-            `<td class="num negative">${tableMoney(line.amountApplied, true)}</td>` +
-            `<td class="num">${ZERO_CELL}</td>`
-          : `<td class="num negative">${tableMoney(line.amountApplied, true)}</td>`) +
-        // NOTE: the cell count must equal headerColumns.length (eleven full,
-        // eight compact). There was once a twelfth empty <td> here, so every
-        // deduction row was one cell wider than the head and the table laid
-        // out an extra 13px column -- the misalignment visible on SET-000011.
-        "</tr>",
-    )
+    `</tr></thead><tbody>`;
+  const combinedRows = rows
+    .map((row) => `<tr>${visibleColumns.map((column) => column.cell(row)).join("")}</tr>`)
     .join("");
-  const combinedRows = deductionRows;
 
   const headerMeta = (label: string, value: string, valueClass = "") =>
     `<div class="meta-item"><span class="meta-label">${escapeHtml(label)}</span>` +
@@ -525,24 +598,23 @@ export function buildTraderSettlementStatementHtml(
   const noticeSection =
     notices.length === 0 ? "" : `<div class="notices">${notices.join("")}</div>`;
 
+  const totalFees = new Decimal(data.summary.totalServiceFees)
+    .plus(data.summary.traderFeeDeductions)
+    .plus(totalAdditionalFees);
+  const totalPaidBefore = data.orders.reduce((sum, order) => sum.plus(paidBefore(order)), new Decimal(0));
+  const totalRemainingAfter = data.orders.reduce((sum, order) => sum.plus(remainingAfter(order)), new Decimal(0));
   const summaryLine = (label: string, value: string) =>
     `<div class="summary-line"><span>${escapeHtml(label)}</span><span>${value}</span></div>`;
   const totalDetailRows = data.orders.length + data.receivableOffsets.length;
   const summary =
     `<section class="summary-section">` +
     `<h2 class="section-title">${escapeHtml(labels.numberOfOrders)}: ${totalDetailRows}</h2>` +
-    (showFullColumns
-      ? summaryLine(labels.cod, money(data.summary.totalCod)) +
-        summaryLine(
-          feeLabel,
-          money(
-            new Decimal(data.summary.totalServiceFees)
-              .plus(data.summary.traderFeeDeductions)
-              .plus(totalAdditionalFees)
-              .toFixed(2),
-          ),
-        )
+    // A summary line that is 0.00 is left off, like an empty column; Amount
+    // Paid Now always prints.
+    (showFullColumns && nonZero(data.summary.totalCod)
+      ? summaryLine(labels.cod, money(data.summary.totalCod))
       : "") +
+    (showFullColumns && totalFees.gt(0) ? summaryLine(feeLabel, money(totalFees.toFixed(2))) : "") +
     ((data.creditApplications ?? []).length === 0
       ? ""
       : summaryLine(
@@ -551,7 +623,13 @@ export function buildTraderSettlementStatementHtml(
             .join(", ")})`,
           money(data.summary.traderCreditsApplied ?? "0.00"),
         )) +
+    (showFullColumns && totalPaidBefore.gt(0)
+      ? summaryLine(labels.previouslyPaid, money(totalPaidBefore.toFixed(2)))
+      : "") +
     summaryLine(labels.amountPaidNow, money(data.summary.netPayment)) +
+    (showFullColumns && totalRemainingAfter.gt(0)
+      ? summaryLine(labels.remainingOutstanding, money(totalRemainingAfter.toFixed(2)))
+      : "") +
     `</section>`;
 
   const signatures =
@@ -604,6 +682,9 @@ export function buildTraderSettlementStatementHtml(
        tabular-nums stacks the decimal points down the column. */
     table.grid td.num, table.grid th.num { text-align: start; white-space: nowrap;
       font-variant-numeric: tabular-nums; }
+    /* Money headings may wrap (the figures never do), so an invoice that
+       needs every column still fits A4 portrait. */
+    table.grid th.num { white-space: normal; }
     .negative { color: #a32626; }
     .muted { color: #8a8a8a; }
     .mono { font-variant-numeric: tabular-nums; }

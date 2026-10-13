@@ -96,15 +96,14 @@ const activeMoneyReceived = (
  * negative (SET-000057 showed -80.00): use what earlier, still-effective
  * Settlements had paid on the Order instead.
  */
-const previouslyPaidSql = (link: string, settlement: string) => {
+/**
+ * What earlier, still-effective (confirmed, not reversed) Settlements paid on
+ * the line's Order before this Settlement was created.
+ */
+const earlierEffectivePaidSql = (link: string, settlement: string) => {
   const l = sql.raw(link);
   const st = sql.raw(settlement);
-  return sql`case
-    when ${st}.reversal_of_id is null and not exists (
-      select 1 from trader_settlements prv_rv
-       where prv_rv.company_id = ${st}.company_id and prv_rv.reversal_of_id = ${st}.id
-    ) then o.trader_paid_amount - ${l}.allocated_amount
-    else coalesce((
+  return sql`coalesce((
       select sum(prv_l.allocated_amount)
         from trader_settlement_orders prv_l
         join trader_settlements prv_s
@@ -117,7 +116,34 @@ const previouslyPaidSql = (link: string, settlement: string) => {
            select 1 from trader_settlements prv_rv2
             where prv_rv2.company_id = prv_s.company_id and prv_rv2.reversal_of_id = prv_s.id
          )
-    ), 0)
+    ), 0)`;
+};
+
+const previouslyPaidSql = (link: string, settlement: string) => {
+  const l = sql.raw(link);
+  const st = sql.raw(settlement);
+  return sql`case
+    when ${st}.reversal_of_id is null and not exists (
+      select 1 from trader_settlements prv_rv
+       where prv_rv.company_id = ${st}.company_id and prv_rv.reversal_of_id = ${st}.id
+    ) then o.trader_paid_amount - ${l}.allocated_amount
+    else ${earlierEffectivePaidSql(link, settlement)}
+  end`;
+};
+
+/**
+ * What was still owed on the line's Order right AFTER this Settlement paid it
+ * -- fixed at that moment, unlike trader_outstanding_balance, which also drops
+ * with every later payment. ORD-000649 (104.00) was paid 60.00 on SET-000101
+ * and 44.00 on SET-000102: SET-000101 must keep reading 44.00 remaining after
+ * SET-000102 settled it. Reversal Settlements have no "remaining" of their own.
+ */
+const remainingAfterThisPaymentSql = (link: string, settlement: string) => {
+  const l = sql.raw(link);
+  const st = sql.raw(settlement);
+  return sql`case
+    when ${st}.reversal_of_id is not null then 0
+    else greatest(o.trader_net_payable - ${earlierEffectivePaidSql(link, settlement)} - ${l}.allocated_amount, 0)
   end`;
 };
 
@@ -278,6 +304,10 @@ export interface TraderSettlementDetailOrder {
   readonly previouslyPaid: string;
   readonly referenceNumber: string | null;
   readonly remainingOutstanding: string;
+  /** Paid on the Order by earlier, still-effective Settlements (printed invoice). */
+  readonly paidBeforeThisPayment?: string;
+  /** Owed on the Order right after THIS Settlement paid it (printed invoice). */
+  readonly remainingAfterThisPayment?: string;
   readonly serialNumber: string;
   readonly serviceFee: string;
   readonly totalDeductions: string;
@@ -2928,6 +2958,8 @@ export class TraderSettlementService {
         traderNetPayable: string;
         traderPaidAmount: string;
         previouslyPaid: string;
+        paidBeforeThisPayment: string;
+        remainingAfterThisPayment: string;
         vatAmount: string;
       }>`
         -- Order NUMBER as well as the Serial Number: the Serial is what the
@@ -2947,7 +2979,10 @@ export class TraderSettlementService {
                o.trader_outstanding_balance::text as "outstandingBalance",
                o.trader_settlement_status as "orderSettlementStatus",
                link.allocated_amount as "allocatedAmount",
-               (${previouslyPaidSql("link", "cur")})::text as "previouslyPaid"
+               (${previouslyPaidSql("link", "cur")})::text as "previouslyPaid",
+               (case when cur.reversal_of_id is not null then 0
+                     else ${earlierEffectivePaidSql("link", "cur")} end)::text as "paidBeforeThisPayment",
+               (${remainingAfterThisPaymentSql("link", "cur")})::text as "remainingAfterThisPayment"
           from trader_settlement_orders link
           join trader_settlements cur on cur.id = link.settlement_id and cur.company_id = link.company_id
           join orders o on o.id = link.order_id and o.company_id = link.company_id
@@ -2980,6 +3015,8 @@ export class TraderSettlementService {
       previouslyPaid: new Decimal(row.previouslyPaid).toFixed(2),
       referenceNumber: row.referenceNumber,
       remainingOutstanding: new Decimal(row.outstandingBalance).toFixed(2),
+      paidBeforeThisPayment: new Decimal(row.paidBeforeThisPayment).toFixed(2),
+      remainingAfterThisPayment: new Decimal(row.remainingAfterThisPayment).toFixed(2),
       orderNumber: row.orderNumber,
       orderType: row.orderType,
       customerMobileNumber: row.customerMobileNumber,

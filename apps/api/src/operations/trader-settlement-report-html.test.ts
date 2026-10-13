@@ -88,7 +88,8 @@ describe("buildTraderSettlementStatementHtml", () => {
     expect(html).toContain('lang="en"');
     expect(html).toContain("Trader Invoice");
     expect(html).toContain("SET-000123");
-    expect(html).toContain("ORD-000001");
+    // Reference Number replaces the Order Number column when present.
+    expect(html).not.toContain("ORD-000001");
     expect(html).toContain("REF-1");
     expect(html).toContain("REF-BANK-1");
     expect(html).toContain("Test Trader");
@@ -128,7 +129,8 @@ describe("buildTraderSettlementStatementHtml", () => {
     );
     expect(summary).not.toContain("المستحق الأصلي للتاجر");
     expect(html).toContain("شركة الاختبار");
-    expect(html).toContain("ORD-000001");
+    // Reference Number replaces the Order Number column when present.
+    expect(html).not.toContain("ORD-000001");
     expect(html).toContain("REF-1");
     expect(html).toContain("100.00");
   });
@@ -249,7 +251,7 @@ describe("buildTraderSettlementStatementHtml", () => {
     };
     const html = buildTraderSettlementStatementHtml(withDeduction, "en");
     expect(html).not.toContain("RCV-000123");
-    expect(html).toContain("ORD-FEE-1");
+    expect(html).toContain("1706");
     expect(html).toContain("1706");
     expect(html).not.toContain("SER-FEE-1");
     expect(html).not.toContain("Service fee owed by Trader");
@@ -348,7 +350,7 @@ describe("buildTraderSettlementStatementHtml", () => {
       // The COD (110.00) and fee (10.00) figures are gone; the paid amount stays.
       expect(html).not.toContain("110.00");
       expect(html).toContain("100.00");
-      expect(headerCells(html)).toBe(8);
+      expect(headerCells(html)).toBe(7);
     }
     const other = buildTraderSettlementStatementHtml(
       { ...sample, companyId: "4d9095cb-3da6-4b8b-9d8e-ff01f8192bdb" },
@@ -358,7 +360,7 @@ describe("buildTraderSettlementStatementHtml", () => {
     expect(other).toContain("COD Amount");
     expect(other).toContain("Service Fee");
     expect(other).toContain("110.00");
-    expect(headerCells(other)).toBe(11);
+    expect(headerCells(other)).toBe(10);
   });
 
   it("shows an XYZ Trader fee deduction as a negative Amount Paid Now with matching cell counts", () => {
@@ -383,18 +385,58 @@ describe("buildTraderSettlementStatementHtml", () => {
       summary: { ...sample.summary, netPayment: "75.00", traderFeeDeductions: "25.00" },
     };
     const html = buildTraderSettlementStatementHtml(xyzWithDeduction, "en");
-    expect(html).toContain("ORD-FEE-1");
+    expect(html).toContain("1706");
     expect(html).toContain("−25.00");
     expect(html).toContain("75.00");
     expect(html).not.toContain("2026-07-19");
     const body = html.split("<tbody>")[1]?.split("</tbody>")[0] ?? "";
     const rows = body.split("<tr>").slice(1);
     expect(rows).toHaveLength(2);
-    for (const row of rows) expect((row.match(/<td[ >]/g) ?? []).length).toBe(8);
+    for (const row of rows) expect((row.match(/<td[ >]/g) ?? []).length).toBe(7);
   });
 
   it("omits the notices section entirely for a plain, un-reversed, not-yet-received settlement", () => {
     const html = buildTraderSettlementStatementHtml(sample, "en");
     expect(html).not.toContain('<div class="notice');
+  });
+
+  // Per Aiman (13 Oct 2026): a column with no data on the invoice is left off;
+  // Order Number prints only in place of a missing Reference Number.
+  // ORD-000649 (104.00): 60.00 on SET-000101, 44.00 on SET-000102.
+  it("shows Previously Paid / Remaining Outstanding only when they have amounts, and hides empty columns", () => {
+    const cells = (html: string) => {
+      const head = html.slice(html.indexOf("<thead>"), html.indexOf("</thead>"));
+      const first = html.slice(html.indexOf("<tbody>") + 7, html.indexOf("</tr>", html.indexOf("<tbody>")));
+      return [(head.match(/<th[\s>]/g) ?? []).length, (first.match(/<td[\s>]/g) ?? []).length];
+    };
+    const first: TraderSettlementReportData = {
+      ...sample,
+      orders: [{ ...sample.orders[0]!, amountPaidNow: "60.00", paidBeforeThisPayment: "0.00", remainingAfterThisPayment: "44.00" }],
+    };
+    const firstHtml = buildTraderSettlementStatementHtml(first, "en");
+    expect(firstHtml).toContain("Remaining Outstanding");
+    expect(firstHtml).not.toContain("Previously Paid");
+    const [h1, d1] = cells(firstHtml);
+    expect(d1).toBe(h1);
+
+    const second: TraderSettlementReportData = {
+      ...sample,
+      orders: [{ ...sample.orders[0]!, amountPaidNow: "44.00", paidBeforeThisPayment: "60.00", remainingAfterThisPayment: "0.00" }],
+    };
+    const secondHtml = buildTraderSettlementStatementHtml(second, "ar");
+    expect(secondHtml).toContain("مدفوع سابقاً");
+    expect(secondHtml).not.toContain("الرصيد المتبقي");
+
+    // No customer, mobile, emirate or area on any row: those columns go; no
+    // Reference: the Order Number prints in its place.
+    const bare: TraderSettlementReportData = {
+      ...sample,
+      orders: [{ ...sample.orders[0]!, areaName: "", customerMobileNumber: "", customerName: "", emirateName: null, referenceNumber: null }],
+    };
+    const bareHtml = buildTraderSettlementStatementHtml(bare, "en");
+    for (const label of ["Customer", "Customer Mobile", "Emirate", "Area"]) expect(bareHtml).not.toContain(`>${label}</th>`);
+    expect(bareHtml).toContain("ORD-000001");
+    const [h3, d3] = cells(bareHtml);
+    expect(d3).toBe(h3);
   });
 });
