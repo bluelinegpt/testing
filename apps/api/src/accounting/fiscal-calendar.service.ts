@@ -104,15 +104,18 @@ export class FiscalCalendarService {
             ${record.startDate}::date, ${record.endDate}::date, interval '1 month'
           ) period_start
       )
+      -- Periods open at creation (Aiman, 13 Oct 2026): a new fiscal year --
+      -- created by hand or by the year-end close -- is immediately postable,
+      -- so entries dated in it never fail for want of an open period.
       insert into accounting_periods (
         company_id, fiscal_year_id, period_number, period_code, name,
         period_start, period_end, status, is_adjustment_period,
-        created_by_account_id
+        created_by_account_id, opened_at, opened_by_account_id
       )
       select ${companyId}::uuid, ${input.fiscalYearId}::uuid, period_number,
              ${prefix} || '-P' || lpad(period_number::text, 2, '0'),
              'Period ' || period_number::text, period_start, period_end,
-             'future', false, ${actorId}::uuid
+             'open', false, ${actorId}::uuid, now(), ${actorId}::uuid
         from generated
       returning id, period_number as "periodNumber", period_code as "periodCode",
                 name, period_start::text as "startDate", period_end::text as "endDate",
@@ -198,12 +201,12 @@ export class FiscalCalendarService {
           insert into accounting_periods (
             id, company_id, fiscal_year_id, period_number, period_code, name,
             period_start, period_end, status, is_adjustment_period,
-            created_by_account_id
+            created_by_account_id, opened_at, opened_by_account_id
           ) values (
             ${id}::uuid, ${companyId}::uuid, ${input.fiscalYearId}::uuid,
             ${input.periodNumber}, ${input.periodCode.trim()}, ${input.name.trim()},
-            ${input.startDate}::date, ${input.endDate}::date, 'future',
-            ${input.isAdjustmentPeriod ?? false}, ${actorId}::uuid
+            ${input.startDate}::date, ${input.endDate}::date, 'open',
+            ${input.isAdjustmentPeriod ?? false}, ${actorId}::uuid, now(), ${actorId}::uuid
           )
           returning id, fiscal_year_id as "fiscalYearId", period_number as "periodNumber",
                     period_code as "periodCode", name, period_start::text as "startDate",

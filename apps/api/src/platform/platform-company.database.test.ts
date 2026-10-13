@@ -482,17 +482,12 @@ describe.skipIf(!runTests)("Platform Company onboarding", () => {
           expect(periods[1]?.period_end).toBe(
             `${thisYear}-02-${String(februaryEnd).padStart(2, "0")}`,
           );
-          // Every OTHER period is created `future`: opening a period ahead of
-          // its own time is an accounting decision with a posting
-          // consequence, not something onboarding makes silently. The one
-          // period covering the Company's own creation date is `open` --
-          // there is nothing to decide about whether today can post.
-          const today = new Date().toISOString().slice(0, 10);
+          // Every period of the year is created `open` (13 Oct 2026), so an
+          // entry dated in any month posts without a manual "open period"
+          // step. Closing a month remains the deliberate control.
           for (const period of periods) {
-            const isTodaysPeriod = today >= period.period_start && today <= period.period_end;
-            expect(period.status).toBe(isTodaysPeriod ? "open" : "future");
+            expect(period.status).toBe("open");
           }
-          expect(periods.filter((period) => period.status === "open")).toHaveLength(1);
 
           // Every period belongs to THIS Company's fiscal year.
           const strayPeriods = (

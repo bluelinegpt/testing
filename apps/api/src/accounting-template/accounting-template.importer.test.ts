@@ -66,14 +66,11 @@ describe("Accounting template importer rules", () => {
     expect(source).toContain("template.fiscalPolicy.periodsPerYear");
   });
 
-  it("opens only the period covering the Company's own creation date", () => {
-    // Opening a period ahead of its own time has a posting consequence;
-    // onboarding does not make that decision for periods that have not
-    // arrived yet -- but the one period covering "today" is not a decision
-    // left open, it is simply when the Company starts.
-    expect(source).toContain('input.effectiveFrom >= periodStart && input.effectiveFrom <= periodEnd');
-    expect(source).toContain('? "open"');
-    expect(source).toContain(': "future"');
+  it("opens every period of the new Company's fiscal year (13 Oct 2026)", () => {
+    // Entries dated in any month of the year must post without someone first
+    // opening that month by hand; closing a month stays the deliberate step.
+    expect(source).toContain('const status = "open";');
+    expect(source).not.toContain(': "future"');
   });
 
   it("lets the Company override the template business-day default", () => {
