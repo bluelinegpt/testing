@@ -61,6 +61,20 @@ export class AccountingEventListQueryDto {
   @MaxLength(100)
   public readonly eventType?: string;
 
+  // The Accounting Events screen sends both of these as filters (its search
+  // box is `sourceReference`). They were missing here, so the global
+  // whitelist rejected every search with "property sourceReference should not
+  // exist" and the list failed to load (13 Oct 2026).
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  public readonly sourceReference?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  public readonly failureCategory?: string;
+
   @IsOptional()
   @IsDateString()
   public readonly dateFrom?: string;

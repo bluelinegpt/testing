@@ -133,6 +133,40 @@ export class AccountingEventQueryService {
          and (${query.status ?? null}::text is null or e.processing_status=${query.status ?? null})
          and (${query.area ?? null}::text is null or e.operational_area=${query.area ?? null})
          and (${query.eventType ?? null}::text is null or e.event_type=${query.eventType ?? null})
+         -- One search box: the Event's own reference (REC-, SET-, ORD-, RCV-)
+         -- OR the Order Number / Order Reference Number of an Order the Event
+         -- is about -- directly, or through the Driver Collection, Trader
+         -- Settlement, Driver Fee or Receivable that carries it. Every join is
+         -- Company-scoped.
+         and (${query.sourceReference?.trim() || null}::text is null
+           or e.source_reference ilike '%' || ${query.sourceReference?.trim() || null} || '%'
+           or exists (
+             select 1 from orders so
+              where so.company_id=e.company_id
+                and (so.reference_number ilike '%' || ${query.sourceReference?.trim() || null} || '%'
+                  or so.order_number ilike '%' || ${query.sourceReference?.trim() || null} || '%')
+                and (
+                  (e.source_entity_type='order' and so.id=e.source_entity_id)
+                  or (e.source_entity_type='driver_reconciliation' and exists (
+                    select 1 from driver_reconciliation_orders dro
+                     where dro.company_id=e.company_id and dro.reconciliation_id=e.source_entity_id
+                       and dro.order_id=so.id))
+                  or (e.source_entity_type='trader_settlement' and exists (
+                    select 1 from trader_settlement_orders tso
+                     where tso.company_id=e.company_id and tso.settlement_id=e.source_entity_id
+                       and tso.order_id=so.id))
+                  or (e.source_entity_type='outsourced_driver_fee_accrual' and exists (
+                    select 1 from outsourced_driver_fee_accruals fa
+                     where fa.company_id=e.company_id and fa.id=e.source_entity_id
+                       and fa.order_id=so.id))
+                  or (e.source_entity_type='trader_receivable' and exists (
+                    select 1 from trader_receivables tr
+                     where tr.company_id=e.company_id and tr.id=e.source_entity_id
+                       and tr.source_reference=so.order_number))
+                )
+           ))
+         and (${query.failureCategory?.trim() || null}::text is null
+           or e.failure_category=${query.failureCategory?.trim() || null})
          and (${query.dateFrom ?? null}::date is null or e.effective_accounting_date>=${query.dateFrom ?? null}::date)
          and (${query.dateTo ?? null}::date is null or e.effective_accounting_date<=${query.dateTo ?? null}::date)
        -- Requested sort first, then the deterministic tail. Both fall to
