@@ -225,15 +225,8 @@ export class DriverShipmentManifestService {
     ]);
     const identity = this.identities.current();
     const { driverId, orders } = await this.resolveOrders(companyId, input);
-    const cancelledOrders = orders.filter((order) => order.deliveryStatus === "cancelled");
-    if (cancelledOrders.length > 0) {
-      throw new ApplicationException(
-        "manifest_order_cancelled",
-        "Cancelled Orders cannot be included in a Driver shipment manifest",
-        HttpStatus.CONFLICT,
-        cancelledOrders.map((order) => order.orderNumber),
-      );
-    }
+    // No status restriction (Aiman, 13 Oct 2026): every Order prints on the
+    // Manifest as a normal row, Cancelled included.
     const driverResult = await sql<{
       driverType: "employee" | "outsourced";
       mobileNumber: string;

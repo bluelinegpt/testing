@@ -398,17 +398,13 @@ describe.skipIf(!runHttpTests)("reconciliation HTTP boundary", () => {
           expect(mixedDrivers.status).toBe(409);
           expect(mixedDrivers.body.error?.code).toBe("manifest_driver_mismatch");
 
-          // A Cancelled Order is rejected and named in the details.
+          // A Cancelled Order prints like any other status -- no restriction.
           const withCancelled = await post(
             admin.token,
             "/operations/cash/driver-shipment-manifest/data",
             { orderIds: [manifestOrderOne, manifestOrderCancelled], selectionMode: "ids" },
-          );
-          expect(withCancelled.status).toBe(409);
-          expect(withCancelled.body.error?.code).toBe("manifest_order_cancelled");
-          expect(withCancelled.body.error?.details).toEqual(
-            expect.arrayContaining([expect.stringContaining("HTTP-")]),
-          );
+          ).expect(201);
+          expect(withCancelled.body.summary.totalOrders).toBe(2);
 
           // A valid same-Driver selection returns real, server-computed totals.
           const manifestData = await post(
