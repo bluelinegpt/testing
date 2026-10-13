@@ -1497,11 +1497,22 @@ export function OrdersModuleWorkspace({
     const first = group.orders[0];
     if (filters.question === "" || first === undefined) return null;
     const orderIds = group.orders.map((order) => order.id);
+    /* Come back to THIS view -- the question and its filters -- not to a bare
+       /orders. The saved list state deliberately does not restore a question,
+       so returning to /orders dropped it: the group button vanished and the
+       "1 of 2" receipt flow could not move on to the next settlement
+       (13 Oct 2026). */
+    const returnPath = `/orders${location.search}`;
+    const back = encodeURIComponent(returnPath);
     if (filters.question === "collect_from_driver" && group.key.startsWith("driver:")) {
       if (!canReconcile || !first.assignedDriverId) return null;
       return {
         label: t("operations.questions.groupAction.collect"),
-        path: collectFromDriverPath({ driverId: first.assignedDriverId, orderIds }),
+        path: collectFromDriverPath({
+          driverId: first.assignedDriverId,
+          orderIds,
+          returnTo: returnPath,
+        }),
       };
     }
     if (!group.key.startsWith("trader:") || !first.traderId) return null;
@@ -1509,7 +1520,7 @@ export function OrdersModuleWorkspace({
     if (filters.question === "pay_trader" && canSettle) {
       return {
         label: t("operations.questions.groupAction.settle"),
-        path: `/trader-settlements?openDialog=new_settlement&traderId=${traderId}&returnTo=%2Forders`,
+        path: `/trader-settlements?openDialog=new_settlement&traderId=${traderId}&returnTo=${back}`,
       };
     }
     if (filters.question === "confirm_trader_receipt" && canSettle) {
@@ -1533,14 +1544,14 @@ export function OrdersModuleWorkspace({
             : t("operations.questions.groupAction.confirmReceipt"),
         path:
           settlementId === undefined
-            ? `/trader-settlements?openDialog=confirm_receipt&traderId=${traderId}&returnTo=%2Forders`
-            : `/trader-settlements?openDialog=confirm_receipt&traderId=${traderId}&settlementId=${encodeURIComponent(settlementId)}&returnTo=%2Forders`,
+            ? `/trader-settlements?openDialog=confirm_receipt&traderId=${traderId}&returnTo=${back}`
+            : `/trader-settlements?openDialog=confirm_receipt&traderId=${traderId}&settlementId=${encodeURIComponent(settlementId)}&returnTo=${back}`,
       };
     }
     if (filters.question === "trader_owes_fees") {
       return {
         label: t("operations.questions.groupAction.collectFees"),
-        path: `/trader-receivables?collectTraderId=${traderId}&returnTo=%2Forders`,
+        path: `/trader-receivables?collectTraderId=${traderId}&returnTo=${back}`,
       };
     }
     return null;

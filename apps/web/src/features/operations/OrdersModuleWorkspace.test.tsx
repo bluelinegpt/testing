@@ -1564,7 +1564,7 @@ describe("OrdersModuleWorkspace", () => {
     fireEvent.click(questions.getByRole("button", { name: /Waiting payment to trader/u }));
     fireEvent.click(await screen.findByRole("button", { name: "New settlement for this trader" }));
     expect(onNavigate).toHaveBeenLastCalledWith(
-      "/trader-settlements?openDialog=new_settlement&traderId=30000000-0000-4000-8000-000000000001&returnTo=%2Forders",
+      "/trader-settlements?openDialog=new_settlement&traderId=30000000-0000-4000-8000-000000000001&returnTo=%2Forders%3FquickView%3Dai%26question%3Dpay_trader",
     );
   });
 
@@ -1619,7 +1619,7 @@ describe("OrdersModuleWorkspace", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Confirm receipt for this trader" }));
     expect(onNavigate).toHaveBeenLastCalledWith(
-      "/trader-settlements?openDialog=confirm_receipt&traderId=30000000-0000-4000-8000-000000000001&settlementId=50000000-0000-4000-8000-000000000001&returnTo=%2Forders",
+      "/trader-settlements?openDialog=confirm_receipt&traderId=30000000-0000-4000-8000-000000000001&settlementId=50000000-0000-4000-8000-000000000001&returnTo=%2Forders%3FquickView%3Dai%26question%3Dconfirm_trader_receipt",
     );
   });
 
