@@ -669,6 +669,33 @@ describe("OrdersModuleWorkspace", () => {
     expect(await screen.findByText("فيصل عبايا")).toBeInTheDocument();
   });
 
+  it("lets a Cancelled Order be returned to the Trader, with a reason", async () => {
+    const cancelledOrder = {
+      ...heldOrder,
+      deliveryStatus: "cancelled",
+      driverReconciliationStatus: "not_applicable",
+      returnStatus: "not_applicable",
+      traderSettlementStatus: "not_eligible",
+    };
+    const api = {
+      get: vi.fn((path: string) => {
+        if (path.startsWith("operations/orders?")) {
+          return Promise.resolve({ filteredCount: 1, items: [cancelledOrder], page: 1, pageSize: 25, totalCount: 1 });
+        }
+        if (path.startsWith("configuration/areas")) return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+        return Promise.resolve([]);
+      }),
+      patch: vi.fn().mockResolvedValue({}),
+      post: vi.fn().mockResolvedValue({}),
+    };
+    renderWithRouter(
+      <OrdersModuleWorkspace api={api as unknown as ApiClient} onNavigate={vi.fn()} permissions={["users_roles.manage"]} />,
+    );
+    await screen.findByLabelText("Select Order SER-000002");
+    fireEvent.click(screen.getByRole("button", { name: "Order actions" }));
+    expect(screen.getByRole("button", { name: "Return to trader" })).toBeInTheDocument();
+  });
+
   it("does not offer Trader Returned Items for an Order that is not returned", async () => {
     const api = {
       get: vi.fn((path: string) => {

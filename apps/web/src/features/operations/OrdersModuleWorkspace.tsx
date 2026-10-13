@@ -6418,6 +6418,9 @@ function availableActions(order: OperationsOrder): readonly RowAction[] {
         ];
       case "collect_order":
         return order.assignedDriverId === null ? ["assignDriver"] : ["close"];
+      // A Cancelled Order's goods still go back to the Trader (13 Oct 2026).
+      case "cancelled":
+        return ["returnToTrader"];
       default:
         return [];
     }

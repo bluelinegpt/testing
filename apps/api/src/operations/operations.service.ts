@@ -6289,6 +6289,11 @@ export class OperationsService {
         returned_to_branch: ["in_branch", "out_for_delivery", "returned_to_trader"],
         returned_to_trader: ["closed"],
         collect_order: ["closed"],
+        // The goods of a Cancelled Order still have to go back to the Trader
+        // (Aiman, 13 Oct 2026). Office only; a reason is required as for any
+        // return. Money is unaffected: the Order stays not eligible for
+        // settlement and its Driver Cash not applicable.
+        cancelled: ["returned_to_trader"],
       };
       // A Driver User gets exactly the narrow set a genuine Driver gets here
       // too — never the broader Operator lifecycle, regardless of holding

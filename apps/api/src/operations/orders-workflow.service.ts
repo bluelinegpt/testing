@@ -483,7 +483,7 @@ export class OrdersWorkflowService {
       in_branch: ["new", "out_for_delivery", "returned_to_branch"],
       out_for_delivery: ["assigned_to_driver", "hold", "in_branch", "returned_to_branch"],
       returned_to_branch: ["out_for_delivery"],
-      returned_to_trader: ["in_branch", "returned_to_branch", "hold"],
+      returned_to_trader: ["in_branch", "returned_to_branch", "hold", "cancelled"],
     };
     if (target in from) {
       if (from[target]?.includes(order.deliveryStatus) !== true) {
