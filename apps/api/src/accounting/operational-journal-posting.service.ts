@@ -42,10 +42,14 @@ export class OperationalJournalPostingService {
     @Inject(OperationsHistoryWriter) private readonly history: OperationsHistoryWriter,
   ) {}
 
+  /**
+   * Posts the Event's Journal, or returns `null` when the Event has nothing to
+   * post and was settled as `ignored_no_accounting_required` instead.
+   */
   public async process(
     database: Kysely<DatabaseSchema>,
     event: OperationalAccountingEventRecord,
-  ): Promise<{ readonly journalId: string; readonly journalNumber: string }> {
+  ): Promise<{ readonly journalId: string; readonly journalNumber: string } | null> {
     if (event.reversalOfEventId !== null) return this.reverse(database, event);
     if (event.eventType.endsWith("_reversed") || event.eventType === "order_recognition_reversed") {
       throw new ApplicationException(
@@ -56,6 +60,19 @@ export class OperationalJournalPostingService {
     }
     const facts = await this.sources.load(database, event);
     this.assertAccountingDate(event, facts);
+    // A Driver Collection that moved no money (e.g. one Order with COD 0 where
+    // the Trader pays the fee: no payment, no deduction, no expense) has no
+    // components. It is a valid operation, not a broken one, but an empty
+    // Journal can never balance -- so it used to fail as
+    // accounting_event_not_balanced, could not be cleared by Reprocess, and
+    // blocked the month-end close check (Lahthza REC-000091 / REC-000093,
+    // 11 Oct 2026). Settle it as "no accounting required" instead.
+    // Deliberately limited to Driver Collections: an empty source for any
+    // other Event type still fails loudly.
+    if (event.eventType === "driver_collection_confirmed" && facts.components.length === 0) {
+      await this.settleWithoutJournal(database, event, "driver_collection_no_money_moved");
+      return null;
+    }
     const hash = this.eventHash(event, facts);
     await this.persistCanonicalEvent(database, event, facts, hash);
     const period = await this.fiscalContext(database, event.companyId, facts.accountingDate);
@@ -128,8 +145,17 @@ export class OperationalJournalPostingService {
   private async reverse(
     database: Kysely<DatabaseSchema>,
     event: OperationalAccountingEventRecord,
-  ): Promise<{ readonly journalId: string; readonly journalNumber: string }> {
+  ): Promise<{ readonly journalId: string; readonly journalNumber: string } | null> {
     const actorId = this.actor(event);
+    // The original needed no Journal, so neither does its reversal.
+    const originalStatus = await sql<{ status: string }>`
+      select processing_status as status from accounting_events
+       where id=${event.reversalOfEventId}::uuid and company_id=${event.companyId}::uuid
+    `.execute(database);
+    if (originalStatus.rows[0]?.status === "ignored_no_accounting_required") {
+      await this.settleWithoutJournal(database, event, "original_required_no_accounting");
+      return null;
+    }
     const originalResult = await sql<{
       businessDate: string;
       description: string;
@@ -407,6 +433,37 @@ export class OperationalJournalPostingService {
         )
       `.execute(database);
     }
+  }
+
+  /**
+   * Marks an Event `ignored_no_accounting_required` -- a status the schema and
+   * the month-end readiness check already recognise as settled -- and records
+   * why, with an audit entry, so the decision is visible rather than silent.
+   */
+  private async settleWithoutJournal(
+    database: Kysely<DatabaseSchema>,
+    event: OperationalAccountingEventRecord,
+    reason: string,
+  ): Promise<void> {
+    await sql`
+      update accounting_events
+         set processing_status='ignored_no_accounting_required',
+             processed_at=now(),processing_locked_at=null,processing_locked_by=null,
+             error_code=null,failure_category=null,safe_error_summary=null,
+             next_attempt_at=null,
+             supplementary_metadata=supplementary_metadata ||
+               ${JSON.stringify({ noAccountingRequired: reason })}::jsonb
+       where id=${event.id}::uuid and company_id=${event.companyId}::uuid
+    `.execute(database);
+    await this.history.audit(database, {
+      action: "accounting.operational_event.no_accounting_required",
+      actorId: this.actor(event),
+      after: { eventId: event.id, eventType: event.eventType, reason },
+      companyId: event.companyId,
+      correlationId: event.correlationId,
+      subjectId: event.id,
+      subjectType: "accounting_event",
+    });
   }
 
   private assertBalanced(lines: readonly ResolvedOperationalLine[]): void {
