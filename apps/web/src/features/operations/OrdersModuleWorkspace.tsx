@@ -4190,12 +4190,18 @@ export function OrderDetailsWorkspace({
     permissions.includes("settlements.create") || permissions.includes("users_roles.manage");
   const canSettle =
     permissions.includes("settlements.create") || permissions.includes("users_roles.manage");
+  // "Collect from Trader" means the Trader's open Receivable -- not the
+  // customer's COD, which the driver collects. ORD-000920 (14 Oct 2026) showed
+  // "Collect from Trader AED 16" (the customer's COD) while the Trader actually
+  // owed 516 on RCV-000047.
+  const amountFromTrader = Number(detail.traderReceivableOutstanding ?? 0);
   const financialStatus = (() => {
-    const amountToCollect = Number(detail.customerAmountDue ?? 0);
+    const amountToCollect = amountFromTrader;
     const amountDueToTrader = Number(detail.traderNetPayable ?? 0);
     const isFree =
       detail.isFreeOrder === true ||
       (amountToCollect === 0 &&
+        Number(detail.customerAmountDue ?? 0) === 0 &&
         amountDueToTrader === 0 &&
         Number(detail.codAmount ?? 0) === 0 &&
         Number(detail.serviceFee ?? 0) === 0 &&
@@ -4393,7 +4399,7 @@ export function OrderDetailsWorkspace({
         <span>{t(`operations.financialBanner.${financialStatus}.description`)}</span>
         <small>
           {t("operations.financialBanner.amounts", {
-            collect: money(detail.customerAmountDue, locale),
+            collect: money(amountFromTrader.toFixed(2), locale),
             pay: money(detail.traderNetPayable, locale),
           })}
         </small>

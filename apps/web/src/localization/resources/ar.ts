@@ -2787,7 +2787,7 @@ export const arabicTranslations = {
       pay: { title: "يلزم الدفع — دفع للتاجر", description: "يوجد مبلغ مستحق للتاجر على هذا الطلب." },
       collect: { title: "يلزم التحصيل — تحصيل من التاجر", description: "يوجد مبلغ مستحق التحصيل من التاجر على هذا الطلب." },
       both: { title: "يلزم الدفع والتحصيل", description: "يوجد مبلغ مستحق للتاجر ومبلغ مستحق التحصيل منه." },
-      amounts: "للتحصيل: {{collect}} · للدفع للتاجر: {{pay}}",
+      amounts: "للتحصيل من التاجر: {{collect}} · للدفع للتاجر: {{pay}}",
     },
     traderReportSelectOne: "اختر طلباً واحداً فقط لفتح التقرير",
     traderCollectionReportUnavailable: "لا يوجد تقرير تحصيل مؤكد مرتبط بهذا الطلب",

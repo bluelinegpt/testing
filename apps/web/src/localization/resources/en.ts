@@ -2792,7 +2792,7 @@ export const englishTranslations = {
       pay: { title: "Payment Required — Pay Trader", description: "The order has an outstanding amount due to the Trader." },
       collect: { title: "Collection Required — Collect from Trader", description: "The order has an outstanding amount to collect from the Trader." },
       both: { title: "Payment and Collection Required", description: "This order has amounts payable to and collectible from the Trader." },
-      amounts: "To collect: {{collect}} · To pay Trader: {{pay}}",
+      amounts: "To collect from Trader: {{collect}} · To pay Trader: {{pay}}",
     },
     traderReportSelectOne: "Select exactly one order to open a report",
     traderCollectionReportUnavailable: "No confirmed Trader collection report is linked to this order",
