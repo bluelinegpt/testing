@@ -46,7 +46,7 @@ import { activeStatusPredicate, customOrderViewPredicate } from "./order-view-pr
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
-import { normalizeReferenceTerm, unifiedOrderSearchPredicate } from "./order-search.js";
+import { exactReferenceTerms, unifiedOrderSearchPredicate } from "./order-search.js";
 import { mapPublicTrackingStatus } from "./public-tracking-status.js";
 import { traderCommerceOrderScopePairs } from "./trader-commerce-order-scope.js";
 import { mobileComparisonKey, normalizeUaeMobile } from "../shared/uae-mobile.js";
@@ -1153,7 +1153,7 @@ export class OperationsService {
     const referenceNumber = this.optionalFilter(filters.referenceNumber);
     // Normalised to match how reference_number_normalized is stored, so the
     // deprecated filter reaches the same index the unified search uses.
-    const referenceTerm = referenceNumber === null ? null : normalizeReferenceTerm(referenceNumber);
+    const referenceTerms = exactReferenceTerms(referenceNumber);
     const serialNumber = this.optionalFilter(filters.serialNumber);
     const serialTerm = serialNumber === null ? null : this.normalizeOrderIdentifier(serialNumber);
     const deliveryStatusPredicate = deliveryStatusFilterPredicate(filters.deliveryStatus);
@@ -1366,8 +1366,11 @@ export class OperationsService {
       -- normalised column so it uses the trigram index instead of scanning, and
       -- leading zeros in values like '000123' still survive because the
       -- normalisation lower-cases and trims but never casts to a number.
-      and (${referenceTerm}::text is null
-           or o.reference_number_normalized like '%' || ${referenceTerm}::text || '%')
+      -- "Reference No. only" box (Aiman, 19 Oct 2026): EXACT match, never
+      -- contains -- "28" must not find 4328. A comma list ("7552, 7554") or
+      -- a pasted column matches any of its values, each exactly.
+      and (${referenceTerms}::text[] is null
+           or o.reference_number_normalized = any(${referenceTerms}::text[]))
       and (${serialTerm}::text is null
            or o.serial_number_normalized = ${serialTerm}::text)
       and ${unifiedOrderSearchPredicate(search)}
@@ -1840,7 +1843,7 @@ export class OperationsService {
     const referenceNumber = this.optionalFilter(filters.referenceNumber);
     // Normalised to match how reference_number_normalized is stored, so the
     // deprecated filter reaches the same index the unified search uses.
-    const referenceTerm = referenceNumber === null ? null : normalizeReferenceTerm(referenceNumber);
+    const referenceTerms = exactReferenceTerms(referenceNumber);
     const serialNumber = this.optionalFilter(filters.serialNumber);
     const serialTerm = serialNumber === null ? null : this.normalizeOrderIdentifier(serialNumber);
     const deliveryStatusPredicate = deliveryStatusFilterPredicate(filters.deliveryStatus);
@@ -1957,8 +1960,8 @@ export class OperationsService {
       where o.company_id = ${companyId}::uuid
         -- The same two fragments as the list, so an export reproduces exactly
         -- what the operator saw on screen.
-      and (${referenceTerm}::text is null
-             or o.reference_number_normalized like '%' || ${referenceTerm}::text || '%')
+      and (${referenceTerms}::text[] is null
+             or o.reference_number_normalized = any(${referenceTerms}::text[]))
         and (${serialTerm}::text is null
              or o.serial_number_normalized = ${serialTerm}::text)
         and ${unifiedOrderSearchPredicate(search)}

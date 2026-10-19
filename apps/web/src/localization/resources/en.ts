@@ -2665,6 +2665,8 @@ export const englishTranslations = {
       "Search by Order No., Serial No., Reference No., Customer Name, or Mobile — press Enter",
     searchOrdersListHint:
       "Several Order or Reference Numbers? Separate them with commas (or paste a column from Excel) to find exact matches, up to 200.",
+    searchReferenceNumber: "Search by reference number",
+    searchReferenceNumberPlaceholder: "Reference No. only — press Enter",
     searchSerialNumber: "Search by serial number",
     searchSerialNumberPlaceholder: "Serial No. only — press Enter",
     selectArea: "Select an area",

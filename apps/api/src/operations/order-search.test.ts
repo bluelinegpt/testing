@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeReferenceTerm, unifiedOrderSearchPredicate } from "./order-search.js";
+import { exactReferenceTerms, normalizeReferenceTerm, unifiedOrderSearchPredicate } from "./order-search.js";
 
 /**
  * What the unified search term turns into.
@@ -161,5 +161,16 @@ describe("unified order search predicate", () => {
     expect(sqlText).toContain("drop table orders");
     expect(sqlText).not.toContain("; drop table orders --'");
     expect(parameters(hostile)).toContain(hostile);
+  });
+});
+
+describe("exactReferenceTerms (Orders 'Reference No. only' box)", () => {
+  it("matches one value exactly, keeps leading zeros, and splits comma lists", () => {
+    expect(exactReferenceTerms("")).toBeNull();
+    expect(exactReferenceTerms("  ")).toBeNull();
+    expect(exactReferenceTerms(" 28 ")).toEqual(["28"]);
+    expect(exactReferenceTerms("04991")).toEqual(["04991"]);
+    expect(exactReferenceTerms("7552, 7554\n4263")).toEqual(["7552", "7554", "4263"]);
+    expect(exactReferenceTerms("ABC-1")).toEqual(["abc-1"]);
   });
 });

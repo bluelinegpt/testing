@@ -2661,6 +2661,8 @@ export const arabicTranslations = {
       "ابحث برقم الطلب أو التسلسلي أو المرجعي أو اسم العميل أو الهاتف — اضغط Enter",
     searchOrdersListHint:
       "لعدة أرقام طلبات أو أرقام مرجعية افصل بينها بفواصل (أو الصق عموداً من Excel) للبحث عن تطابق تام، بحد أقصى 200 قيمة.",
+    searchReferenceNumber: "البحث برقم المرجع",
+    searchReferenceNumberPlaceholder: "رقم المرجع فقط — اضغط Enter",
     searchSerialNumber: "البحث بالرقم التسلسلي",
     searchSerialNumberPlaceholder: "الرقم التسلسلي فقط — اضغط Enter",
     selectArea: "اختر منطقة",

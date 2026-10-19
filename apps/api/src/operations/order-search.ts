@@ -57,6 +57,18 @@ export function normalizeReferenceTerm(term: string): string {
   return term.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase("en-US");
 }
 
+/**
+ * The Orders "Reference No. only" filter: the exact normalised references to
+ * match, or null when the box is empty. One value, or a list ("7552, 7554" or
+ * one per line); every value is matched EXACTLY (leading zeros kept).
+ */
+export function exactReferenceTerms(term: string | null | undefined): string[] | null {
+  const trimmed = term?.trim() ?? "";
+  if (trimmed === "") return null;
+  const values = isSearchList(trimmed) ? splitSearchList(trimmed) : [trimmed];
+  return values.length === 0 ? null : values.map(normalizeReferenceTerm);
+}
+
 /** True when the term is worth spending the mobile branch on. */
 function looksLikeMobile(term: string): boolean {
   // Digits, with optional leading + and separators people paste from contacts.

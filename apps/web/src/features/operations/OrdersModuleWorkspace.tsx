@@ -531,7 +531,7 @@ export function OrdersModuleWorkspace({
   const [searchText, setSearchText] = useState(filters.search);
   // Seeded from the URL-backed filter like the main search box, so returning
   // from an Order shows the serial filter that is still applied.
-  const [serialSearchText, setSerialSearchText] = useState(filters.serialNumber);
+  const [referenceSearchText, setReferenceSearchText] = useState(filters.referenceNumber);
   const [filterArea, setFilterArea] = useState<CompanyArea>();
   const [drivers, setDrivers] = useState<readonly OperationsDriver[]>([]);
   const [traders, setTraders] = useState<readonly OperationsTrader[]>([]);
@@ -1156,10 +1156,10 @@ export function OrdersModuleWorkspace({
     setSearchText((current) => (current === filters.search ? current : filters.search));
   }, [filters.search]);
   useEffect(() => {
-    setSerialSearchText((current) =>
-      current === filters.serialNumber ? current : filters.serialNumber,
+    setReferenceSearchText((current) =>
+      current === filters.referenceNumber ? current : filters.referenceNumber,
     );
-  }, [filters.serialNumber]);
+  }, [filters.referenceNumber]);
 
   /* Clearing the box applies at once. Waiting for Enter to reveal the full list
      again would leave the operator looking at filtered results with an empty
@@ -2299,21 +2299,25 @@ export function OrdersModuleWorkspace({
             </label>
             <label className="orders-search orders-serial-search">
               <Search aria-hidden="true" size={17} />
-              <span className="sr-only">{t("operations.searchSerialNumber")}</span>
+              {/* Reference No. only, EXACT (Aiman, 19 Oct 2026): "28" finds
+                  reference 28 only -- not serial 28, 4328 or a customer. A
+                  comma list or a pasted Excel column matches each exactly. */}
+              <span className="sr-only">{t("operations.searchReferenceNumber")}</span>
               <input
-                onChange={(event) => setSerialSearchText(event.target.value)}
+                onChange={(event) => setReferenceSearchText(event.target.value)}
+                onPaste={listPasteHandler(setReferenceSearchText)}
                 onKeyDown={(event) => {
                   if (event.key !== "Enter") return;
                   event.preventDefault();
-                  updateFilters({ serialNumber: serialSearchText });
+                  updateFilters({ referenceNumber: referenceSearchText });
                 }}
                 onBlur={() => {
-                  if (serialSearchText !== filters.serialNumber) {
-                    updateFilters({ serialNumber: serialSearchText });
+                  if (referenceSearchText !== filters.referenceNumber) {
+                    updateFilters({ referenceNumber: referenceSearchText });
                   }
                 }}
-                placeholder={t("operations.searchSerialNumberPlaceholder")}
-                value={serialSearchText}
+                placeholder={t("operations.searchReferenceNumberPlaceholder")}
+                value={referenceSearchText}
               />
             </label>
             {/* Name only, and searchable. The code stays matchable so anyone who
@@ -2870,6 +2874,9 @@ export function OrdersModuleWorkspace({
           filters.viewKey === "" &&
           // Not part of the bulk filter selection either; explicit rows only.
           filters.cancellationReason === "" &&
+          // Nor is the exact Reference filter: "every matching Order" would
+          // otherwise ignore it and select far more than the rows shown.
+          filters.referenceNumber === "" &&
           matchingCount > pageIds.length ? (
             <button
               className="select-all-matching"

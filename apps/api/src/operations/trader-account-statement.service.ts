@@ -173,7 +173,11 @@ export class TraderAccountStatementService {
         select o.id, 'order'::text as type,
                (o.delivered_at at time zone 'Asia/Dubai')::date::text as date,
                o.created_at::text as "createdAt", 1 as sequence,
-               coalesce(o.serial_number, o.order_number) as reference,
+               -- The column is headed "Reference No." and the Trader knows a
+               -- shipment by HIS reference (7552), not by the daily serial
+               -- (28, which restarts every day). Per Aiman, 19 Oct 2026: the
+               -- Reference Number, or the Order Number when there is none.
+               coalesce(nullif(btrim(o.reference_number), ''), o.order_number) as reference,
                ('Delivered Order · ' || coalesce(o.customer_name, '')) as description,
                o.trader_net_payable::text as amount,
                (o.trader_outstanding_balance > 0) as "isOutstanding",
@@ -224,7 +228,7 @@ export class TraderAccountStatementService {
                (case when r.source_type = 'service_charge' then 'Service fee receivable'
                      else 'Trader receivable · ' || r.reason end
                 || case when linked.id is null then '' else ' · Order '
-                     || coalesce(linked.serial_number, linked.order_number) || ' (' || linked.order_number || ')' end),
+                     || coalesce(nullif(btrim(linked.reference_number), ''), linked.order_number) || ' (' || linked.order_number || ')' end),
                r.original_amount_due::text, (r.outstanding_amount > 0),
                linked.order_number, null::text, coalesce(linked.serial_number, linked.order_number),
                null::text, '0.00'::text, '0.00'::text, '0.00'::text, '0.00'::text,
@@ -243,7 +247,7 @@ export class TraderAccountStatementService {
                c.collection_number,
                'Trader collection received · ' || r.receivable_number
                  || case when linked.id is null then '' else ' · Order '
-                     || coalesce(linked.serial_number, linked.order_number) || ' (' || linked.order_number || ')' end,
+                     || coalesce(nullif(btrim(linked.reference_number), ''), linked.order_number) || ' (' || linked.order_number || ')' end,
                alloc.amount_allocated::text, false,
                linked.order_number, null::text, coalesce(linked.serial_number, linked.order_number),
                c.payment_reference, '0.00'::text, '0.00'::text, '0.00'::text, '0.00'::text,
