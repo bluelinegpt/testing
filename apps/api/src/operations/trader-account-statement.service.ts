@@ -233,11 +233,12 @@ export class TraderAccountStatementService {
                 where rv.company_id = s.company_id and rv.reversal_of_id = s.id)
            and s.business_date between ${from}::date and ${to}::date
         union all
-        -- A fee receivable prints directly under its Order (Aiman, 20 Oct
-        -- 2026): same date (the Order's delivery date) and the Order's own
-        -- createdAt as the sort key, so it lands right after that Order line.
+        -- A fee receivable carries its Order's delivery date. It keeps its own
+        -- createdAt as the sort key, so a day's Orders print first and that
+        -- day's fees after them (Aiman, 20 Oct 2026: placing each fee under
+        -- its Order confused the Traders; the Arabic fee line names its Order).
         select r.id, 'receivable'::text, (${receivableDate})::text,
-               coalesce(linked.created_at, r.created_at)::text, 2,
+               r.created_at::text, 2,
                r.receivable_number,
                (case when r.source_type = 'service_charge' then 'Service fee receivable'
                      else 'Trader receivable · ' || r.reason end
