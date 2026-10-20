@@ -14,12 +14,21 @@ import type {
 } from "../../api/contracts.js";
 
 type CatalogOption = { readonly id: string; readonly name: string };
+
+/** Lahthza: link an existing Customer by mobile number alone (20 Oct 2026). */
+const LINK_CUSTOMER_BY_MOBILE_COMPANY_ID = "4d9095cb-3da6-4b8b-9d8e-ff01f8192bdb";
+
+/** Comparison key for a mobile: the UAE canonical form, else its digits. */
+function mobileKey(value: string): string {
+  return normalizeUaeMobile(value) ?? value.replace(/[^0-9]/g, "").replace(/^00/, "");
+}
 import { Modal } from "../../components/Modal.js";
 import { isUaeMobile, normalizeUaeMobile } from "../../domain/uae-mobile.js";
 import { SearchCombobox } from "../../components/SearchCombobox.js";
 import { AreaSelector } from "../configuration/AreaSelector.js";
 import { PricingDialog, TraderForm } from "../configuration/TraderConfigurationWorkspace.js";
 import { CompanyBrandingContext } from "../../app/CompanyBrandingContext.js";
+import { useSessionAccess } from "../../app/SessionAccessContext.js";
 import { formatCurrency } from "../../localization/formatters.js";
 import { normalizeLocale } from "../../localization/locale.js";
 import { localizeName } from "../../localization/localize-name.js";
@@ -73,6 +82,13 @@ export function CreateOrderDialog({
   const canOverrideFee = permissions.includes("orders.override_service_fee");
   const [trader, setTrader] = useState<OperationsTraderOption>();
   const [customer, setCustomer] = useState<CustomerOption>();
+  // Lahthza types the same generic name ("عميل") for every Customer, so the
+  // mobile number alone identifies one (Aiman, 20 Oct 2026). For that Company
+  // a mobile that already belongs to a Customer links that Customer and his
+  // saved address automatically -- the typed name is never compared.
+  const session = useSessionAccess();
+  const linkCustomerByMobile = session?.companyId === LINK_CUSTOMER_BY_MOBILE_COMPANY_ID;
+  const [linkedByMobile, setLinkedByMobile] = useState<string>();
   const [customerAddresses, setCustomerAddresses] = useState<readonly Record<string, unknown>[]>(
     [],
   );
@@ -360,6 +376,35 @@ export function CreateOrderDialog({
       updatedAt: "",
     });
   }, []);
+
+  const linkExistingCustomerByMobile = useCallback(async () => {
+    const typed = mobile.trim();
+    if (!linkCustomerByMobile || isEdit || readOnly || customer !== undefined || typed === "") return;
+    const key = mobileKey(typed);
+    if (key === "") return;
+    try {
+      const page = await api.get<SearchPage<CustomerOption>>(
+        `configuration/customers/search?search=${encodeURIComponent(typed)}&limit=10&offset=0`,
+      );
+      const match = page.items.find(
+        (item) =>
+          mobileKey(item.mobileNumber) === key ||
+          (item.secondMobileNumber !== null && mobileKey(item.secondMobileNumber) === key),
+      );
+      if (match === undefined) return;
+      applyCustomer(match);
+      setLinkedByMobile(match.code);
+      clearServerError("customer");
+      void api
+        .get<{ addresses: readonly Record<string, unknown>[] }>(
+          `configuration/customers/${encodeURIComponent(match.code)}`,
+        )
+        .then((detail) => setCustomerAddresses(detail.addresses))
+        .catch(() => undefined);
+    } catch {
+      // Lookup is a convenience; saving still links the Customer server-side.
+    }
+  }, [api, applyCustomer, customer, isEdit, linkCustomerByMobile, mobile, readOnly]);
 
   const selectCreatedTrader = useCallback(
     async (created: { code: string; id: string; name: string }) => {
@@ -1201,14 +1246,21 @@ export function CreateOrderDialog({
                         id="order-mobile"
                         inputMode="tel"
                         maxLength={32}
+                        onBlur={() => void linkExistingCustomerByMobile()}
                         onChange={(event) => {
                           setMobile(event.target.value);
+                          setLinkedByMobile(undefined);
                           clearServerError("mobile");
                         }}
                         placeholder={t("common.mobilePlaceholder")}
                         required={false}
                         value={mobile}
                       />
+                      {linkedByMobile === undefined ? null : (
+                        <small className="field-advisory" id="order-mobile-linked" role="status">
+                          {t("operations.customerLinkedByMobile", { code: linkedByMobile })}
+                        </small>
+                      )}
                       {errorFor("mobile") !== undefined ? (
                         <small className="field-error" id="order-mobile-error">
                           {errorFor("mobile")}

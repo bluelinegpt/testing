@@ -2381,6 +2381,7 @@ export const englishTranslations = {
     creatingOrder: "Creating Order…",
     customerFieldHint: "Search to select an existing Customer, or type a new Customer Name.",
     customerSearchOrType: "Search or type a new Customer Name",
+    customerLinkedByMobile: "Existing Customer {{code}} found by this mobile — his saved details and address are used.",
     mobileAdvisory: "Recommended UAE format: 0506468442 or 971506468442.",
     overrideHint:
       "Overriding the configured Service Fee requires a reason and is recorded in the audit trail.",

@@ -50,7 +50,7 @@ export function buildTraderAccountStatementHtml(
         <td>${line.lineNumber}</td>
         <td>${escapeHtml(line.date)}</td>
         <td>${escapeHtml(line.reference)}</td>
-        <td>${escapeHtml(ar ? arabicDescription(line.type) : line.description)}</td>
+        <td>${escapeHtml(ar ? arabicDescription(line) : line.description)}</td>
         <td class="money">${escapeHtml(line.debit)}</td>
         <td class="money">${escapeHtml(line.credit)}</td>
         <td class="money">${escapeHtml(line.runningBalance)}</td>
@@ -80,7 +80,13 @@ table{width:100%;border-collapse:collapse;table-layout:fixed}thead{display:table
   <section class="header"><div class="brand">${data.company.logoDataUri === null ? "" : `<img class="logo" alt="" src="${escapeHtml(data.company.logoDataUri)}">`}<div><h1>${labels.title}</h1><div class="trader-line">${escapeHtml(data.trader.number)} · ${escapeHtml(ar ? data.trader.nameAr || data.trader.nameEn : data.trader.nameEn)}</div></div></div>
   <div><strong>${escapeHtml(ar ? data.company.nameAr || data.company.nameEn : data.company.nameEn)}</strong><br>${labels.from}: ${escapeHtml(data.period.from)}<br>${labels.to}: ${escapeHtml(data.period.to)}</div></section>
   <section class="cards">
-    <div class="card">${ar ? "غير المدفوع للتاجر" : "Unpaid to Trader"}<strong>AED ${escapeHtml(data.summary.outstandingAmount)}</strong></div>
+    ${
+      // A negative balance means the Trader owes the Company: say so, with
+      // the amount as a positive figure, instead of "Unpaid to Trader -200".
+      data.summary.outstandingAmount.startsWith("-")
+        ? `<div class="card">${ar ? "المستحق على التاجر" : "Owed by Trader"}<strong>AED ${escapeHtml(data.summary.outstandingAmount.slice(1))}</strong></div>`
+        : `<div class="card">${ar ? "غير المدفوع للتاجر" : "Unpaid to Trader"}<strong>AED ${escapeHtml(data.summary.outstandingAmount)}</strong></div>`
+    }
     <div class="card">${ar ? "المدفوع للتاجر" : "Paid to Trader"}<strong>AED ${escapeHtml(data.summary.netPayments)}</strong></div>
     <div class="card">${ar ? "المستحق المؤكد من الطلبات المحصّلة" : "Confirmed Payable from Collected Orders"}<strong>AED ${escapeHtml(data.summary.totalPayable)}</strong></div>
   </section>
@@ -97,8 +103,12 @@ table{width:100%;border-collapse:collapse;table-layout:fixed}thead{display:table
 </body></html>`;
 }
 
-function arabicDescription(type: TraderAccountStatement["transactions"][number]["type"]): string {
-  switch (type) {
+function arabicDescription(line: TraderAccountStatement["transactions"][number]): string {
+  // An Order's fee names its Order, so it reads as belonging to the line above.
+  if (line.type === "receivable" && line.orderNumber !== null) {
+    return `رسوم مستحقة على التاجر · ${line.referenceNumber?.trim() || line.orderNumber}`;
+  }
+  switch (line.type) {
     case "order":
       return "طلب مسلّم";
     case "payment":

@@ -8,6 +8,7 @@ import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
+import { normalizeAreaName } from "../route-planning/route-planner.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
 
 import { deliveryStatusFilterPredicate } from "./delivery-status-filter.js";
@@ -32,8 +33,13 @@ const deliveryStatusLabels: Record<string, string> = {
   returned_to_trader: "Returned to Trader",
 };
 
-interface ManifestOrderRow {
+export interface ManifestOrderRow {
+  readonly areaId: string | null;
   readonly areaName: string;
+  readonly areaNameAr: string | null;
+  readonly emirateNameAr: string | null;
+  readonly emirateOrder: number | null;
+  readonly traderNameAr: string | null;
   readonly assignedDriverId: string | null;
   readonly codAmount: string;
   readonly customerMobileNumber: string;
@@ -48,6 +54,31 @@ interface ManifestOrderRow {
   readonly referenceNumber: string | null;
   readonly serialNumber: string | null;
   readonly traderName: string;
+}
+
+/**
+ * Route order for the Manifest (Aiman, 20 Oct 2026): Emirate, then Area, then
+ * the Reference Number -- every Order of one Area together, the Areas of one
+ * Emirate together. The keys are the Driver app's own route fallback
+ * (`fallbackOrder` in route-planning: Emirate display order, then the
+ * normalised English Area name), so the sheet and the app list the stops in
+ * the same order. Lahthza has no pinned Area coordinates yet; once Areas are
+ * pinned, the app's optimised route can replace this ordering.
+ */
+export function sortForRoute(rows: readonly ManifestOrderRow[]): readonly ManifestOrderRow[] {
+  const referenceKey = (row: ManifestOrderRow) => {
+    const digits = (row.referenceNumber ?? "").replace(/[^0-9]/g, "");
+    return digits === "" ? Number.POSITIVE_INFINITY : Number(digits);
+  };
+  return [...rows].sort(
+    (a, b) =>
+      (a.emirateOrder ?? Number.MAX_SAFE_INTEGER) - (b.emirateOrder ?? Number.MAX_SAFE_INTEGER) ||
+      normalizeAreaName(a.areaName).localeCompare(normalizeAreaName(b.areaName)) ||
+      (a.areaId ?? "").localeCompare(b.areaId ?? "") ||
+      referenceKey(a) - referenceKey(b) ||
+      (a.referenceNumber ?? "").localeCompare(b.referenceNumber ?? "") ||
+      a.orderNumber.localeCompare(b.orderNumber),
+  );
 }
 
 @Injectable()
@@ -112,7 +143,7 @@ export class DriverShipmentManifestService {
         HttpStatus.CONFLICT,
       );
     }
-    return { driverId, orders: rows };
+    return { driverId, orders: sortForRoute(rows) };
   }
 
   private async resolveOrdersByIds(
@@ -123,10 +154,13 @@ export class DriverShipmentManifestService {
     const result = await sql<ManifestOrderRow>`
       select o.serial_number as "serialNumber", o.order_number as "orderNumber",
              o.reference_number as "referenceNumber", o.assigned_driver_id as "assignedDriverId",
-             t.name_en as "traderName", coalesce(o.customer_name, '') as "customerName",
+             t.name_en as "traderName", t.name_ar as "traderNameAr",
+             coalesce(o.customer_name, '') as "customerName",
              coalesce(o.customer_mobile_number, '') as "customerMobileNumber",
              o.customer_second_mobile_number as "customerSecondMobileNumber",
-             e.name_en as "emirateName", coalesce(a.name_en, '') as "areaName",
+             e.name_en as "emirateName", e.name_ar as "emirateNameAr",
+             e.display_order as "emirateOrder", a.id as "areaId",
+             coalesce(a.name_en, '') as "areaName", a.name_ar as "areaNameAr",
              o.cod_amount::text as "codAmount",
              o.service_fee::text as "serviceFee",
              o.customer_delivery_notes_snapshot as "deliveryInstructions", o.notes,
@@ -165,10 +199,13 @@ export class DriverShipmentManifestService {
     const result = await sql<ManifestOrderRow>`
       select o.serial_number as "serialNumber", o.order_number as "orderNumber",
              o.reference_number as "referenceNumber", o.assigned_driver_id as "assignedDriverId",
-             t.name_en as "traderName", coalesce(o.customer_name, '') as "customerName",
+             t.name_en as "traderName", t.name_ar as "traderNameAr",
+             coalesce(o.customer_name, '') as "customerName",
              coalesce(o.customer_mobile_number, '') as "customerMobileNumber",
              o.customer_second_mobile_number as "customerSecondMobileNumber",
-             e.name_en as "emirateName", coalesce(a.name_en, '') as "areaName",
+             e.name_en as "emirateName", e.name_ar as "emirateNameAr",
+             e.display_order as "emirateOrder", a.id as "areaId",
+             coalesce(a.name_en, '') as "areaName", a.name_ar as "areaNameAr",
              o.cod_amount::text as "codAmount",
              o.service_fee::text as "serviceFee",
              o.customer_delivery_notes_snapshot as "deliveryInstructions", o.notes,
@@ -230,9 +267,10 @@ export class DriverShipmentManifestService {
     const driverResult = await sql<{
       driverType: "employee" | "outsourced";
       mobileNumber: string;
+      nameAr: string | null;
       nameEn: string;
     }>`
-      select name_en as "nameEn", mobile_number as "mobileNumber", driver_type as "driverType"
+      select name_en as "nameEn", name_ar as "nameAr", mobile_number as "mobileNumber", driver_type as "driverType"
         from drivers where id = ${driverId}::uuid and company_id = ${companyId}::uuid
     `.execute(this.database);
     const driver = driverResult.rows[0];
@@ -272,6 +310,7 @@ export class DriverShipmentManifestService {
         },
         driverMobile: driver.mobileNumber,
         driverName: driver.nameEn,
+        driverNameAr: driver.nameAr,
         driverType: driver.driverType,
         generatedBy: generatedByResult.rows[0]?.username ?? "—",
         manifestNumber,
@@ -279,6 +318,9 @@ export class DriverShipmentManifestService {
       },
       orders: orders.map((row) => ({
         areaName: row.areaName,
+        areaNameAr: row.areaNameAr,
+        emirateNameAr: row.emirateNameAr,
+        traderNameAr: row.traderNameAr,
         codAmount: new Decimal(row.codAmount).toFixed(2),
         customerMobileNumber: row.customerMobileNumber,
         customerName: row.customerName,
@@ -365,10 +407,10 @@ export class DriverShipmentManifestService {
         [
           row.serialNumber,
           row.referenceNumber ?? "",
-          row.traderName,
+          language === "ar" ? (row.traderNameAr ?? row.traderName) : row.traderName,
           row.customerName,
           row.customerMobileNumber,
-          row.areaName,
+          language === "ar" ? (row.areaNameAr ?? row.areaName) : row.areaName,
           row.codAmount,
           row.notes ?? "",
         ].map((value, index) => [columns[index]!, value]),
@@ -376,7 +418,10 @@ export class DriverShipmentManifestService {
     );
     const bytes = accountingXlsx(columns, rows, [
       [language === "ar" ? "تاريخ ووقت الكشف" : "Manifest Date and Time", `${generatedAt} (UAE)`],
-      [language === "ar" ? "المندوب" : "Driver", data.header.driverName],
+      [
+        language === "ar" ? "المندوب" : "Driver",
+        language === "ar" ? (data.header.driverNameAr ?? data.header.driverName) : data.header.driverName,
+      ],
       [language === "ar" ? "عدد الطلبات" : "Orders", data.header.orderCount],
     ]);
     const safe = data.header.driverName.replaceAll(/[^A-Za-z0-9]+/g, "-");

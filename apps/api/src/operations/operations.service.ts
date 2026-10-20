@@ -851,6 +851,9 @@ const INTERNATIONAL_CARRIER_FINISHED_STATUSES: ReadonlySet<string> = new Set([
   "returned_to_trader",
 ]);
 
+/** Lahthza: an existing Customer is identified by mobile alone (20 Oct 2026). */
+const LINK_CUSTOMER_BY_MOBILE_COMPANY_ID = "4d9095cb-3da6-4b8b-9d8e-ff01f8192bdb";
+
 @Injectable()
 export class OperationsService {
   public constructor(
@@ -7720,8 +7723,17 @@ export class OperationsService {
         hashtext(${"customer-mobile:" + primaryKey})
       )
     `.execute(transaction);
-    const duplicate = await sql<{ code: string; name: string }>`
-      select code,name from customers
+    const duplicate = await sql<{
+      code: string;
+      customerReference: string | null;
+      deliveryNotes: string | null;
+      id: string;
+      name: string;
+      status: string;
+    }>`
+      select id,code,name,status,customer_reference as "customerReference",
+             delivery_notes as "deliveryNotes"
+      from customers
       where company_id=${input.companyId}::uuid
         and (
           customer_mobile_comparison_key(mobile_number) in (${primaryKey},${secondKey})
@@ -7730,9 +7742,23 @@ export class OperationsService {
             and customer_mobile_comparison_key(second_mobile_number) in (${primaryKey},${secondKey})
           )
         )
+      order by (status='active') desc, created_at
       limit 1
     `.execute(transaction);
-    if (duplicate.rows[0] !== undefined) {
+    const existing = duplicate.rows[0];
+    // Lahthza (Aiman, 20 Oct 2026): the mobile number identifies the Customer
+    // and the typed name ("عميل" for everyone) is never compared. An active
+    // Customer with this mobile is linked instead of refusing the Order: his
+    // saved address in the Order's Area is used, or one is added for that
+    // Area, so the Customer is never duplicated.
+    if (
+      existing !== undefined &&
+      existing.status === "active" &&
+      input.companyId === LINK_CUSTOMER_BY_MOBILE_COMPANY_ID
+    ) {
+      return this.linkExistingCustomerAddress(transaction, input, existing, draft.address);
+    }
+    if (existing !== undefined) {
       throw new ApplicationException(
         "customer_duplicate",
         "A Customer with this mobile number already exists. Select that Customer instead.",
@@ -7797,6 +7823,78 @@ export class OperationsService {
         customerReference: null,
         deliveryNotes: null,
         id: customerRow.id,
+      },
+    };
+  }
+
+  private async linkExistingCustomerAddress(
+    transaction: Parameters<Parameters<KyselyTransactionManager["execute"]>[0]>[0],
+    input: { companyId: string; correlationId: string; createdByAccountId: string; orderAreaId: string },
+    customer: {
+      code: string;
+      customerReference: string | null;
+      deliveryNotes: string | null;
+      id: string;
+    },
+    typedAddress: string | null | undefined,
+  ) {
+    const area = await this.activeArea(transaction, input.companyId, input.orderAreaId);
+    const saved = await sql<{
+      deliveryInstructions: string | null;
+      id: string;
+      latitude: string | null;
+      locationLink: string | null;
+      longitude: string | null;
+    }>`
+      select ca.id, ca.location_link as "locationLink", ca.latitude::text, ca.longitude::text,
+             ca.delivery_instructions as "deliveryInstructions"
+        from customer_addresses ca
+       where ca.company_id=${input.companyId}::uuid and ca.customer_id=${customer.id}::uuid
+         and ca.area_id=${area.id}::uuid and ca.is_active
+       order by ca.is_default desc, ca.created_at desc
+       limit 1
+    `.execute(transaction);
+    let address = saved.rows[0];
+    if (address === undefined) {
+      const added = await sql<{ id: string }>`
+        insert into customer_addresses(
+          company_id,customer_id,area_id,address,is_default,created_by_account_id
+        ) values (
+          ${input.companyId}::uuid,${customer.id}::uuid,${area.id}::uuid,
+          ${typedAddress?.trim() ?? ""},false,${input.createdByAccountId}::uuid
+        )
+        returning id
+      `.execute(transaction);
+      const addedId = added.rows[0]?.id;
+      if (addedId === undefined) throw new Error("Customer address creation returned no identifier");
+      address = { deliveryInstructions: null, id: addedId, latitude: null, locationLink: null, longitude: null };
+    }
+    await this.audit(transaction, {
+      action: "customer.linked_by_mobile_from_order",
+      actorId: input.createdByAccountId,
+      after: { addressId: address.id, areaId: area.id, code: customer.code },
+      companyId: input.companyId,
+      correlationId: input.correlationId,
+      subjectId: customer.id,
+      subjectType: "customer",
+    });
+    return {
+      address: {
+        areaCode: area.code,
+        areaId: area.id,
+        areaNameAr: area.nameAr,
+        areaNameEn: area.nameEn,
+        deliveryInstructions: address.deliveryInstructions,
+        id: address.id,
+        latitude: address.latitude,
+        locationLink: address.locationLink,
+        longitude: address.longitude,
+      },
+      customer: {
+        code: customer.code,
+        customerReference: customer.customerReference,
+        deliveryNotes: customer.deliveryNotes,
+        id: customer.id,
       },
     };
   }

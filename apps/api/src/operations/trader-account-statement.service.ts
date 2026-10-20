@@ -139,6 +139,15 @@ export interface TraderAccountStatement {
   readonly warnings: readonly string[];
 }
 
+/**
+ * The date a Trader receivable carries on the statement: its Order's delivery
+ * date (UAE) when it is an Order's fee, otherwise its own business date. A
+ * fee raised the day before the Order was marked delivered (RCV-000052,
+ * 17 Oct, for ref 4266 delivered 18 Oct) then sits on the Order's own date.
+ * Uses the aliases `r` (trader_receivables) and `linked` (its Order).
+ */
+const RECEIVABLE_STATEMENT_DATE = sql`coalesce((linked.delivered_at at time zone 'Asia/Dubai')::date, r.business_date)`;
+
 @Injectable()
 export class TraderAccountStatementService {
   public constructor(
@@ -168,6 +177,7 @@ export class TraderAccountStatementService {
       throw new ApplicationException("trader_not_found", "Trader not found", HttpStatus.NOT_FOUND);
     }
     const opening = await this.balanceBefore(companyId, traderId, from);
+    const receivableDate = RECEIVABLE_STATEMENT_DATE;
     const source = (
       await sql<StatementSourceRow>`
         select o.id, 'order'::text as type,
@@ -223,14 +233,18 @@ export class TraderAccountStatementService {
                 where rv.company_id = s.company_id and rv.reversal_of_id = s.id)
            and s.business_date between ${from}::date and ${to}::date
         union all
-        select r.id, 'receivable'::text, r.business_date::text, r.created_at::text, 2,
+        -- A fee receivable prints directly under its Order (Aiman, 20 Oct
+        -- 2026): same date (the Order's delivery date) and the Order's own
+        -- createdAt as the sort key, so it lands right after that Order line.
+        select r.id, 'receivable'::text, (${receivableDate})::text,
+               coalesce(linked.created_at, r.created_at)::text, 2,
                r.receivable_number,
                (case when r.source_type = 'service_charge' then 'Service fee receivable'
                      else 'Trader receivable · ' || r.reason end
                 || case when linked.id is null then '' else ' · Order '
                      || coalesce(nullif(btrim(linked.reference_number), ''), linked.order_number) || ' (' || linked.order_number || ')' end),
                r.original_amount_due::text, (r.outstanding_amount > 0),
-               linked.order_number, null::text, coalesce(linked.serial_number, linked.order_number),
+               linked.order_number, linked.reference_number, coalesce(linked.serial_number, linked.order_number),
                null::text, '0.00'::text, '0.00'::text, '0.00'::text, '0.00'::text,
                '0.00'::text, '0.00'::text, r.status, r.notes, (-r.original_amount_due)::text,
                null::text as "settlementNumber"
@@ -241,7 +255,7 @@ export class TraderAccountStatementService {
            -- A cancelled or reversed charge (e.g. replaced after a fee change)
            -- is left out together with its cancellation.
            and r.status not in ('cancelled', 'reversed')
-           and r.business_date between ${from}::date and ${to}::date
+           and (${receivableDate}) between ${from}::date and ${to}::date
         union all
         select alloc.id, 'collection'::text, c.payment_date::text, c.created_at::text, 3,
                c.collection_number,
@@ -411,9 +425,13 @@ export class TraderAccountStatementService {
       return {
         additionalFee: row.additionalFee,
         codAmount: row.codAmount,
-        credit: balanceImpact.lessThan(0) ? balanceImpact.abs().toFixed(2) : "0.00",
+        // The Trader's account as a statement of account (Aiman, 20 Oct 2026):
+        // what the Company owes the Trader is Credit (دائن); what the Trader
+        // owes, or was paid, is Debit (مدين). The running balance keeps its
+        // sign: positive = owed to the Trader, negative = owed by the Trader.
+        credit: balanceImpact.greaterThan(0) ? balanceImpact.toFixed(2) : "0.00",
         date: row.date,
-        debit: balanceImpact.greaterThan(0) ? balanceImpact.toFixed(2) : "0.00",
+        debit: balanceImpact.lessThan(0) ? balanceImpact.abs().toFixed(2) : "0.00",
         description: row.description,
         id: row.id,
         isOutstanding: row.isOutstanding,
@@ -570,9 +588,13 @@ export class TraderAccountStatementService {
               and not exists (select 1 from trader_settlements r
                 where r.company_id = s.company_id and r.reversal_of_id = s.id)), 0)
           - coalesce((select sum(r.original_amount_due) from trader_receivables r
+            left join orders linked on linked.company_id = r.company_id
+              and r.source_type = 'service_charge' and linked.order_number = r.source_reference
             where r.company_id = ${companyId}::uuid and r.trader_id = ${traderId}::uuid
               and r.status not in ('cancelled', 'reversed')
-              and r.business_date < ${from}::date), 0)
+              -- The same statement date the lines use, so a fee never falls
+              -- in one period's lines and another period's opening balance.
+              and (${RECEIVABLE_STATEMENT_DATE}) < ${from}::date), 0)
           + coalesce((select sum(alloc.amount_allocated)
             from trader_collection_allocations alloc
             join trader_collections c on c.id = alloc.collection_id and c.company_id = alloc.company_id

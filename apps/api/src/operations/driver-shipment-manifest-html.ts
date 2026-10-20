@@ -12,6 +12,10 @@ import type { ReportLanguage } from "./driver-collection-report-html.js";
 
 export interface ManifestOrder {
   readonly areaName: string;
+  /** Arabic names, printed instead of the English ones on the Arabic sheet. */
+  readonly areaNameAr?: string | null;
+  readonly emirateNameAr?: string | null;
+  readonly traderNameAr?: string | null;
   readonly codAmount: string;
   readonly customerMobileNumber: string;
   readonly customerName: string;
@@ -41,6 +45,7 @@ export interface ManifestData {
     };
     readonly driverMobile: string;
     readonly driverName: string;
+    readonly driverNameAr?: string | null;
     readonly driverType: "employee" | "outsourced";
     readonly generatedBy: string;
     readonly manifestNumber: string;
@@ -202,17 +207,37 @@ export function buildDriverShipmentManifestHtml(
 ): string {
   const labels = LABELS[language];
   const dir = language === "ar" ? "rtl" : "ltr";
+  // Arabic sheet in Arabic throughout (Aiman, 20 Oct 2026): the Arabic Area,
+  // Emirate, Trader and Driver names whenever they exist. A name with no
+  // Arabic version saved prints as entered.
+  const ar = language === "ar";
+  const areaOf = (order: ManifestOrder) => (ar ? (order.areaNameAr ?? order.areaName) : order.areaName);
+  const emirateOf = (order: ManifestOrder) =>
+    (ar ? (order.emirateNameAr ?? order.emirateName) : order.emirateName) ?? "";
+  const traderOf = (order: ManifestOrder) =>
+    ar ? (order.traderNameAr ?? order.traderName) : order.traderName;
+  // The Orders arrive sorted Emirate -> Area -> Reference. One Emirate needs
+  // no heading; a sheet spanning several gets one heading row per Emirate.
+  const emirates = new Set(data.orders.map((order) => order.emirateName ?? ""));
+  const showEmirateHeadings = emirates.size > 1;
+  let currentEmirate: string | null = null;
 
   const orderRows = data.orders
     .map(
       (order) =>
+        (showEmirateHeadings && (order.emirateName ?? "") !== currentEmirate
+          ? ((currentEmirate = order.emirateName ?? ""),
+            `<tr class="emirate-heading"><td colspan="8">${escapeHtml(labels.emirate)}: ${escapeHtml(emirateOf(order))} (${
+              data.orders.filter((other) => (other.emirateName ?? "") === currentEmirate).length
+            })</td></tr>`)
+          : "") +
         "<tr>" +
         `<td class="mono">${escapeHtml(order.serialNumber)}</td>` +
         `<td class="mono">${order.referenceNumber === null ? "" : escapeHtml(order.referenceNumber)}</td>` +
-        `<td>${escapeHtml(order.traderName)}</td>` +
+        `<td>${escapeHtml(traderOf(order))}</td>` +
         `<td>${escapeHtml(order.customerName)}</td>` +
         `<td class="mono">${escapeHtml(order.customerMobileNumber)}</td>` +
-        `<td>${escapeHtml(order.areaName)}</td>` +
+        `<td class="area">${escapeHtml(areaOf(order))}</td>` +
         `<td class="num">${money(order.codAmount)}</td>` +
         /* Notes, not Delivery Status. A manifest is signed at handover, when
            every Order on it is going out, so the status column read the same on
@@ -245,8 +270,11 @@ export function buildDriverShipmentManifestHtml(
       ? ""
       : `<img class="company-logo" alt="" src="${escapeHtml(data.header.company.logoDataUri)}">`) +
     `<div class="company-identity">` +
-    `<div class="company-name">${escapeHtml(data.header.company.nameEn)}` +
-    (data.header.company.nameAr === null ? "" : ` / ${escapeHtml(data.header.company.nameAr)}`) +
+    `<div class="company-name">` +
+    (ar && data.header.company.nameAr !== null
+      ? escapeHtml(data.header.company.nameAr)
+      : escapeHtml(data.header.company.nameEn) +
+        (data.header.company.nameAr === null ? "" : ` / ${escapeHtml(data.header.company.nameAr)}`)) +
     `</div>` +
     (data.header.company.subtitleEn === null && data.header.company.subtitleAr === null
       ? ""
@@ -262,7 +290,7 @@ export function buildDriverShipmentManifestHtml(
     `<h1 class="report-title">${escapeHtml(labels.title)}</h1>` +
     `<div class="header-meta">` +
     `<div class="meta-date">${escapeHtml(labels.reportDate)}: ${escapeHtml(generatedAt)}</div>` +
-    `<div class="meta-driver">${escapeHtml(labels.driver)}: ${escapeHtml(data.header.driverName)}</div>` +
+    `<div class="meta-driver">${escapeHtml(labels.driver)}: ${escapeHtml(ar ? (data.header.driverNameAr ?? data.header.driverName) : data.header.driverName)}</div>` +
     `</div>` +
     `</header>`;
 
@@ -315,9 +343,13 @@ export function buildDriverShipmentManifestHtml(
     table.grid th:nth-child(3), table.grid td:nth-child(3) { width: 18%; }
     table.grid th:nth-child(4), table.grid td:nth-child(4) { width: 10%; }
     table.grid th:nth-child(5), table.grid td:nth-child(5) { width: 12%; }
-    table.grid th:nth-child(6), table.grid td:nth-child(6) { width: 10%; }
+    /* Area wider and Notes narrower (Aiman, 20 Oct 2026): "International
+       City" was splitting mid-word while Notes stood mostly empty. */
+    table.grid th:nth-child(6), table.grid td:nth-child(6) { width: 17%; }
     table.grid th:nth-child(7), table.grid td:nth-child(7) { width: 10%; }
-    table.grid th:nth-child(8), table.grid td:nth-child(8) { width: 25%; }
+    table.grid th:nth-child(8), table.grid td:nth-child(8) { width: 18%; }
+    table.grid td.area { overflow-wrap: normal; word-break: normal; hyphens: none; }
+    table.grid tr.emirate-heading td { background: #e8eef9; font-weight: 700; font-size: 12px; width: auto; }
     .summary-section { margin-top: 12px; max-width: 460px; }
     /* Side by side rather than stacked. Each keeps its own underline so the
        label still reads as attached to its own figure. */

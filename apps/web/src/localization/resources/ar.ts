@@ -2380,6 +2380,7 @@ export const arabicTranslations = {
     creatingOrder: "جارٍ إنشاء الطلب…",
     customerFieldHint: "ابحث لاختيار عميل موجود، أو اكتب اسم عميل جديد.",
     customerSearchOrType: "ابحث أو اكتب اسم عميل جديد",
+    customerLinkedByMobile: "عميل موجود بهذا الجوال ({{code}}) — تم استخدام بياناته وعنوانه المحفوظ.",
     mobileAdvisory: "التنسيق الإماراتي الموصى به: 0506468442 أو 971506468442.",
     overrideHint: "يتطلب تجاوز رسوم الخدمة المُهيأة سبباً ويُسجَّل في سجل التدقيق.",
     pricingFailureMessage:

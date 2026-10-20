@@ -284,4 +284,36 @@ describe("buildDriverShipmentManifestHtml", () => {
     const html = buildDriverShipmentManifestHtml(sparse, "en", "now");
     expect(html).not.toContain("null");
   });
+
+  // Aiman, 20 Oct 2026: the Arabic sheet prints Arabic names; an Emirate
+  // heading appears only when the sheet covers more than one Emirate.
+  it("prints Arabic Area, Trader and Driver names on the Arabic sheet, and Emirate headings only for several Emirates", () => {
+    const order = sample.orders[0]!;
+    const arabic: ManifestData = {
+      ...sample,
+      header: { ...sample.header, driverNameAr: "سائق الاختبار" },
+      orders: [{ ...order, areaName: "Jebel Ali", areaNameAr: "جبل علي", traderNameAr: "تاجر الاختبار" }],
+    };
+    const ar = buildDriverShipmentManifestHtml(arabic, "ar", "20/10/2026");
+    expect(ar).toContain("جبل علي");
+    expect(ar).not.toContain("Jebel Ali");
+    expect(ar).toContain("تاجر الاختبار");
+    expect(ar).toContain("سائق الاختبار");
+    expect(ar).toContain('<div class="company-name">شركة الاختبار</div>');
+    expect(ar).not.toContain("emirate-heading\"");
+    const en = buildDriverShipmentManifestHtml(arabic, "en", "20/10/2026");
+    expect(en).toContain("Jebel Ali");
+
+    const twoEmirates: ManifestData = {
+      ...arabic,
+      orders: [
+        { ...order, emirateName: "Sharjah", emirateNameAr: "الشارقة" },
+        { ...order, emirateName: "Dubai", emirateNameAr: "دبي" },
+      ],
+    };
+    const html = buildDriverShipmentManifestHtml(twoEmirates, "ar", "20/10/2026");
+    expect(html.match(/class="emirate-heading"/g) ?? []).toHaveLength(2);
+    expect(html).toContain("الإمارة: الشارقة (1)");
+  });
 });
+

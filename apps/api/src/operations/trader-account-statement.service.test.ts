@@ -142,8 +142,9 @@ describe("TraderAccountStatementService", () => {
     expect(statement.transactions).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          credit: "18.00",
-          debit: "0.00",
+          // A fee the Trader owes is Debit (مدين) on his statement of account.
+          credit: "0.00",
+          debit: "18.00",
           orderNumber: "ORD-000126",
           reference: "RCV-000019",
           runningBalance: "746.00",
