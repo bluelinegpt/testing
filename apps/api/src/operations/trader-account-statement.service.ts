@@ -18,6 +18,8 @@ import {
 
 interface StatementSourceRow {
   readonly additionalFee: string;
+  /** The Order's fee receivable(s) charged on its own line, if any. */
+  readonly feeReceivableNumber: string | null;
   readonly amount: string;
   /** Positive increases the amount owed to the Trader; negative reduces it. */
   readonly balanceImpact: string;
@@ -51,6 +53,8 @@ interface StatementSourceRow {
 }
 
 export interface TraderAccountStatementLine {
+  /** The Order's fee receivable(s) charged on this Order line, if any. */
+  readonly feeReceivableNumber?: string | null;
   readonly additionalFee: string;
   readonly codAmount: string;
   readonly credit: string;
@@ -188,18 +192,35 @@ export class TraderAccountStatementService {
                -- (28, which restarts every day). Per Aiman, 19 Oct 2026: the
                -- Reference Number, or the Order Number when there is none.
                coalesce(nullif(btrim(o.reference_number), ''), o.order_number) as reference,
-               ('Delivered Order · ' || coalesce(o.customer_name, '')) as description,
+               ('Delivered Order · ' || coalesce(o.customer_name, '')
+                || case when fee.numbers is null then ''
+                        else ' · Service fee ' || fee.amount::text || ' (' || fee.numbers || ')' end) as description,
                o.trader_net_payable::text as amount,
-               (o.trader_outstanding_balance > 0) as "isOutstanding",
+               (o.trader_outstanding_balance > 0 or coalesce(fee.open, false)) as "isOutstanding",
                o.order_number as "orderNumber", o.reference_number as "referenceNumber",
                coalesce(o.serial_number, o.order_number) as "serialNumber",
                o.reference_number as "paymentReference", o.cod_amount::text as "codAmount",
                o.service_fee::text as "serviceFee", coalesce(o.additional_fees, 0)::text as "additionalFee",
                o.trader_net_payable::text as "traderPayable", '0.00'::text as "settlementAmount",
                '0.00'::text as "reversalAmount", o.delivery_status as "sourceStatus",
-               o.notes, o.trader_net_payable::text as "balanceImpact",
-               null::text as "settlementNumber"
+               -- A "Pay by Trader" Order's fee (its service-charge receivable)
+               -- is charged ON the Order's own line, as Debit (Aiman, 20 Oct
+               -- 2026): the statement goes to the Trader, and an Order line
+               -- reading 0.00 while the fee sat on a separate RCV line further
+               -- down read as "no amount". That receivable then has no line of
+               -- its own (see the receivable branch), so it counts once.
+               o.notes, (o.trader_net_payable - coalesce(fee.amount, 0))::text as "balanceImpact",
+               null::text as "settlementNumber", fee.numbers as "feeReceivableNumber"
           from orders o
+          left join lateral (
+            select sum(fr.original_amount_due) as amount,
+                   string_agg(fr.receivable_number, ', ' order by fr.receivable_number) as numbers,
+                   bool_or(fr.outstanding_amount > 0) as open
+              from trader_receivables fr
+             where fr.company_id = o.company_id and fr.trader_id = o.trader_id
+               and fr.source_type = 'service_charge' and fr.source_reference = o.order_number
+               and fr.status not in ('cancelled', 'reversed')
+          ) fee on true
          where o.company_id = ${companyId}::uuid and o.trader_id = ${traderId}::uuid
            -- 'closed' is the terminal state a delivered Order reaches once its
            -- Driver cash is reconciled and its Trader Settlement is complete
@@ -221,7 +242,7 @@ export class TraderAccountStatementService {
                null::text, null::text, null::text, p.bank_reference, '0.00'::text, '0.00'::text,
                '0.00'::text, '0.00'::text, p.amount::text, '0.00'::text,
                s.status, null::text, (-p.amount)::text,
-               s.settlement_number as "settlementNumber"
+               s.settlement_number as "settlementNumber", null::text
           from trader_settlements s
           join trader_settlement_payments p
             on p.settlement_id = s.id and p.company_id = s.company_id
@@ -248,7 +269,7 @@ export class TraderAccountStatementService {
                linked.order_number, linked.reference_number, coalesce(linked.serial_number, linked.order_number),
                null::text, '0.00'::text, '0.00'::text, '0.00'::text, '0.00'::text,
                '0.00'::text, '0.00'::text, r.status, r.notes, (-r.original_amount_due)::text,
-               null::text as "settlementNumber"
+               null::text as "settlementNumber", null::text
           from trader_receivables r
           left join orders linked on linked.company_id = r.company_id
             and r.source_type = 'service_charge' and linked.order_number = r.source_reference
@@ -257,6 +278,13 @@ export class TraderAccountStatementService {
            -- is left out together with its cancellation.
            and r.status not in ('cancelled', 'reversed')
            and (${receivableDate}) between ${from}::date and ${to}::date
+           -- Already charged on its Order's line in this statement: the same
+           -- Order conditions as the Order branch, and the receivable's date
+           -- is that Order's delivery date, so both fall in the same period.
+           and not (linked.id is not null and linked.trader_id = r.trader_id
+             and linked.delivery_status in ('delivered', 'closed')
+             and linked.driver_reconciliation_status in ('reconciled', 'not_applicable')
+             and linked.delivered_at is not null)
         union all
         select alloc.id, 'collection'::text, c.payment_date::text, c.created_at::text, 3,
                c.collection_number,
@@ -267,7 +295,7 @@ export class TraderAccountStatementService {
                linked.order_number, null::text, coalesce(linked.serial_number, linked.order_number),
                c.payment_reference, '0.00'::text, '0.00'::text, '0.00'::text, '0.00'::text,
                '0.00'::text, '0.00'::text, c.status, c.notes, alloc.amount_allocated::text,
-               c.collection_number as "settlementNumber"
+               c.collection_number as "settlementNumber", null::text
           from trader_collection_allocations alloc
           join trader_collections c on c.id = alloc.collection_id and c.company_id = alloc.company_id
           join trader_receivables r on r.id = alloc.receivable_id and r.company_id = alloc.company_id
@@ -444,6 +472,7 @@ export class TraderAccountStatementService {
         reference: row.reference,
         runningBalance: this.money(running).toFixed(2),
         settlementNumber: row.settlementNumber,
+        feeReceivableNumber: row.feeReceivableNumber,
         serialNumber: row.serialNumber,
         serviceFee: row.serviceFee,
         settlementAmount: row.settlementAmount,

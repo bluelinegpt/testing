@@ -93,7 +93,7 @@ table{width:100%;border-collapse:collapse;table-layout:fixed}thead{display:table
   <section class="cards">
     <div class="card">${labels.opening}<strong>AED ${escapeHtml(data.summary.openingBalance)}</strong></div>
     <div class="card">${ar ? "قيمة الدفع عند الاستلام للطلبات المؤكد تحصيلها" : "COD from Collection-Confirmed Orders"}<strong>AED ${escapeHtml(data.summary.codCollected)}</strong><span class="muted">${ar ? "لا يشمل الطلبات بانتظار التحصيل من المندوب" : "Excludes orders awaiting Driver Collection"}</span></div>
-    <div class="card">${ar ? "رسوم الخدمة للطلبات المؤكد تحصيلها" : "Service Fees on Collection-Confirmed Orders"}<strong>AED ${escapeHtml(data.summary.serviceFeesDeducted)}</strong><span class="muted">${ar ? "قد تُسجل رسوم الطلبات ذات المستحق الصفري كمبالغ منفصلة مستحقة على التاجر" : "Fees on zero-payable orders are shown separately as Trader receivables"}</span></div>
+    <div class="card">${ar ? "رسوم الخدمة للطلبات المؤكد تحصيلها" : "Service Fees on Collection-Confirmed Orders"}<strong>AED ${escapeHtml(data.summary.serviceFeesDeducted)}</strong><span class="muted">${ar ? "رسوم طلبات الدفع من التاجر تظهر مديناً على سطر الطلب نفسه" : "Fees on Pay-by-Trader orders are charged as Debit on the order's own line"}</span></div>
   </section>
   <table><thead><tr><th>#</th><th>${labels.date}</th><th>${labels.transaction}</th><th>${labels.description}</th><th>${labels.debit}</th><th>${labels.credit}</th><th>${labels.balance}</th></tr></thead>
   <tbody>${rows}</tbody></table>
@@ -110,7 +110,9 @@ function arabicDescription(line: TraderAccountStatement["transactions"][number])
   }
   switch (line.type) {
     case "order":
-      return "طلب مسلّم";
+      return line.feeReceivableNumber
+        ? `طلب مسلّم · رسوم ${line.debit} (${line.feeReceivableNumber})`
+        : "طلب مسلّم";
     case "payment":
       return "دفعة للتاجر";
     case "reversal":
