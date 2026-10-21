@@ -439,4 +439,12 @@ describe("buildTraderSettlementStatementHtml", () => {
     const [h3, d3] = cells(bareHtml);
     expect(d3).toBe(h3);
   });
+
+  it("prints the Trader's mobile in the header when one is saved", () => {
+    const withMobile: TraderSettlementReportData = { ...sample, header: { ...sample.header, traderMobile: "0501234567" } };
+    expect(buildTraderSettlementStatementHtml(withMobile, "en")).toContain("Trader Mobile");
+    expect(buildTraderSettlementStatementHtml(withMobile, "en")).toContain("0501234567");
+    expect(buildTraderSettlementStatementHtml(withMobile, "ar")).toContain("جوال التاجر");
+    expect(buildTraderSettlementStatementHtml(sample, "en")).not.toContain("Trader Mobile");
+  });
 });

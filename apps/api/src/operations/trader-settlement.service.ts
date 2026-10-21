@@ -435,6 +435,8 @@ export interface TraderSettlementReportData {
     readonly settlementNumber: string;
     readonly sourceBank: { readonly accountName: string; readonly bankName: string } | null;
     readonly status: "confirmed" | "reversed";
+    /** Trader's mobile from his record (Aiman, 21 Oct 2026); null when none. */
+    readonly traderMobile?: string | null;
     readonly traderName: string;
   };
   readonly orders: readonly TraderSettlementDetailOrder[];
@@ -2698,6 +2700,7 @@ export class TraderSettlementService {
         settlementNumber: header.settlementNumber,
         sourceBank: header.sourceBank,
         status: header.status,
+        traderMobile: header.traderMobile,
         traderName: header.traderName,
       },
       orders: orders.lines,
@@ -2779,6 +2782,7 @@ export class TraderSettlementService {
     readonly settlementNumber: string;
     readonly sourceBank: { readonly accountName: string; readonly bankName: string } | null;
     readonly status: "confirmed" | "reversed";
+    readonly traderMobile: string | null;
     readonly traderName: string;
     readonly traderId: string;
   }> {
@@ -2801,11 +2805,13 @@ export class TraderSettlementService {
         sourceAccountName: string | null;
         sourceBankName: string | null;
         status: string;
+        traderMobile: string | null;
         traderName: string;
         traderId: string;
       }>`
         select s.settlement_number as "settlementNumber", s.status,
                s.business_date::text as "businessDate", t.name_en as "traderName",
+               nullif(btrim(t.mobile_number), '') as "traderMobile",
                s.trader_id as "traderId",
                coalesce(creator.username, 'Legacy/Unknown') as "createdBy",
                coalesce(confirmer.username, 'Legacy/Unknown') as "confirmedBy",
@@ -2923,6 +2929,7 @@ export class TraderSettlementService {
           ? null
           : { accountName: row.sourceAccountName ?? "", bankName: row.sourceBankName },
       status: row.reversedBySettlementNumber === null ? "confirmed" : "reversed",
+      traderMobile: row.traderMobile,
       traderName: row.traderName,
       traderId: row.traderId,
     };

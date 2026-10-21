@@ -78,6 +78,7 @@ interface Labels {
   readonly title: string;
   readonly totalDeductions: string;
   readonly trader: string;
+  readonly traderMobile: string;
   readonly traderAcknowledgement: string;
   readonly vat: string;
 }
@@ -148,6 +149,7 @@ const LABELS: Record<ReportLanguage, Labels> = {
     title: "فاتورة التاجر",
     totalDeductions: "إجمالي الخصومات",
     trader: "التاجر",
+    traderMobile: "جوال التاجر",
     traderAcknowledgement: "إقرار التاجر",
     vat: "ضريبة القيمة المضافة",
   },
@@ -216,6 +218,7 @@ const LABELS: Record<ReportLanguage, Labels> = {
     title: "Trader Invoice",
     totalDeductions: "Total Deductions",
     trader: "Trader",
+    traderMobile: "Trader Mobile",
     traderAcknowledgement: "Trader Acknowledgement",
     vat: "VAT",
   },
@@ -539,6 +542,9 @@ export function buildTraderSettlementStatementHtml(
     headerMeta(labels.settlementNumber, header.settlementNumber) +
     headerMeta(labels.status, settlementStatusLabel(labels, header.status)) +
     headerMeta(labels.trader, header.traderName, isFahdAlMalikiCompany ? "target-trader-name" : "") +
+    // Trader's mobile on every Company's invoice (Aiman, 21 Oct 2026); left
+    // off when the Trader has none saved rather than printing an empty line.
+    (header.traderMobile ? headerMeta(labels.traderMobile, header.traderMobile, "ltr-value") : "") +
     headerMeta(labels.paymentDate, header.paymentDate) +
     headerMeta(labels.paymentMethod, paymentMethodLabel(labels, header.paymentMethod)) +
     headerMeta(labels.paymentReference, header.paymentReference ?? "") +
@@ -686,6 +692,8 @@ export function buildTraderSettlementStatementHtml(
        needs every column still fits A4 portrait. */
     table.grid th.num { white-space: normal; }
     .negative { color: #a32626; }
+    /* A phone number keeps its own left-to-right order on the Arabic invoice. */
+    .ltr-value { direction: ltr; unicode-bidi: isolate; }
     .muted { color: #8a8a8a; }
     .mono { font-variant-numeric: tabular-nums; }
     .summary-section { margin-top: 12px; max-width: 360px; }
