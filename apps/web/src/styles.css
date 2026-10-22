@@ -1277,9 +1277,10 @@
   font-size: 13px;
 }
 .one-screen-settlement__chips .chip-on {
-  border-color: #1e3a8a;
-  background: #1e3a8a;
-  color: #fff;
+  border-color: #1d4ed8;
+  background: #dbeafe;
+  color: #1e3a8a;
+  font-weight: 600;
 }
 .one-screen-settlement__search {
   flex: 1;
@@ -1291,8 +1292,10 @@
   gap: 6px;
   font-size: 13px;
 }
+/* Full window (Aiman, 22 Oct 2026): the table takes the height left over. */
 .one-screen-settlement__table {
-  max-height: min(52vh, 560px);
+  max-height: calc(100vh - 380px);
+  min-height: 240px;
   overflow: auto;
 }
 .one-screen-settlement__table td.numeric,

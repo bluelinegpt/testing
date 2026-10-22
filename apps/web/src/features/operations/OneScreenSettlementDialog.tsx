@@ -242,7 +242,7 @@ export function OneScreenSettlementDialog({
     setLoading(true);
     setError(undefined);
     void Promise.all([
-      allPages<EligibleOrder>(api, `operations/settlements/payments/eligible-orders?traderId=${traderId}`, 200),
+      allPages<EligibleOrder>(api, `operations/settlements/payments/eligible-orders?traderId=${traderId}`, 100),
       allPages<EligibleReceivable>(
         api,
         `operations/trader-receivables/eligible?traderId=${traderId}&outstandingOnly=true&sortBy=businessDate&sortDirection=asc`,
@@ -535,7 +535,7 @@ export function OneScreenSettlementDialog({
 
   return (
     <Modal
-      className="modal-extra-wide one-screen-settlement"
+      className="modal-extra-wide new-trader-settlement-modal one-screen-settlement"
       closeLabel={t("common.close")}
       onRequestClose={onClose}
       title={
@@ -716,7 +716,7 @@ export function OneScreenSettlementDialog({
         </div>
         <div className="one-total">
           <span>{t("traderSettlements.oneScreen.totalFees")}</span>
-          <strong className="one-minus">−{money(totals.fee)}</strong>
+          <strong className="one-minus">{totals.fee === 0 ? money(0) : `−${money(totals.fee)}`}</strong>
         </div>
         {totals.credit === 0 ? null : (
           <div className="one-total">
