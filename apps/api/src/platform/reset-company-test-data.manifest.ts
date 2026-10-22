@@ -69,6 +69,7 @@ export const PURGE_TABLES = new Set([
   "trader_settlement_receivable_offsets",
   "trader_settlement_zero_due_orders",
   "trader_settlement_drafts",
+  "trader_zero_invoices",
   "trader_settlements",
   "trader_credits",
   // Payroll runs, calculations and payments
@@ -679,7 +680,7 @@ const MODULE_RULES: { module: string; tables?: string[]; prefixes?: string[] }[]
     module: "Driver commissions / outsourced Driver fees",
     prefixes: ["driver_commission", "outsourced_driver"],
   },
-  { module: "Trader Settlements", prefixes: ["trader_settlement"] },
+  { module: "Trader Settlements", prefixes: ["trader_settlement"], tables: ["trader_zero_invoices"] },
   { module: "Payroll", prefixes: ["payroll_"] },
   {
     module: "General Expenses",

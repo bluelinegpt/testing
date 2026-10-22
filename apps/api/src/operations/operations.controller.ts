@@ -106,6 +106,7 @@ import {
   TraderSettlementService,
   type CreateTraderSettlementResult,
   type TraderOwesDraftResult,
+  type ZeroInvoiceDraftResult,
   type Page as TraderSettlementPage,
   type TraderAllocationProposal,
   type TraderEligibleOrderRow,
@@ -1610,7 +1611,7 @@ export class OperationsController {
   public confirmTraderSettlementDraft(
     @Param("draftId", new ParseUUIDPipe()) draftId: string,
     @Req() request: Request,
-  ): Promise<CreateTraderSettlementResult | TraderOwesDraftResult> {
+  ): Promise<CreateTraderSettlementResult | TraderOwesDraftResult | ZeroInvoiceDraftResult> {
     return this.traderSettlementService.confirmDraft(draftId, this.correlationId(request));
   }
 

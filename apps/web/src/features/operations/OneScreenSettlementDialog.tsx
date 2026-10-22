@@ -500,13 +500,20 @@ export function OneScreenSettlementDialog({
     paymentMethod === "cash"
       ? !hasPayLine || cashAccountId !== ""
       : bankAccountId !== "" && bankReference.trim() !== "" && (!hasPayLine || traderBankAccountId !== "");
+  // Only "Nothing to pay" Orders ticked: posted as a numbered 0.00 invoice,
+  // the Trader's proof; no money and no payment details (22 Oct 2026).
+  const zeroOnly =
+    totals.zero.length > 0 && ticked.every((line) => line.kind === "zero");
   const canPost =
     traderId !== "" &&
     amountErrors.length === 0 &&
     !busy &&
-    (traderOwes ? owesPaymentReady : hasPayLine && totals.net > 0 && paymentReady);
+    (zeroOnly || (traderOwes ? owesPaymentReady : hasPayLine && totals.net > 0 && paymentReady));
   const canPreview =
-    traderId !== "" && !busy && amountErrors.length === 0 && (hasPayLine || hasFeeLine) && totals.net !== 0;
+    traderId !== "" &&
+    !busy &&
+    amountErrors.length === 0 &&
+    (zeroOnly || ((hasPayLine || hasFeeLine) && totals.net !== 0));
 
   const payload = () => ({
     allocations: ticked
@@ -585,9 +592,11 @@ export function OneScreenSettlementDialog({
     const traderName = trader?.name ?? draft?.traderName ?? "";
     if (
       !window.confirm(
-        traderOwes
-          ? t("traderSettlements.oneScreen.collectConfirm", { amount: money(-totals.net), trader: traderName })
-          : t("traderSettlements.oneScreen.postConfirm", { amount: money(totals.net), trader: traderName }),
+        zeroOnly
+          ? t("traderSettlements.oneScreen.zeroInvoiceConfirm", { count: totals.zero.length, trader: traderName })
+          : traderOwes
+            ? t("traderSettlements.oneScreen.collectConfirm", { amount: money(-totals.net), trader: traderName })
+            : t("traderSettlements.oneScreen.postConfirm", { amount: money(totals.net), trader: traderName }),
       )
     ) {
       return;
@@ -599,18 +608,21 @@ export function OneScreenSettlementDialog({
       const result = await api.post<{
         amountCollected?: string;
         collectionNumber?: string;
+        invoiceNumber?: string;
         settlementId: string | null;
       }>(`operations/settlements/drafts/${saved.id}/confirm`);
-      onPosted({
-        ...(result.collectionNumber === undefined
-          ? {}
-          : {
-              notice: t("traderSettlements.oneScreen.collectedNotice", {
+      const notice =
+        result.invoiceNumber !== undefined
+          ? t("traderSettlements.oneScreen.zeroInvoiceNotice", { number: result.invoiceNumber, trader: traderName })
+          : result.collectionNumber !== undefined
+            ? t("traderSettlements.oneScreen.collectedNotice", {
                 amount: money(result.amountCollected ?? -totals.net),
                 number: result.collectionNumber,
                 trader: traderName,
-              }),
-            }),
+              })
+            : undefined;
+      onPosted({
+        ...(notice === undefined ? {} : { notice }),
         settlementId: result.settlementId,
       });
     } catch (reason) {
@@ -1042,9 +1054,11 @@ export function OneScreenSettlementDialog({
           {t("traderSettlements.saveDraft")}
         </button>
         <button className="button button-primary" disabled={!canPost} onClick={() => void post()} type="button">
-          {traderOwes
-            ? t("traderSettlements.oneScreen.collect", { amount: money(-totals.net) })
-            : t("traderSettlements.oneScreen.post", { amount: money(totals.net) })}
+          {zeroOnly
+            ? t("traderSettlements.oneScreen.postZeroInvoice")
+            : traderOwes
+              ? t("traderSettlements.oneScreen.collect", { amount: money(-totals.net) })
+              : t("traderSettlements.oneScreen.post", { amount: money(totals.net) })}
         </button>
       </div>
       </>

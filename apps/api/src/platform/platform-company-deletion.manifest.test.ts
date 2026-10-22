@@ -106,7 +106,9 @@ describe("permanent Company deletion manifest", () => {
     // (Trader Credits paid in Settlements; PURGE, with its Settlement).
     // 180 -> 181 (22 Oct 2026): `trader_settlement_zero_due_orders` (0-due
     // Orders printed on a chosen Settlement; PURGE, with its Settlement).
-    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(181);
+    // 181 -> 182 (22 Oct 2026): `trader_zero_invoices` (0.00 Trader invoices
+    // for Nothing-to-pay Orders; PURGE, with its Settlement data).
+    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(182);
     expect(COMPANY_DELETION_MANIFEST_HASH).toMatch(/^[a-f0-9]{64}$/);
   });
 

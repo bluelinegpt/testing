@@ -204,6 +204,9 @@ interface TraderSettlementDraftRow {
   readonly confirmedCollectionId?: string | null;
   readonly confirmedCollectionNumber?: string | null;
   readonly confirmedCollectionReversed?: boolean | null;
+  /** Posted as a 0.00 invoice ("Nothing to pay" Orders only). */
+  readonly confirmedZeroInvoiceNumber?: string | null;
+  readonly confirmedZeroInvoiceReversed?: boolean | null;
   readonly amount: string;
   readonly orderCount: number;
   readonly createdAt: string;
@@ -685,12 +688,36 @@ export function TraderSettlementsWorkspace({
     );
     if (failure !== undefined) setDraftError(message(failure, t("traderSettlements.pdfGenerationFailed")));
   };
+  /** A draft posted as a collection from the Trader or as a 0.00 invoice. */
+  const postedOf = (
+    draft: TraderSettlementDraftRow,
+  ): { kind: "collection" | "zeroInvoice"; number: string; reversed: boolean } | undefined =>
+    draft.confirmedCollectionNumber
+      ? {
+          kind: "collection",
+          number: draft.confirmedCollectionNumber,
+          reversed: draft.confirmedCollectionReversed === true,
+        }
+      : draft.confirmedZeroInvoiceNumber
+        ? {
+            kind: "zeroInvoice",
+            number: draft.confirmedZeroInvoiceNumber,
+            reversed: draft.confirmedZeroInvoiceReversed === true,
+          }
+        : undefined;
   const postDraft = async (draft: TraderSettlementDraftRow) => {
     // A negative draft: the Trader owes, and posting collects it from him.
     const owes = safeMoneyValue(draft.amount) < 0;
+    const zeroOnly =
+      safeMoneyValue(draft.amount) === 0 && (draft.payload.zeroDueOrderIds ?? []).length > 0;
     if (
       !window.confirm(
-        owes
+        zeroOnly
+          ? t("traderSettlements.oneScreen.zeroInvoiceConfirm", {
+              count: (draft.payload.zeroDueOrderIds ?? []).length,
+              trader: draft.traderName,
+            })
+          : owes
           ? t("traderSettlements.oneScreen.collectConfirm", {
               amount: money(-safeMoneyValue(draft.amount)),
               trader: draft.traderName,
@@ -706,8 +733,17 @@ export function TraderSettlementsWorkspace({
       const result = await api.post<{
         amountCollected?: string;
         collectionNumber?: string;
+        invoiceNumber?: string;
         settlementId: string | null;
       }>(`operations/settlements/drafts/${draft.id}/confirm`);
+      if (result.invoiceNumber !== undefined) {
+        setReceiptNotice(
+          t("traderSettlements.oneScreen.zeroInvoiceNotice", {
+            number: result.invoiceNumber,
+            trader: draft.traderName,
+          }),
+        );
+      }
       if (result.collectionNumber !== undefined) {
         setReceiptNotice(
           t("traderSettlements.oneScreen.collectedNotice", {
@@ -991,33 +1027,33 @@ export function TraderSettlementsWorkspace({
                       >
                         {draft.status === "draft"
                           ? t("traderSettlements.statusDraft")
-                          : draft.confirmedCollectionNumber
-                            ? draft.confirmedCollectionReversed
-                              ? t("traderSettlements.oneScreen.collectionUnposted", {
-                                  number: draft.confirmedCollectionNumber,
-                                })
-                              : t("traderSettlements.oneScreen.collectionPosted", {
-                                  number: draft.confirmedCollectionNumber,
-                                })
+                          : postedOf(draft) !== undefined
+                            ? t(
+                                `traderSettlements.oneScreen.${postedOf(draft)!.kind}${
+                                  postedOf(draft)!.reversed ? "Unposted" : "Posted"
+                                }`,
+                                { number: postedOf(draft)!.number },
+                              )
                             : t("traderSettlements.statusConfirmed")}
                       </span>
                     </td>
                     <td className="settlement-drafts__muted">{draft.updatedAt.slice(0, 10)}</td>
                     <td>
                       <div className="settlement-drafts__actions">
-                        {draft.confirmedCollectionNumber ? (
-                          /* Posted as a collection from the Trader: its invoice,
-                             and Un-post & adjust while it stands. */
+                        {postedOf(draft) !== undefined ? (
+                          /* Posted as a collection from the Trader or a 0.00
+                             invoice: its invoice, and Un-post & adjust while
+                             it stands. */
                           <>
                             <button onClick={() => void previewDraft(draft)} type="button">
                               {t("traderSettlements.oneScreen.invoice")}
                             </button>
-                            {oneScreen && !draft.confirmedCollectionReversed ? (
+                            {oneScreen && !postedOf(draft)!.reversed ? (
                               <button
                                 onClick={() =>
                                   setUnpostTarget({
                                     id: draft.id,
-                                    number: draft.confirmedCollectionNumber ?? "",
+                                    number: postedOf(draft)!.number,
                                     path: `operations/settlements/drafts/${draft.id}/unpost`,
                                   })
                                 }

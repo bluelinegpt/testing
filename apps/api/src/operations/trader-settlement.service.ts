@@ -73,6 +73,13 @@ const draftProjection = sql`
   (select tc.status = 'reversed' from trader_collections tc
     where tc.company_id = d.company_id
       and tc.id = (to_jsonb(d) ->> 'confirmed_collection_id')::uuid) as "confirmedCollectionReversed",
+  (to_jsonb(d) ->> 'confirmed_zero_invoice_id') as "confirmedZeroInvoiceId",
+  (select zi.invoice_number from trader_zero_invoices zi
+    where zi.company_id = d.company_id
+      and zi.id = (to_jsonb(d) ->> 'confirmed_zero_invoice_id')::uuid) as "confirmedZeroInvoiceNumber",
+  (select zi.reversed_at is not null from trader_zero_invoices zi
+    where zi.company_id = d.company_id
+      and zi.id = (to_jsonb(d) ->> 'confirmed_zero_invoice_id')::uuid) as "confirmedZeroInvoiceReversed",
   round(coalesce((d.payload->>'amount')::numeric, 0), 2)::text as "amount",
   case when jsonb_typeof(d.payload->'allocations') = 'array'
        then jsonb_array_length(d.payload->'allocations')
@@ -296,11 +303,33 @@ export interface TraderOwesDraftResult {
 /** A draft as the un-post paths read it, with the Collection it was posted as. */
 interface PostedDraftRow {
   readonly collectionId: string | null;
+  readonly zeroInvoiceId?: string | null;
   readonly confirmedSettlementId: string | null;
   readonly id: string;
   readonly payload: CreateTraderSettlementDto;
   readonly status: string;
   readonly traderId: string;
+}
+
+/** A one-screen draft with only "Nothing to pay" Orders, posted as a 0.00 invoice. */
+export interface ZeroInvoiceDraftResult {
+  readonly draftId: string;
+  readonly invoiceId: string;
+  readonly invoiceNumber: string;
+  readonly orderCount: number;
+  readonly settlementId: null;
+}
+
+/** True when the request ticks only "Nothing to pay" Orders: no pay, fee or credit line. */
+export function draftIsZeroOnly(input: CreateTraderSettlementDto): boolean {
+  const anyMoney = (lines: readonly { readonly amount: number }[] | undefined) =>
+    (lines ?? []).some((line) => line.amount > 0);
+  return (
+    (input.zeroDueOrderIds ?? []).length > 0 &&
+    !anyMoney(input.allocations) &&
+    !anyMoney(input.receivableOffsets) &&
+    !anyMoney(input.creditApplications)
+  );
 }
 
 /** Net of a settlement request: orders - fee deductions + credits. */
@@ -565,6 +594,10 @@ export interface TraderSettlementDraft {
   readonly confirmedCollectionId?: string | null;
   readonly confirmedCollectionNumber?: string | null;
   readonly confirmedCollectionReversed?: boolean | null;
+  /** Set when only "Nothing to pay" Orders were posted: the 0.00 invoice (and whether it was un-posted). */
+  readonly confirmedZeroInvoiceId?: string | null;
+  readonly confirmedZeroInvoiceNumber?: string | null;
+  readonly confirmedZeroInvoiceReversed?: boolean | null;
   readonly amount: string;
   readonly orderCount: number;
 }
@@ -1013,11 +1046,17 @@ export class TraderSettlementService {
     companyId: string,
     traderId: string,
     onlyOrderIds?: readonly string[],
+    /** Reprint of a posted 0.00 invoice: its own Orders as they are, already invoiced. */
+    reprint = false,
   ): Promise<readonly TraderZeroDueOrderRow[]> {
     const idFilter =
       onlyOrderIds === undefined
         ? sql`true`
         : sql`o.id = any(${[...onlyOrderIds]}::uuid[])`;
+    const eligibility =
+      reprint && onlyOrderIds !== undefined
+        ? sql`true`
+        : sql`${this.zeroDueOrderQualifies()} and not ${this.zeroDueChosenOnEffectiveSettlement()}`;
     const result = await sql<TraderZeroDueOrderRow>`
       select o.id, o.order_number as "orderNumber", o.order_type as "orderType",
              coalesce(o.serial_number, o.order_number) as "serialNumber",
@@ -1041,8 +1080,7 @@ export class TraderSettlementService {
        where o.company_id = ${companyId}::uuid
          and o.trader_id = ${traderId}::uuid
          and ${idFilter}
-         and ${this.zeroDueOrderQualifies()}
-         and not ${this.zeroDueChosenOnEffectiveSettlement()}
+         and ${eligibility}
        order by o.delivered_at desc, coalesce(o.serial_number, o.order_number) desc
        limit 500
     `.execute(executor);
@@ -1058,12 +1096,19 @@ export class TraderSettlementService {
 
   /** Order `o` already chosen to print on an effective Settlement. */
   private zeroDueChosenOnEffectiveSettlement(): RawBuilder<unknown> {
-    return sql`exists (
+    // ... or printed on a 0.00 invoice that was not un-posted (22 Oct 2026).
+    return sql`(exists (
       select 1
         from trader_settlement_zero_due_orders zc
         join trader_settlements zs on zs.id = zc.settlement_id and zs.company_id = zc.company_id
        where zc.company_id = o.company_id and zc.order_id = o.id
-         and ${this.effectiveSettlement(sql`zs`)})`;
+         and ${this.effectiveSettlement(sql`zs`)})
+      or exists (
+      select 1
+        from trader_settlement_zero_due_orders zic
+        join trader_zero_invoices zi on zi.id = zic.zero_invoice_id and zi.company_id = zic.company_id
+       where zic.company_id = o.company_id and zic.order_id = o.id
+         and zi.reversed_at is null))`;
   }
 
   /**
@@ -1899,7 +1944,7 @@ export class TraderSettlementService {
   public async confirmDraft(
     draftId: string,
     correlationId: string,
-  ): Promise<CreateTraderSettlementResult | TraderOwesDraftResult> {
+  ): Promise<CreateTraderSettlementResult | TraderOwesDraftResult | ZeroInvoiceDraftResult> {
     this.assertAnyPermission("settlements.create");
     const { companyId } = this.tenants.current();
     return this.transactions.execute(async (transaction) => {
@@ -1919,6 +1964,10 @@ export class TraderSettlementService {
       // as a Collection from the Trader, plus a Settlement for any orders.
       if (draftNet(row.payload).lessThan(0) && (await this.oneScreenEnabled(transaction, companyId))) {
         return this.postTraderOwesDraft(transaction, companyId, draftId, row.payload, correlationId);
+      }
+      // Only "Nothing to pay" Orders: a numbered 0.00 invoice, no money.
+      if (draftIsZeroOnly(row.payload) && (await this.oneScreenEnabled(transaction, companyId))) {
+        return this.postZeroInvoiceDraft(transaction, companyId, draftId, row.payload, correlationId);
       }
       const result = await this.createPayment(
         row.payload,
@@ -2042,6 +2091,72 @@ export class TraderSettlementService {
       settlementId: settlement?.settlementId ?? null,
       settlementNumber: settlement?.settlementNumber ?? null,
     };
+  }
+
+  /**
+   * Post a one-screen draft with only "Nothing to pay" Orders as a numbered
+   * 0.00 invoice (Aiman, 22 Oct 2026): the Trader's proof that the customer
+   * paid and the Company kept its fee. No money moves -- no payment, cash,
+   * bank or accounting row. Its Orders are remembered as invoiced (not offered
+   * again) until it is un-posted.
+   */
+  private async postZeroInvoiceDraft(
+    transaction: Transaction<DatabaseSchema>,
+    companyId: string,
+    draftId: string,
+    payload: CreateTraderSettlementDto,
+    correlationId: string,
+  ): Promise<ZeroInvoiceDraftResult> {
+    const identity = this.identities.current();
+    const orderIds = [...new Set(payload.zeroDueOrderIds ?? [])];
+    // Serialise per Trader, as a Settlement does, before reading eligibility.
+    await sql`
+      select id from traders where id = ${payload.traderId}::uuid and company_id = ${companyId}::uuid for update
+    `.execute(transaction);
+    const chosen = await this.zeroDueCandidates(transaction, companyId, payload.traderId, orderIds);
+    if (chosen.length !== orderIds.length || chosen.length === 0) {
+      throw new ApplicationException(
+        "settlement_zero_due_order_ineligible",
+        "One or more Orders with nothing to pay can no longer be invoiced. Refresh and try again.",
+        HttpStatus.CONFLICT,
+      );
+    }
+    const invoiceNumber = await this.history.nextReferenceNumber(
+      transaction,
+      companyId,
+      "trader_zero_invoice",
+      "INV",
+    );
+    const invoice = (
+      await sql<{ id: string }>`
+        insert into trader_zero_invoices (company_id, trader_id, invoice_number, created_by_account_id)
+        values (${companyId}::uuid, ${payload.traderId}::uuid, ${invoiceNumber}, ${identity.identityId}::uuid)
+        returning id
+      `.execute(transaction)
+    ).rows[0];
+    if (invoice === undefined) throw new Error("0.00 invoice was not saved");
+    for (const order of chosen) {
+      await sql`
+        insert into trader_settlement_zero_due_orders (company_id, zero_invoice_id, order_id, created_by_account_id)
+        values (${companyId}::uuid, ${invoice.id}::uuid, ${order.id}::uuid, ${identity.identityId}::uuid)
+      `.execute(transaction);
+    }
+    await sql`
+      update trader_settlement_drafts
+         set status = 'confirmed', confirmed_zero_invoice_id = ${invoice.id}::uuid,
+             confirmed_at = now(), updated_at = now()
+       where id = ${draftId}::uuid and company_id = ${companyId}::uuid and status = 'draft'
+    `.execute(transaction);
+    await this.history.audit(transaction, {
+      action: "trader_settlement.zero_invoice_posted",
+      actorId: identity.identityId,
+      after: { draftId, invoiceNumber, orderCount: chosen.length, traderId: payload.traderId },
+      companyId,
+      correlationId,
+      subjectId: invoice.id,
+      subjectType: "trader_settlement",
+    });
+    return { draftId, invoiceId: invoice.id, invoiceNumber, orderCount: chosen.length, settlementId: null };
   }
 
   /**
@@ -3452,7 +3567,8 @@ export class TraderSettlementService {
         await sql<PostedDraftRow>`
           select d.id, d.trader_id as "traderId", d.payload, d.status,
                  d.confirmed_settlement_id as "confirmedSettlementId",
-                 (to_jsonb(d) ->> 'confirmed_collection_id') as "collectionId"
+                 (to_jsonb(d) ->> 'confirmed_collection_id') as "collectionId",
+                 (to_jsonb(d) ->> 'confirmed_zero_invoice_id') as "zeroInvoiceId"
             from trader_settlement_drafts d
            where d.company_id = ${companyId}::uuid and d.confirmed_settlement_id = ${settlementId}::uuid
            for update
@@ -3558,7 +3674,8 @@ export class TraderSettlementService {
         await sql<PostedDraftRow>`
           select d.id, d.trader_id as "traderId", d.payload, d.status,
                  d.confirmed_settlement_id as "confirmedSettlementId",
-                 (to_jsonb(d) ->> 'confirmed_collection_id') as "collectionId"
+                 (to_jsonb(d) ->> 'confirmed_collection_id') as "collectionId",
+                 (to_jsonb(d) ->> 'confirmed_zero_invoice_id') as "zeroInvoiceId"
             from trader_settlement_drafts d
            where d.id = ${draftId}::uuid and d.company_id = ${companyId}::uuid
            for update
@@ -3567,15 +3684,92 @@ export class TraderSettlementService {
       if (draft === undefined) {
         throw new ApplicationException("trader_settlement_draft_not_found", "Trader settlement draft not found", HttpStatus.NOT_FOUND);
       }
+      if (draft.status === "confirmed" && draft.zeroInvoiceId) {
+        return this.unpostZeroInvoiceInTransaction(transaction, companyId, draft, trimmedReason, correlationId);
+      }
       if (draft.status !== "confirmed" || !draft.collectionId) {
         throw new ApplicationException(
           "settlement_unpost_invalid",
-          "Only a posted collection from the Trader can be un-posted here",
+          "Only a posted collection from the Trader or a 0.00 invoice can be un-posted here",
           HttpStatus.CONFLICT,
         );
       }
       return this.unpostTraderOwesInTransaction(transaction, companyId, draft, trimmedReason, correlationId);
     });
+  }
+
+  /**
+   * Un-post a 0.00 invoice: mark it reversed (its Orders can be invoiced
+   * again) and reopen the same lines as a new draft. No money was involved.
+   */
+  private async unpostZeroInvoiceInTransaction(
+    transaction: Transaction<DatabaseSchema>,
+    companyId: string,
+    draft: PostedDraftRow,
+    reason: string,
+    correlationId: string,
+  ): Promise<{
+    readonly draftId: string;
+    readonly reversalSettlementNumber: string;
+    readonly settlementNumber: string;
+  }> {
+    const identity = this.identities.current();
+    const invoice = (
+      await sql<{ invoiceNumber: string; reversed: boolean }>`
+        select invoice_number as "invoiceNumber", reversed_at is not null as reversed
+          from trader_zero_invoices
+         where id = ${draft.zeroInvoiceId}::uuid and company_id = ${companyId}::uuid
+         for update
+      `.execute(transaction)
+    ).rows[0];
+    if (invoice === undefined || invoice.reversed) {
+      throw new ApplicationException(
+        "settlement_unpost_invalid",
+        "This 0.00 invoice was already un-posted",
+        HttpStatus.CONFLICT,
+      );
+    }
+    const openDraft = (
+      await sql<{ id: string }>`
+        select id from trader_settlement_drafts
+         where company_id = ${companyId}::uuid and trader_id = ${draft.traderId}::uuid and status = 'draft'
+      `.execute(transaction)
+    ).rows[0];
+    if (openDraft !== undefined) {
+      throw new ApplicationException(
+        "trader_settlement_draft_already_open",
+        "This Trader already has a draft. Post or delete it before un-posting another settlement.",
+        HttpStatus.CONFLICT,
+        [openDraft.id],
+      );
+    }
+    await sql`
+      update trader_zero_invoices
+         set reversed_at = now(), reversed_by_account_id = ${identity.identityId}::uuid, reversal_reason = ${reason}
+       where id = ${draft.zeroInvoiceId}::uuid and company_id = ${companyId}::uuid
+    `.execute(transaction);
+    const reopened = (
+      await sql<{ id: string }>`
+        insert into trader_settlement_drafts(
+          company_id, trader_id, payload, created_by_account_id, updated_by_account_id
+        ) values (
+          ${companyId}::uuid, ${draft.traderId}::uuid, ${JSON.stringify(draft.payload)}::jsonb,
+          ${identity.identityId}::uuid, ${identity.identityId}::uuid
+        )
+        returning id
+      `.execute(transaction)
+    ).rows[0];
+    if (reopened === undefined) throw new Error("Un-post draft was not saved");
+    await this.history.audit(transaction, {
+      action: "trader_settlement.zero_invoice_unposted",
+      actorId: identity.identityId,
+      after: { draftId: reopened.id, invoiceNumber: invoice.invoiceNumber, postedDraftId: draft.id, reason },
+      companyId,
+      correlationId,
+      subjectId: draft.zeroInvoiceId ?? "",
+      subjectType: "trader_settlement",
+    });
+    return { draftId: reopened.id, reversalSettlementNumber: "—", settlementNumber: invoice.invoiceNumber };
   }
 
   /**
@@ -3790,7 +3984,44 @@ export class TraderSettlementService {
     if (draft.status === "confirmed" && draft.confirmedCollectionId) {
       return this.postedTraderOwesPdf(draft, language);
     }
+    if (draft.status === "confirmed" && draft.confirmedZeroInvoiceId) {
+      return this.postedZeroInvoicePdf(draft, language);
+    }
     return this.draftPreviewPdf(draft.payload, language);
+  }
+
+  /** The posted 0.00 invoice: its "Nothing to pay" Orders, numbered INV-…, total 0.00. */
+  private async postedZeroInvoicePdf(
+    draft: TraderSettlementDraft,
+    language: ReportLanguage,
+  ): Promise<{ bytes: Buffer; filename: string }> {
+    this.assertAnyPermission(["settlements.create", "reports.export"]);
+    const { companyId } = this.tenants.current();
+    const invoice = (
+      await sql<{ confirmedBy: string | null; invoiceNumber: string; orderIds: string[] }>`
+        select zi.invoice_number as "invoiceNumber",
+               (select a.username from accounts a
+                 where a.id = zi.created_by_account_id and a.company_id = zi.company_id) as "confirmedBy",
+               coalesce((select array_agg(z.order_id::text) from trader_settlement_zero_due_orders z
+                          where z.company_id = zi.company_id and z.zero_invoice_id = zi.id), '{}') as "orderIds"
+          from trader_zero_invoices zi
+         where zi.id = ${draft.confirmedZeroInvoiceId}::uuid and zi.company_id = ${companyId}::uuid
+      `.execute(this.database)
+    ).rows[0];
+    if (invoice === undefined) {
+      throw new ApplicationException("trader_zero_invoice_not_found", "Invoice not found", HttpStatus.NOT_FOUND);
+    }
+    const data = await this.draftReportData(
+      { ...draft.payload, zeroDueOrderIds: invoice.orderIds },
+      { confirmedBy: invoice.confirmedBy ?? "", number: invoice.invoiceNumber, zeroInvoice: true },
+    );
+    const html = buildTraderSettlementStatementHtml(data, language);
+    const footerTemplate =
+      language === "ar"
+        ? `<div style="font-size:9px;width:100%;text-align:center;color:#666;direction:rtl;">الصفحة <span class="pageNumber"></span> من <span class="totalPages"></span></div>`
+        : `<div style="font-size:9px;width:100%;text-align:center;color:#666;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>`;
+    const bytes = await this.pdf.renderPdf(html, footerTemplate);
+    return { bytes, filename: `Trader-Invoice-${invoice.invoiceNumber}.pdf` };
   }
 
   /**
@@ -3848,7 +4079,7 @@ export class TraderSettlementService {
   private async draftReportData(
     input: CreateTraderSettlementDto,
     /** A posted "Trader owes" draft: its number and poster; amounts as posted. */
-    posted?: { readonly confirmedBy: string; readonly number: string },
+    posted?: { readonly confirmedBy: string; readonly number: string; readonly zeroInvoice?: boolean },
   ): Promise<TraderSettlementReportData> {
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
@@ -3966,7 +4197,13 @@ export class TraderSettlementService {
     const zero =
       zeroIds.length === 0
         ? []
-        : await this.zeroDueCandidates(this.database, companyId, input.traderId, zeroIds);
+        : await this.zeroDueCandidates(
+            this.database,
+            companyId,
+            input.traderId,
+            zeroIds,
+            posted?.zeroInvoice === true,
+          );
     const zeroLines: TraderSettlementDetailOrder[] = zero.map((row) => ({
       additionalFees: new Decimal(row.additionalFees).toFixed(2),
       amountPaidNow: "0.00",
