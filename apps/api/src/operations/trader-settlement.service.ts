@@ -2821,7 +2821,38 @@ export class TraderSettlementService {
           join orders o on o.company_id = cur.company_id and o.trader_id = cur.trader_id
           left join areas a on a.id = o.area_id and a.company_id = o.company_id
           left join emirates e on e.id = a.emirate_id
-         where o.payment_condition = 'customer_pays_cod_and_fee'
+         where (
+             o.payment_condition = 'customer_pays_cod_and_fee'
+             -- "Pay by Trader" too when its fee was collected DIRECTLY (Collect
+             -- Money from Trader) rather than deducted in a Settlement -- e.g.
+             -- 05220, RCV-000067 (Aiman, 22 Oct 2026). A fee deducted in a
+             -- Settlement already prints there as a deduction line; one still
+             -- unpaid prints when it is deducted or collected.
+             or (o.payment_condition = 'customer_pays_cod_trader_pays_fee'
+               and exists (
+                 select 1
+                   from trader_receivables r
+                   join trader_collection_allocations alloc
+                     on alloc.company_id = r.company_id and alloc.receivable_id = r.id
+                   join trader_collections c
+                     on c.id = alloc.collection_id and c.company_id = alloc.company_id
+                  where r.company_id = o.company_id and r.source_type = 'service_charge'
+                    and r.source_reference = o.order_number
+                    and r.status not in ('cancelled', 'reversed')
+                    and c.status <> 'reversed')
+               and not exists (
+                 select 1
+                   from trader_receivables r
+                   join trader_settlement_receivable_offsets off
+                     on off.company_id = r.company_id and off.receivable_id = r.id
+                   join trader_settlements os
+                     on os.id = off.settlement_id and os.company_id = off.company_id
+                  where r.company_id = o.company_id and r.source_type = 'service_charge'
+                    and r.source_reference = o.order_number
+                    and os.status = 'confirmed' and os.reversal_of_id is null
+                    and not exists (select 1 from trader_settlements orv
+                         where orv.company_id = os.company_id and orv.reversal_of_id = os.id)))
+           )
            and o.order_type <> 'collect_order'
            and o.delivery_status in ('delivered', 'closed')
            and o.trader_net_payable = 0
