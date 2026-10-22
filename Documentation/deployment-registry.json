@@ -6,13 +6,13 @@
       "displayName": "Public website",
       "path": "apps/public-web",
       "renderService": "tawseelhub-public-web",
-      "status": "pushed_awaiting_confirmation",
+      "status": "confirmed_live",
       "localCommit": "b635e0d3",
       "localCommitDate": "2026-10-23",
       "lastChangeDescription": "Fix language switching for untranslated software pages",
       "lastChangeBy": "codex",
-      "confirmedLiveCommit": null,
-      "confirmedLiveAt": null
+      "confirmedLiveCommit": "b635e0d3",
+      "confirmedLiveAt": "2026-10-22"
     },
     {
       "id": "api",
