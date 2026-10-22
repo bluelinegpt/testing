@@ -153,10 +153,13 @@ interface ZeroDueOrderRow {
   readonly additionalFees: string;
   readonly areaName: string;
   readonly codAmount: string;
+  readonly customerMobileNumber: string;
   readonly customerName: string;
   readonly deliveryDate: string | null;
+  readonly emirateName: string | null;
   readonly id: string;
   readonly orderNumber: string;
+  readonly orderType?: string;
   readonly printedOnSettlementNumber: string | null;
   readonly referenceNumber: string | null;
   readonly serialNumber: string;
@@ -1991,6 +1994,17 @@ function NewSettlementDialog({
   // ones print on this Settlement's invoice at 0.00 (no money).
   const [zeroDueOrders, setZeroDueOrders] = useState<readonly ZeroDueOrderRow[]>([]);
   const [zeroDueOrderIds, setZeroDueOrderIds] = useState<readonly string[]>([]);
+  // 0-due rows follow the Order Number / Reference Number filters like the
+  // Orders around them: a list is an exact match, one value a partial one.
+  const matchesListFilter = (filter: string, value: string | null): boolean => {
+    const given = filter.trim();
+    if (given === "") return true;
+    const terms = given.split(/[,،\n]+/).map((term) => term.trim()).filter((term) => term !== "");
+    const candidate = (value ?? "").trim();
+    return terms.length > 1
+      ? terms.includes(candidate)
+      : candidate.toLowerCase().includes(given.toLowerCase());
+  };
 
   // Step 3 — Payment Details.
   const [amount, setAmount] = useState("");
@@ -2076,6 +2090,12 @@ function NewSettlementDialog({
      checkbox would tick -- a total spanning unseen pages would not. */
   const selectedOrderIds = new Set(allocations.map((line) => line.orderId));
   const selectedEligibleOrders = eligibleOrders.filter((order) => selectedOrderIds.has(order.id));
+  const visibleZeroDueOrders = zeroDueOrders.filter(
+    (order) =>
+      zeroDueOrderIds.includes(order.id) ||
+      (matchesListFilter(orderFilters.orderNumber, order.orderNumber) &&
+        matchesListFilter(orderFilters.referenceNumber, order.referenceNumber)),
+  );
   const sumOutstanding = (rows: readonly TraderEligibleOrderRow[]) =>
     rows.reduce((total, order) => total + safeMoneyValue(order.outstandingBalance), 0);
   const listedOutstandingTotal = sumOutstanding(eligibleOrders);
@@ -3342,6 +3362,49 @@ function NewSettlementDialog({
                           </td>
                         </tr>
                       ))}
+                      {/* Delivered Orders that pay the Trader 0. Ticking one
+                          prints it on this Settlement's invoice at 0.00; no
+                          money moves and "Select all" never ticks them. */}
+                      {visibleZeroDueOrders.map((order) => (
+                        <tr className="row-zero-due" key={`zero-${order.id}`}>
+                          <td>
+                            <input
+                              aria-label={t("traderSettlements.zeroDueAdd", {
+                                number: order.referenceNumber ?? order.orderNumber,
+                              })}
+                              checked={zeroDueOrderIds.includes(order.id)}
+                              disabled={draftReadOnly}
+                              onChange={(event) =>
+                                setZeroDueOrderIds((current) =>
+                                  event.target.checked
+                                    ? [...current, order.id]
+                                    : current.filter((id) => id !== order.id),
+                                )
+                              }
+                              type="checkbox"
+                            />
+                          </td>
+                          <td className="mono">{order.orderNumber}</td>
+                          <td className="mono">{order.serialNumber}</td>
+                          <td>{order.orderType ?? "delivery"}</td>
+                          <td className="mono">{order.referenceNumber ?? "-"}</td>
+                          <td>{order.deliveryDate === null ? "-" : order.deliveryDate.slice(0, 10)}</td>
+                          <td>{order.emirateName ?? "-"}</td>
+                          <td>{order.areaName === "" ? "-" : order.areaName}</td>
+                          <td>{order.customerName}<span className="cell-secondary">{order.customerMobileNumber}</span></td>
+                          <td>{t("traderSettlements.zeroDueItem")}</td>
+                          <td>{money(0)}</td>
+                          <td>{money(0)}</td>
+                          <td>{money(0)}</td>
+                          <td>
+                            {order.printedOnSettlementNumber === null
+                              ? "-"
+                              : t("traderSettlements.zeroDuePrintsOn", {
+                                  number: order.printedOnSettlementNumber,
+                                })}
+                          </td>
+                        </tr>
+                      ))}
                       {eligibleReceivables.map((receivable) => {
                         const offset = receivableOffsets.find(
                           (line) => line.receivableId === receivable.id,
@@ -3460,7 +3523,9 @@ function NewSettlementDialog({
                           </tr>
                         );
                       })}
-                      {eligibleOrders.length === 0 && eligibleReceivables.length === 0 ? (
+                      {eligibleOrders.length === 0 &&
+                      eligibleReceivables.length === 0 &&
+                      visibleZeroDueOrders.length === 0 ? (
                         <tr>
                           <td className="empty-state" colSpan={12}>
                             {t("traderSettlements.noEligibleOrders")}
@@ -3521,73 +3586,6 @@ function NewSettlementDialog({
                       {t("common.next")}
                     </button>
                   </nav>
-                )}
-                {zeroDueOrders.length === 0 ? null : (
-                  <details className="zero-due-orders" open={zeroDueOrderIds.length > 0}>
-                    <summary>
-                      {t("traderSettlements.zeroDueTitle", { count: zeroDueOrders.length })}
-                      {zeroDueOrderIds.length === 0 ? null : (
-                        <strong>
-                          {" · "}
-                          {t("traderSettlements.zeroDueSelected", { count: zeroDueOrderIds.length })}
-                        </strong>
-                      )}
-                    </summary>
-                    <p className="form-hint">{t("traderSettlements.zeroDueHelp")}</p>
-                    <div className="table-scroll">
-                      <table className="data-table">
-                        <thead>
-                          <tr>
-                            <th aria-label={t("common.select")} scope="col" />
-                            <th scope="col">{t("operations.orderNumber")}</th>
-                            <th scope="col">{t("traderSettlements.filterOrderSerialNumber")}</th>
-                            <th scope="col">{t("traderSettlements.filterExternalReference")}</th>
-                            <th scope="col">{t("traderSettlements.filterDeliveryDateFrom")}</th>
-                            <th scope="col">{t("traderSettlements.filterArea")}</th>
-                            <th scope="col">{t("operations.codAmount")}</th>
-                            <th scope="col">{t("traderSettlements.zeroDueFees")}</th>
-                            <th scope="col">{t("traderSettlements.zeroDuePrintedOn")}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {zeroDueOrders.map((order) => {
-                            const checked = zeroDueOrderIds.includes(order.id);
-                            return (
-                              <tr key={order.id}>
-                                <td>
-                                  <input
-                                    aria-label={t("traderSettlements.zeroDueAdd", {
-                                      number: order.referenceNumber ?? order.orderNumber,
-                                    })}
-                                    checked={checked}
-                                    disabled={draftReadOnly}
-                                    onChange={(event) =>
-                                      setZeroDueOrderIds((current) =>
-                                        event.target.checked
-                                          ? [...current, order.id]
-                                          : current.filter((id) => id !== order.id),
-                                      )
-                                    }
-                                    type="checkbox"
-                                  />
-                                </td>
-                                <td className="mono">{order.orderNumber}</td>
-                                <td className="mono">{order.serialNumber}</td>
-                                <td className="mono">{order.referenceNumber ?? "-"}</td>
-                                <td>{order.deliveryDate?.slice(0, 10) ?? "-"}</td>
-                                <td>{order.areaName || "-"}</td>
-                                <td className="numeric">{money(order.codAmount)}</td>
-                                <td className="numeric">
-                                  {money(safeMoneyValue(order.serviceFee) + safeMoneyValue(order.additionalFees))}
-                                </td>
-                                <td className="mono">{order.printedOnSettlementNumber ?? "-"}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </details>
                 )}
               </section>
 

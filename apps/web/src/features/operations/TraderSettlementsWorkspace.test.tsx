@@ -601,8 +601,10 @@ describe("TraderSettlementsWorkspace", () => {
                 additionalFees: "0.00",
                 areaName: "Deira",
                 codAmount: "15.00",
+                customerMobileNumber: "0500000000",
                 customerName: "Customer",
                 deliveryDate: "2026-10-21T02:02:24.231Z",
+                emirateName: "Dubai",
                 id: "order-zero",
                 orderNumber: "ORD-001377",
                 printedOnSettlementNumber: "SET-000155",
@@ -618,7 +620,14 @@ describe("TraderSettlementsWorkspace", () => {
     fireEvent.click(await dialog.findByRole("button", { name: /Test Trader/ }));
     const tick = await dialog.findByRole("checkbox", { name: "Print 04980 on this invoice" });
     expect(tick).not.toBeChecked();
-    expect(dialog.getByText("SET-000155")).toBeInTheDocument();
+    // In the same table as the paying Orders, at 0.00.
+    const row = tick.closest("tr")!;
+    expect(row.closest("table")).toBe(dialog.getByText("SER-1").closest("table"));
+    expect(row.textContent).toContain("Nothing to pay (0.00)");
+    expect(row.textContent).toContain("Prints on SET-000155");
+    // "Select all" ticks only the paying Orders.
+    fireEvent.click(dialog.getByRole("checkbox", { name: "Select all listed Orders" }));
+    expect(tick).not.toBeChecked();
     fireEvent.click(tick);
     fireEvent.change(dialog.getByLabelText("Gross Order Payable (+)"), { target: { value: "100" } });
     await dialog.findByText("Outstanding Before");

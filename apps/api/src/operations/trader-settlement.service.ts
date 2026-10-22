@@ -223,6 +223,7 @@ export interface TraderZeroDueOrderRow {
   readonly emirateName: string | null;
   readonly id: string;
   readonly orderNumber: string;
+  readonly orderType: "collect_order" | "delivery" | "gcc_international";
   readonly paymentCondition: string;
   /** The invoice it prints on today by date, if any (e.g. SET-000155). */
   readonly printedOnSettlementNumber: string | null;
@@ -928,7 +929,7 @@ export class TraderSettlementService {
         ? sql`true`
         : sql`o.id = any(${[...onlyOrderIds]}::uuid[])`;
     const result = await sql<TraderZeroDueOrderRow>`
-      select o.id, o.order_number as "orderNumber",
+      select o.id, o.order_number as "orderNumber", o.order_type as "orderType",
              coalesce(o.serial_number, o.order_number) as "serialNumber",
              o.reference_number as "referenceNumber", o.delivered_at::text as "deliveryDate",
              o.customer_name as "customerName", o.customer_mobile_number as "customerMobileNumber",
