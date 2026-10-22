@@ -248,8 +248,12 @@ export function OneScreenSettlementDialog({
         `operations/trader-receivables/eligible?traderId=${traderId}&outstandingOnly=true&sortBy=businessDate&sortDirection=asc`,
         100,
       ),
-      api.get<readonly OpenCredit[]>(`operations/settlements/payments/open-credits?traderId=${traderId}`).catch(() => []),
-      api.get<readonly ZeroDueOrder[]>(`operations/settlements/payments/zero-due-orders?traderId=${traderId}`).catch(() => []),
+      api
+        .get<readonly OpenCredit[]>(`operations/settlements/payments/open-credits?traderId=${traderId}`)
+        .catch((): readonly OpenCredit[] => []),
+      api
+        .get<readonly ZeroDueOrder[]>(`operations/settlements/payments/zero-due-orders?traderId=${traderId}`)
+        .catch((): readonly ZeroDueOrder[] => []),
     ])
       .then(([orders, receivables, credits, zeroDue]) => {
         if (!active) return;
