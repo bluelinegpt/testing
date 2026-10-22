@@ -2132,6 +2132,7 @@ export const arabicTranslations = {
     fastEntryUsePastedRows: "استخدام الصفوف الملصقة",
     fastEntryValidate: "التحقق من الصفوف",
     fastEntryValidationFailed: "تعذر التحقق من هذا الصف. حاول مرة أخرى.",
+    fastEntryAddArea: "+ إضافة منطقة",
     fastEntryAddTrader: "+ إضافة تاجر",
     fastEntryCodBelowFees:
       "تنبيه: مبلغ التحصيل {{cod}} أقل من الرسوم {{fees}} — الفرق لن يُحصّل. إذا كان التاجر يدفع الرسوم اختر «يدفع التاجر».",

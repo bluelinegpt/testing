@@ -87,6 +87,20 @@ describe("Fast Entry daily sheet", () => {
     expect(row?.errors).toEqual([]);
   });
 
+  it("gives every line to the signed-in Trader in the portal, with no Driver", () => {
+    const parsed = parseFastEntrySheet(
+      sheet([
+        [1, "1", "", "Someone Else", "", "ش التعاون", "0501234567", 100, 25, 125, "", "مجدي"],
+        [2, "2", "", "", "", "ش التعاون", "0501234568", 100, 25, 125, "", ""],
+      ]),
+    );
+    const me = trader("me", "My Shop");
+    const { rows } = matchFastEntryRows(parsed.rows, { ...directory, drivers: [], traders: [] }, me);
+    expect(rows.map((row) => row.trader?.id)).toEqual(["me", "me"]);
+    expect(rows.every((row) => row.errors.length === 0)).toBe(true);
+    expect(rows.map((row) => [row.driverId, row.driverName])).toEqual([[null, ""], [null, ""]]);
+  });
+
   it("downloads a template the importer reads back, in Arabic and English", () => {
     const service = new FastEntrySheetService(undefined as never, undefined as never);
     for (const language of ["ar", "en"] as const) {

@@ -59,6 +59,7 @@ import { PageHeader } from "../../components/PageHeader.js";
 import { FilterCombobox } from "../../components/FilterCombobox.js";
 import { SearchCombobox } from "../../components/SearchCombobox.js";
 import { AreaSelector } from "../configuration/AreaSelector.js";
+import { AreaFormDialog } from "../configuration/AreaFormDialog.js";
 import { PricingDialog, TraderForm } from "../configuration/TraderConfigurationWorkspace.js";
 import {
   type OrderView,
@@ -3259,6 +3260,29 @@ function fastEntryRowFromSheet(line: FastEntrySheetRowPayload): FastEntryRow {
   };
 }
 
+/** An Area the Trader portal lists (`portal/trader/areas`). */
+interface TraderPortalAreaOption {
+  emirateId: string;
+  emirateNameAr: string | null;
+  emirateNameEn: string;
+  id: string;
+  nameAr: string | null;
+  nameEn: string;
+}
+
+/** "ش السيوح" -> "السيوح": the sheet's Emirate prefix is not part of the Area name. */
+const fastEntryEmiratePrefixes = [
+  "ش", "الشارقه", "الشارقة", "راك", "راس الخيمه", "رأس الخيمة", "الفجيره", "الفجيرة", "عجمان",
+  "ابوظبي", "أبوظبي", "ابو ظبي", "أبو ظبي", "دبي", "ديره", "ديرة", "العين", "ع", "ام القيوين", "أم القيوين",
+];
+function withoutEmiratePrefix(text: string): string {
+  const trimmed = text.trim().replace(/\s+/g, " ");
+  for (const prefix of fastEntryEmiratePrefixes) {
+    if (trimmed.startsWith(`${prefix} `)) return trimmed.slice(prefix.length + 1).trim();
+  }
+  return trimmed;
+}
+
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -3338,10 +3362,11 @@ function tSafeOrderMessage(message: string, fallback: string): string {
   return message.trim() === "" ? fallback : message;
 }
 
-function FastOrderEntryDialog({
+export function FastOrderEntryDialog({
   api,
   drivers = [],
   emirates,
+  mode = "company",
   onClose,
   onCreated,
   onSaved,
@@ -3350,6 +3375,12 @@ function FastOrderEntryDialog({
   /** Active Drivers, for the Driver column (assign now or later). */
   drivers?: readonly OperationsDriver[];
   emirates: readonly Emirate[];
+  /**
+   * "trader": the Trader portal (Aiman, 22 Oct 2026). Every row is the
+   * signed-in Trader's -- no Trader, Serial, fee or Driver columns -- and the
+   * portal's own endpoints are used. No Areas or Traders can be added.
+   */
+  mode?: "company" | "trader";
   onClose: () => void;
   /** Called once every filled row was created; the sheet then closes. */
   onCreated?: (notice: string) => void;
@@ -3363,6 +3394,32 @@ function FastOrderEntryDialog({
   // 2026): an Arabic screen lists Arabic names, falling back to English only
   // when a record has no Arabic name.
   const nameLanguage = locale;
+  const isTrader = mode === "trader";
+  // Trader portal: the Company's active Areas, loaded once (no search endpoint there).
+  const [traderAreas, setTraderAreas] = useState<readonly TraderPortalAreaOption[]>([]);
+  useEffect(() => {
+    if (!isTrader) return;
+    let active = true;
+    void Promise.resolve(api.get<readonly TraderPortalAreaOption[]>("portal/trader/areas"))
+      .then((rows) => {
+        if (active) setTraderAreas(Array.isArray(rows) ? rows : []);
+      })
+      .catch(() => {
+        if (active) setTraderAreas([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [api, isTrader]);
+  const emirateChoices: readonly { id: string; nameAr: string | null; nameEn: string }[] = isTrader
+    ? [...new Map(traderAreas.map((area) => [area.emirateId, { id: area.emirateId, nameAr: area.emirateNameAr, nameEn: area.emirateNameEn }])).values()]
+    : (Array.isArray(emirates) ? emirates : []);
+  const tabOrder: readonly string[] = isTrader
+    ? fastEntryTabOrder.filter((field) => field !== "trader")
+    : fastEntryTabOrder;
+  const columnCount = isTrader ? 12 : 17;
+  // "+ Add Area" (Company only): the sheet line whose Area is being added.
+  const [addAreaFor, setAddAreaFor] = useState<{ emirateId: string; sheetText: string }>();
   // Row errors in English and Arabic together, whatever the screen language.
   const tEnglish = useMemo(() => i18n.getFixedT("en"), [i18n]);
   const tArabic = useMemo(() => i18n.getFixedT("ar"), [i18n]);
@@ -3398,19 +3455,19 @@ function FastOrderEntryDialog({
   const fastEntryKeyDown = (event: ReactKeyboardEvent<HTMLTableRowElement>, rowIndex: number) => {
     if (event.key !== "Tab" || event.altKey || event.ctrlKey || event.metaKey) return;
     const field = (event.target as HTMLElement).closest<HTMLElement>("[data-fe]")?.dataset.fe;
-    const position = fastEntryTabOrder.indexOf(field as (typeof fastEntryTabOrder)[number]);
+    const position = tabOrder.indexOf(field ?? "");
     if (position < 0) return; // a column outside the order: normal browser Tab
     let targetRow = rowIndex;
     let targetPosition = position + (event.shiftKey ? -1 : 1);
-    if (targetPosition >= fastEntryTabOrder.length) {
+    if (targetPosition >= tabOrder.length) {
       targetRow += 1;
       targetPosition = 0;
     } else if (targetPosition < 0) {
       targetRow -= 1;
-      targetPosition = fastEntryTabOrder.length - 1;
+      targetPosition = tabOrder.length - 1;
     }
     if (targetRow < 0) return;
-    const targetField = fastEntryTabOrder[targetPosition]!;
+    const targetField = tabOrder[targetPosition]!;
     event.preventDefault();
     const existing = rows[targetRow];
     if (existing !== undefined) {
@@ -3533,7 +3590,7 @@ function FastOrderEntryDialog({
             errors.push(both("operations.fastEntryDuplicateSerial"));
           if (reference !== "" && (referenceCounts.get(reference) ?? 0) > 1)
             errors.push(both("operations.fastEntryDuplicateReference"));
-          if (row.traderId === "") errors.push(both("operations.errors.traderRequired"));
+          if (!isTrader && row.traderId === "") errors.push(both("operations.errors.traderRequired"));
           if (row.customerName.trim() === "")
             errors.push(both("operations.errors.customerNameRequired"));
           if (row.mobile.trim() === "") errors.push(both("operations.errors.mobileRequired"));
@@ -3551,7 +3608,9 @@ function FastOrderEntryDialog({
           if (!packages.ok) errors.push(both("operations.errors.packagesInvalid"));
 
           let customerOption: CustomerOption | undefined;
-          if (errors.length === 0) {
+          // Trader portal: the server checks customers, references and
+          // prices when each order is created.
+          if (errors.length === 0 && !isTrader) {
             try {
               const page = await api.get<SearchPage<CustomerOption>>(
                 `configuration/customers/search?search=${encodeURIComponent(row.mobile.trim())}&limit=10&offset=0`,
@@ -3577,7 +3636,7 @@ function FastOrderEntryDialog({
             }
           }
 
-          if (errors.length === 0 && (serial !== "" || reference !== "")) {
+          if (errors.length === 0 && !isTrader && (serial !== "" || reference !== "")) {
             try {
               const query = new URLSearchParams();
               if (serial !== "") query.set("serialNumber", serial);
@@ -3597,6 +3656,7 @@ function FastOrderEntryDialog({
 
           if (
             errors.length === 0 &&
+            !isTrader &&
             row.pickup !== true &&
             row.traderId !== "" &&
             row.areaId !== "" &&
@@ -3680,7 +3740,7 @@ function FastOrderEntryDialog({
         }),
       );
     },
-    [api, both, locale, t],
+    [api, both, isTrader, locale, t],
   );
 
   const [sheetBusy, setSheetBusy] = useState(false);
@@ -3695,10 +3755,13 @@ function FastOrderEntryDialog({
       const form = new FormData();
       form.append("file", file);
       const result = await api.postMultipart<FastEntrySheetPayload>(
-        "operations/orders/fast-entry/sheet",
+        isTrader ? "portal/trader/orders/fast-entry/sheet" : "operations/orders/fast-entry/sheet",
         form,
       );
-      const loaded = result.rows.map((line) => fastEntryRowFromSheet(line));
+      // Trader portal: prices are the Company's, so the sheet's fee is not used.
+      const loaded = result.rows
+        .map((line) => fastEntryRowFromSheet(line))
+        .map((row) => (isTrader ? { ...row, sheetServiceFee: "" } : row));
       setRows((current) => [
         ...current.filter((row) => row.status === "created" || rowHasFastEntryContent(row)),
         ...loaded,
@@ -3721,7 +3784,9 @@ function FastOrderEntryDialog({
 
   const downloadTemplate = async (language: "ar" | "en") => {
     try {
-      const blob = await api.getBinary(`operations/orders/fast-entry/template?language=${language}`);
+      const blob = await api.getBinary(
+        `${isTrader ? "portal/trader" : "operations"}/orders/fast-entry/template?language=${language}`,
+      );
       downloadBlob(blob, language === "ar" ? "Fast-Entry-Template-AR.xlsx" : "Fast-Entry-Template-EN.xlsx");
     } catch (requestError) {
       setMessage(resolveApiMessage(requestError, t("operations.fastEntrySheetReadFailed")));
@@ -3856,7 +3921,31 @@ function FastOrderEntryDialog({
                   customerId: existingCustomer.id,
                   inlineCustomer: undefined,
                 };
-          const createdOrder = await api.post<OperationsOrder>(
+          const createdOrder = isTrader
+            ? await api.post<OperationsOrder>(
+                "portal/trader/orders",
+                {
+                  areaId: row.areaId,
+                  codAmount: row.pickup === true ? 0 : cod,
+                  ...(row.pickup === true ? { orderType: "collect_order" } : {}),
+                  customerAddress: row.customerAddress.trim(),
+                  customerMobileNumber: row.mobile.trim(),
+                  customerName: row.customerName.trim(),
+                  customerSecondMobileNumber: row.secondMobile.trim() || undefined,
+                  inlineCustomer: {
+                    address: row.customerAddress.trim(),
+                    areaId: row.areaId,
+                    mobileNumber: row.mobile.trim(),
+                    name: row.customerName.trim(),
+                  },
+                  notes: row.notes.trim() || undefined,
+                  packageCount: packages.ok ? packages.value : 1,
+                  paymentCondition: row.pickup === true ? undefined : row.paymentCondition,
+                  referenceNumber: row.referenceNumber.trim() || undefined,
+                },
+                { "X-Idempotency-Key": row.submissionKey },
+              )
+            : await api.post<OperationsOrder>(
             "operations/orders",
             {
               additionalFees: row.pickup === true ? 0 : additionalFees,
@@ -4015,6 +4104,7 @@ function FastOrderEntryDialog({
             English
           </button>
         </div>
+        {isTrader ? null : (
         <details className="fast-entry-paste">
           <summary>{t("operations.fastEntryPasteTitle")}</summary>
           <p className="form-hint">{t("operations.fastEntryPasteHelp")}</p>
@@ -4031,14 +4121,15 @@ function FastOrderEntryDialog({
             {t("operations.fastEntryUsePastedRows")}
           </button>
         </details>
+        )}
         <div className="fast-entry-table-scroll" ref={tableScrollRef}>
           <table className="fast-entry-table">
             <thead>
               <tr>
                 <th>#</th>
-                <th>{t("operations.serialNumber")}</th>
+                {isTrader ? null : <th>{t("operations.serialNumber")}</th>}
                 <th>{t("operations.referenceNumber")}</th>
-                <th>{t("operations.trader")}</th>
+                {isTrader ? null : <th>{t("operations.trader")}</th>}
                 <th>{t("operations.customerName")}</th>
                 <th>{t("operations.mobile")}</th>
                 <th>{t("areas.emirate")}</th>
@@ -4046,11 +4137,11 @@ function FastOrderEntryDialog({
                 <th>{t("operations.customerAddress")}</th>
                 <th>{t("operations.codAmount")}</th>
                 <th>{t("operations.paymentCondition")}</th>
-                <th>{t("operations.serviceFee")}</th>
-                <th>{t("operations.additionalFees")}</th>
+                {isTrader ? null : <th>{t("operations.serviceFee")}</th>}
+                {isTrader ? null : <th>{t("operations.additionalFees")}</th>}
                 <th>{t("operations.packages")}</th>
                 <th>{t("operations.notes")}</th>
-                <th>{t("operations.driver")}</th>
+                {isTrader ? null : <th>{t("operations.driver")}</th>}
                 <th>{t("common.actions")}</th>
               </tr>
             </thead>
@@ -4065,7 +4156,7 @@ function FastOrderEntryDialog({
                       </small>
                     )}
                   </td>
-                  <td colSpan={15}>
+                  <td colSpan={columnCount - 2}>
                     <strong>{t("operations.fastEntryExcluded", { reason: row.excludedReason })}</strong>
                     <span className="fast-entry-excluded-detail">
                       {[
@@ -4123,6 +4214,7 @@ function FastOrderEntryDialog({
                       </label>
                     ) : null}
                   </td>
+                  {isTrader ? null : (
                   <td>
                     <input
                       aria-label={t("operations.serialNumber")}
@@ -4131,6 +4223,7 @@ function FastOrderEntryDialog({
                       onChange={(event) => updateRow(row.id, { serialNumber: event.target.value })}
                     />
                   </td>
+                  )}
                   <td data-fe="referenceNumber">
                     <input
                       value={row.referenceNumber}
@@ -4139,6 +4232,7 @@ function FastOrderEntryDialog({
                       }
                     />
                   </td>
+                  {isTrader ? null : (
                   <td
                     className={
                       row.traderId === "" && row.sheetTraderName.trim() !== "" ? "fast-entry-cell-missing" : undefined
@@ -4178,6 +4272,7 @@ function FastOrderEntryDialog({
                       </div>
                     ) : null}
                   </td>
+                  )}
                   <td data-fe="customerName">
                     <input
                       value={row.customerName}
@@ -4207,7 +4302,7 @@ function FastOrderEntryDialog({
                       }}
                     >
                       <option value="">{t("areas.selectEmirate")}</option>
-                      {emirateOptions.map((emirate) => (
+                      {emirateChoices.map((emirate) => (
                         <option key={emirate.id} value={emirate.id}>
                           {localizeName(nameLanguage, { ar: emirate.nameAr, en: emirate.nameEn })}
                         </option>
@@ -4224,6 +4319,30 @@ function FastOrderEntryDialog({
                     }
                     data-fe="area"
                   >
+                    {isTrader ? (
+                      <select
+                        aria-label={t("operations.areaField")}
+                        onChange={(event) => {
+                          const picked = traderAreas.find((area) => area.id === event.target.value);
+                          applyToSameSheetText(row, "sheetAreaText", (candidate) => candidate.areaId === "", {
+                            areaId: picked?.id ?? "",
+                            areaNote: undefined,
+                            areaOption: undefined,
+                            emirateId: picked?.emirateId ?? row.emirateId,
+                          });
+                        }}
+                        value={row.areaId}
+                      >
+                        <option value="">{t("operations.selectArea")}</option>
+                        {traderAreas
+                          .filter((area) => row.emirateId === "" || area.emirateId === row.emirateId)
+                          .map((area) => (
+                            <option key={area.id} value={area.id}>
+                              {localizeName(nameLanguage, { ar: area.nameAr, en: area.nameEn })}
+                            </option>
+                          ))}
+                      </select>
+                    ) : (
                     <SearchCombobox<CompanyArea>
                       api={api}
                       emptyText={t("areas.noneFound")}
@@ -4254,9 +4373,22 @@ function FastOrderEntryDialog({
                       placeholder={t("operations.selectArea")}
                       value={row.areaOption}
                     />
+                    )}
                     {row.areaId === "" && row.sheetAreaText.trim() !== "" ? (
                       <div className="fast-entry-sheet-hint">
                         <small>{row.sheetAreaText}</small>
+                        {isTrader ? null : (
+                          <button
+                            className="link-button"
+                            disabled={busy}
+                            onClick={() =>
+                              setAddAreaFor({ emirateId: row.emirateId, sheetText: row.sheetAreaText.trim() })
+                            }
+                            type="button"
+                          >
+                            {t("operations.fastEntryAddArea")}
+                          </button>
+                        )}
                       </div>
                     ) : null}
                     {row.areaId !== "" && row.areaNote !== undefined ? (
@@ -4298,6 +4430,7 @@ function FastOrderEntryDialog({
                       </option>
                     </select>
                   </td>
+                  {isTrader ? null : (
                   <td>
                     <input
                       min="0"
@@ -4329,6 +4462,8 @@ function FastOrderEntryDialog({
                       />
                     )}
                   </td>
+                  )}
+                  {isTrader ? null : (
                   <td>
                     <input
                       min="0"
@@ -4344,6 +4479,7 @@ function FastOrderEntryDialog({
                       }
                     />
                   </td>
+                  )}
                   <td>
                     <input
                       min="1"
@@ -4359,6 +4495,7 @@ function FastOrderEntryDialog({
                       onChange={(event) => updateRow(row.id, { notes: event.target.value })}
                     />
                   </td>
+                  {isTrader ? null : (
                   <td
                     className={
                       row.driverId === "" && row.driverName.trim() !== ""
@@ -4382,6 +4519,7 @@ function FastOrderEntryDialog({
                       <small className="fast-entry-sheet-hint">{row.driverName}</small>
                     ) : null}
                   </td>
+                  )}
                   <td>
                     {row.message === undefined ? null : (
                       <span className="fast-entry-row-message">{row.message}</span>
@@ -4419,7 +4557,7 @@ function FastOrderEntryDialog({
             </tbody>
             <tfoot>
               <tr>
-                <td colSpan={17}>
+                <td colSpan={columnCount}>
                   {t("operations.fastEntryTotalCod", {
                     amount: formatCurrency(
                       rows
@@ -4436,6 +4574,41 @@ function FastOrderEntryDialog({
           </table>
         </div>
       </div>
+      {addAreaFor === undefined ? null : (
+        <AreaFormDialog
+          api={api}
+          defaultEmirateId={addAreaFor.emirateId || undefined}
+          emirates={emirateOptions.length === 0 ? undefined : emirateOptions}
+          {...(/[\u0600-\u06FF]/.test(addAreaFor.sheetText)
+            ? { initialNameAr: withoutEmiratePrefix(addAreaFor.sheetText) }
+            : { initialNameEn: withoutEmiratePrefix(addAreaFor.sheetText) })}
+          onClose={() => setAddAreaFor(undefined)}
+          onSaved={(area) => {
+            const sheetText = addAreaFor.sheetText;
+            setAddAreaFor(undefined);
+            setRows((current) =>
+              current.map((candidate) =>
+                candidate.sheetAreaText.trim() === sheetText &&
+                candidate.areaId === "" &&
+                candidate.status !== "created" &&
+                candidate.status !== "excluded"
+                  ? {
+                      ...candidate,
+                      areaId: area.id,
+                      areaNote: undefined,
+                      areaOption: area,
+                      emirateId: area.emirateId,
+                      message: undefined,
+                      resolvedServiceFee: "",
+                      status: "draft",
+                      submissionKey: createFastEntrySubmissionKey(),
+                    }
+                  : candidate,
+              ),
+            );
+          }}
+        />
+      )}
       {addTraderFor !== undefined && addedTrader === undefined ? (
         <TraderForm
           api={api}

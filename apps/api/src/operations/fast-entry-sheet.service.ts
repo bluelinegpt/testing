@@ -120,7 +120,34 @@ export class FastEntrySheetService {
     };
   }
 
-  public async load(file: { readonly buffer: Buffer; readonly originalname: string } | undefined): Promise<FastEntrySheetResult> {
+  /**
+   * Trader portal: the same sheet, for the signed-in Trader. Every line is his
+   * (the sheet's Trader column is ignored) and no Driver is assigned.
+   */
+  public async loadForTrader(
+    file: { readonly buffer: Buffer; readonly originalname: string } | undefined,
+    trader: { readonly code: string; readonly id: string; readonly mobileNumber: string; readonly nameAr: string | null; readonly nameEn: string },
+  ): Promise<FastEntrySheetResult> {
+    return this.load(file, {
+      code: trader.code,
+      id: trader.id,
+      mobileNumber: trader.mobileNumber,
+      nameAr: trader.nameAr,
+      nameEn: trader.nameEn,
+      pickupAreaId: null,
+      pickupAreaNameAr: null,
+      pickupAreaNameEn: null,
+      pickupEmirateId: null,
+      pickupEmirateNameAr: null,
+      pickupEmirateNameEn: null,
+      secondMobileNumber: null,
+    });
+  }
+
+  public async load(
+    file: { readonly buffer: Buffer; readonly originalname: string } | undefined,
+    fixedTrader?: FastEntrySheetTrader,
+  ): Promise<FastEntrySheetResult> {
     if (file === undefined || file.buffer.length === 0) {
       throw new ApplicationException("fast_entry_sheet_missing", "Choose an Excel file (.xlsx)", HttpStatus.BAD_REQUEST);
     }
@@ -152,7 +179,9 @@ export class FastEntrySheetService {
       this.drivers(companyId),
     ]);
 
-    return matchFastEntryRows(parsed.rows, { areas, drivers, traders });
+    return fixedTrader === undefined
+      ? matchFastEntryRows(parsed.rows, { areas, drivers, traders })
+      : matchFastEntryRows(parsed.rows, { areas, drivers: [], traders: [] }, fixedTrader);
   }
 
   private async traders(companyId: string): Promise<FastEntrySheetTrader[]> {
@@ -206,6 +235,8 @@ export interface FastEntryDirectory {
 export function matchFastEntryRows(
   parsedRows: readonly ParsedSheetRow[],
   { areas, drivers, traders }: FastEntryDirectory,
+  /** Trader portal: every line belongs to this Trader; the sheet's Trader is ignored. */
+  fixedTrader?: FastEntrySheetTrader,
 ): FastEntrySheetResult {
   const tradersByKey = new Map<string, FastEntrySheetTrader[]>();
   for (const trader of traders) {
@@ -229,11 +260,20 @@ export function matchFastEntryRows(
   }
 
   const rows = parsedRows.map((row): FastEntrySheetRow => {
-    const errors: SheetMessage[] = [...row.errors];
+    // Trader portal: the sheet's Trader column does not apply.
+    const errors: SheetMessage[] =
+      fixedTrader === undefined
+        ? [...row.errors]
+        : row.errors.filter((error) => error.en !== "Trader name is missing");
     // Trader
-    const traderMatches = row.traderName === "" ? [] : (tradersByKey.get(nameKey(row.traderName)) ?? []);
-    let trader: FastEntrySheetTrader | null = null;
-    if (traderMatches.length === 1) trader = traderMatches[0]!;
+    const traderMatches =
+      fixedTrader !== undefined || row.traderName === ""
+        ? []
+        : (tradersByKey.get(nameKey(row.traderName)) ?? []);
+    let trader: FastEntrySheetTrader | null = fixedTrader ?? null;
+    if (fixedTrader !== undefined) {
+      // nothing to match
+    } else if (traderMatches.length === 1) trader = traderMatches[0]!;
     else if (traderMatches.length > 1) {
       errors.push({
         ar: `يوجد أكثر من تاجر باسم «${row.traderName}» — اختر التاجر`,
@@ -317,8 +357,9 @@ export function matchFastEntryRows(
       codAmount: row.codAmount === null ? "" : row.codAmount.toFixed(2),
       customerAddress: row.addressText,
       customerName: row.customerName,
-      driverId: driverMatches.length === 1 ? driverMatches[0]! : null,
-      driverName: row.driverName,
+      driverId: fixedTrader === undefined && driverMatches.length === 1 ? driverMatches[0]! : null,
+      // A Trader does not assign Drivers.
+      driverName: fixedTrader === undefined ? row.driverName : "",
       emirateId,
       errors,
       excludedReason: row.excludedReason,

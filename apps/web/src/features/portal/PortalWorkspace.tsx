@@ -22,6 +22,7 @@ import { StorefrontConfigurationWorkspace } from "../storefront/StorefrontConfig
 import { type TraderDashboardData, TraderDashboardView } from "./TraderDashboardView.js";
 import { TraderCommerceIntegrationsView } from "./TraderCommerceIntegrationsView.js";
 import { StoreOrdersView } from "./StoreOrdersView.js";
+import { FastOrderEntryDialog } from "../operations/OrdersModuleWorkspace.js";
 
 type PortalArea = {
   readonly emirateId: string;
@@ -102,6 +103,8 @@ export function PortalWorkspace({
   const [editingOrder, setEditingOrder] = useState<PortalOrder>();
   const [creatingOrder, setCreatingOrder] = useState(false);
   const [bulkImporting, setBulkImporting] = useState(false);
+  // Fast Entry for the Trader (Aiman, 22 Oct 2026): rows or the daily Excel sheet.
+  const [fastEntryOpen, setFastEntryOpen] = useState(false);
   // Bumped after any Order create/edit/import so the Trader Orders table (and
   // the Dashboard, via `load()`) both show the change immediately rather than
   // a stale list the Trader has to manually refresh (§37).
@@ -457,6 +460,7 @@ export function PortalWorkspace({
             locale={locale}
             onCreateBulk={() => setBulkImporting(true)}
             onCreateOrder={() => setCreatingOrder(true)}
+            onFastEntry={() => setFastEntryOpen(true)}
             onEditOrder={setEditingOrder}
             onViewOrder={setSelectedOrder}
             reloadToken={reload}
@@ -488,6 +492,19 @@ export function PortalWorkspace({
           onSaved={async () => {
             setEditingOrder(undefined);
             setNotice(t("portal.orderUpdated"));
+            setReload((current) => current + 1);
+            await load();
+          }}
+        />
+      ) : null}
+      {fastEntryOpen ? (
+        <FastOrderEntryDialog
+          api={api}
+          emirates={[]}
+          mode="trader"
+          onClose={() => setFastEntryOpen(false)}
+          onCreated={(created) => setNotice(created)}
+          onSaved={async () => {
             setReload((current) => current + 1);
             await load();
           }}
@@ -885,6 +902,7 @@ function TraderOrdersTable({
   onCreateBulk,
   onCreateOrder,
   onEditOrder,
+  onFastEntry,
   onViewOrder,
   reloadToken,
 }: {
@@ -892,6 +910,7 @@ function TraderOrdersTable({
   readonly locale: SupportedLocale;
   readonly onCreateBulk: () => void;
   readonly onCreateOrder: () => void;
+  readonly onFastEntry?: () => void;
   readonly onEditOrder: (order: PortalOrder) => void;
   readonly onViewOrder: (order: PortalOrder) => void;
   readonly reloadToken: number;
@@ -985,6 +1004,11 @@ function TraderOrdersTable({
             <Plus aria-hidden="true" size={16} />
             {t("portal.createOrder")}
           </button>
+          {onFastEntry === undefined ? null : (
+            <button className="button button-secondary" onClick={onFastEntry} type="button">
+              {t("operations.fastEntry")}
+            </button>
+          )}
           <button className="button button-secondary" onClick={onCreateBulk} type="button">
             {t("portal.bulk.createMultiple")}
           </button>

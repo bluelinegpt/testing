@@ -25,6 +25,8 @@ export function AreaFormDialog({
   area,
   defaultEmirateId,
   emirates: suppliedEmirates,
+  initialNameAr,
+  initialNameEn,
   onClose,
   onSaved,
 }: {
@@ -35,6 +37,9 @@ export function AreaFormDialog({
   defaultEmirateId?: string | undefined;
   /** Reuse an already-loaded selector list when opened inline from an Order. */
   emirates?: readonly Emirate[] | undefined;
+  /** Prefills a new Area's names, e.g. from a Fast Entry sheet line. */
+  initialNameAr?: string | undefined;
+  initialNameEn?: string | undefined;
   onClose: () => void;
   onSaved: (area: CompanyArea) => void;
 }) {
@@ -44,8 +49,8 @@ export function AreaFormDialog({
 
   const [emirates, setEmirates] = useState<readonly Emirate[]>(suppliedEmirates ?? []);
   const [emirateId, setEmirateId] = useState(area?.emirateId ?? defaultEmirateId ?? "");
-  const [nameEn, setNameEn] = useState(area?.nameEn ?? "");
-  const [nameAr, setNameAr] = useState(area?.nameAr ?? "");
+  const [nameEn, setNameEn] = useState(area?.nameEn ?? initialNameEn ?? "");
+  const [nameAr, setNameAr] = useState(area?.nameAr ?? initialNameAr ?? "");
   const [notes, setNotes] = useState(area?.notes ?? "");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string>();

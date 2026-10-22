@@ -2378,6 +2378,7 @@ export const englishTranslations = {
     fastEntryUsePastedRows: "Use pasted rows",
     fastEntryValidate: "Validate rows",
     fastEntryValidationFailed: "This row could not be validated. Try again.",
+    fastEntryAddArea: "+ Add Area",
     fastEntryAddTrader: "+ Add Trader",
     fastEntryCodBelowFees:
       "Warning: COD {{cod}} is less than the fees {{fees}} — the difference will not be collected. If the Trader pays the fee, choose Pay by Trader.",

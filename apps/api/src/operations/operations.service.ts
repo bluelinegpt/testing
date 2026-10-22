@@ -7456,6 +7456,31 @@ export class OperationsService {
     `.execute(database);
   }
 
+  /** The signed-in Trader's own record (Trader portal Fast Entry). */
+  public async currentPortalTrader(): Promise<{
+    readonly code: string;
+    readonly id: string;
+    readonly mobileNumber: string;
+    readonly nameAr: string | null;
+    readonly nameEn: string;
+  }> {
+    const identity = this.identities.current();
+    if (identity.companyId === null) {
+      throw new ApplicationException("tenant_required", "A Company account is required", HttpStatus.FORBIDDEN);
+    }
+    const { id } = await this.traderForAccount(identity.companyId, identity.identityId, identity.profileId);
+    const row = (
+      await sql<{ code: string; id: string; mobileNumber: string; nameAr: string | null; nameEn: string }>`
+        select id, code, name_en as "nameEn", name_ar as "nameAr", coalesce(mobile_number, '') as "mobileNumber"
+          from traders where id = ${id}::uuid and company_id = ${identity.companyId}::uuid
+      `.execute(this.database)
+    ).rows[0];
+    if (row === undefined) {
+      throw new ApplicationException("trader_not_found", "Trader not found", HttpStatus.NOT_FOUND);
+    }
+    return row;
+  }
+
   private async traderForAccount(
     companyId: string,
     accountId: string,

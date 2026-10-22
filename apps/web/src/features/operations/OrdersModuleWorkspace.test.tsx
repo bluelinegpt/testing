@@ -2325,6 +2325,46 @@ describe("Fast Entry loads the daily Excel sheet", () => {
     expect(api.post.mock.calls.some(([path]) => path === "operations/orders/quote")).toBe(false);
   });
 
+  it("adds a missing Area from the row, pre-filled from the sheet, and uses it on every row that said the same", async () => {
+    const api = sheetApi();
+    api.postMultipart.mockResolvedValue({
+      excludedLines: 0,
+      rows: [
+        line({ area: null, customerAddress: "ش السيوح", emirateId: "emirate-shj", errors: [{ ar: "المنطقة غير موجودة", en: "Area not found" }] }),
+        line({ area: null, customerAddress: "ش السيوح", emirateId: "emirate-shj", referenceNumber: "17331", sheetRow: 4 }),
+      ],
+      totalLines: 2,
+    });
+    api.post.mockImplementation((...args: [path: string, body?: unknown, headers?: unknown]) =>
+      Promise.resolve(
+        args[0] === "configuration/areas"
+          ? { ...area, id: "area-new", nameAr: "السيوح", nameEn: "Al Suyoh" }
+          : args[0] === "operations/orders/quote"
+            ? { serviceFee: "16.00" }
+            : { serialNumber: "501" },
+      ),
+    );
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Fast entry" }));
+    const dialog = await screen.findByRole("dialog", { name: /Fast order entry/ });
+    fireEvent.change(dialog.querySelector('input[type="file"]')!, { target: { files: [new File(["x"], "sheet.xlsx")] } });
+    const addButtons = await within(dialog).findAllByRole("button", { name: "+ Add Area" });
+    expect(dialog.querySelectorAll("td.fast-entry-cell-missing")).toHaveLength(2);
+    fireEvent.click(addButtons[0]!);
+    const form = await screen.findByRole("dialog", { name: "Add Area" });
+    expect((within(form).getByLabelText("Area Name (Arabic)") as HTMLInputElement).value).toBe("السيوح");
+    fireEvent.change(within(form).getByLabelText(/Area Name$/), { target: { value: "Al Suyoh" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(dialog.querySelectorAll("td.fast-entry-cell-missing")).toHaveLength(0));
+    expect(api.post).toHaveBeenCalledWith("configuration/areas", expect.objectContaining({ nameAr: "السيوح", nameEn: "Al Suyoh" }));
+  });
+
   it("warns when a Pay by Customer row's COD is below the fees", async () => {
     const api = sheetApi();
     api.postMultipart.mockResolvedValue({ excludedLines: 0, rows: [line({ codAmount: "10.00" })], totalLines: 1 });

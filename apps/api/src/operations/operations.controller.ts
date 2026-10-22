@@ -1833,7 +1833,35 @@ export class PublicTrackingController {
 @ApiBearerAuth()
 @Controller("portal")
 export class PortalController {
-  public constructor(@Inject(OperationsService) private readonly operations: OperationsService) {}
+  public constructor(
+    @Inject(OperationsService) private readonly operations: OperationsService,
+    @Inject(FastEntrySheetService) private readonly fastEntrySheet: FastEntrySheetService,
+  ) {}
+
+  // Trader portal Fast Entry (Aiman, 22 Oct 2026): the daily Excel sheet for
+  // the signed-in Trader only -- every line is his, no Driver is assigned.
+  @RequireIdentityKinds("trader")
+  @ApiOperation({ summary: "Read a daily orders Excel sheet into the Trader's Fast Entry rows" })
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @UseInterceptors(FileInterceptor("file", { limits: { fileSize: 5 * 1024 * 1024, files: 1 } }))
+  @Post("trader/orders/fast-entry/sheet")
+  public async loadTraderFastEntrySheet(
+    @UploadedFile() file: { readonly buffer: Buffer; readonly originalname: string } | undefined,
+  ): Promise<FastEntrySheetResult> {
+    const trader = await this.operations.currentPortalTrader();
+    return this.fastEntrySheet.loadForTrader(file, trader);
+  }
+
+  @RequireIdentityKinds("trader")
+  @ApiOperation({ summary: "Download the Fast Entry Excel template (Arabic or English headers)" })
+  @Get("trader/orders/fast-entry/template")
+  public traderFastEntryTemplate(@Query("language") language: string | undefined, @Res() response: Response): void {
+    const file = this.fastEntrySheet.template(language === "en" ? "en" : "ar");
+    response.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    response.setHeader("Content-Disposition", `attachment; filename="${file.filename}"`);
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.send(file.bytes);
+  }
 
   @RequireIdentityKinds("trader")
   @ApiOperation({ summary: "Show the authenticated Trader profile" })
