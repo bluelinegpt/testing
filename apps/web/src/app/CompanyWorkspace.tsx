@@ -209,6 +209,7 @@ export function CompanyWorkspace({
       <TraderReceivablesWorkspace
         api={api}
         collectionDetailId={collectionId}
+        onNavigate={(target) => void navigate(target)}
         permissions={session.identity.permissions}
         receivableDetailId={
           collectionId === undefined ? detailSegment(path, "/trader-receivables/") : undefined

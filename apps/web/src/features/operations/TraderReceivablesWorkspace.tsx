@@ -22,6 +22,7 @@ import { formatMoneyValue, parseMoneyInput, safeMoneyValue } from "../../utils/n
 
 import { type PdfAction, useReconciliationPdfActions } from "./reconciliation-pdf.js";
 import { useIdempotencyKey } from "./useIdempotencyKey.js";
+import { useOneScreenSettlementSetting } from "./OneScreenSettlementDialog.js";
 
 /**
  * Single-Receivable offset reversal is DISABLED (8 Oct 2026): it caused the fee
@@ -380,12 +381,15 @@ function receivableStatusLabel(t: (key: string) => string, status: string): stri
 export function TraderReceivablesWorkspace({
   api,
   collectionDetailId: routeCollectionId,
+  onNavigate,
   permissions,
   receivableDetailId: routeReceivableId,
 }: {
   api: ApiClient;
   /** Collection opened by `/trader-receivables/collections/:id`. */
   collectionDetailId?: string | undefined;
+  /** In-app navigation: one-screen Companies collect fees on the Trader Settlement. */
+  onNavigate?: ((target: string) => void) | undefined;
   permissions: readonly string[];
   /** Receivable opened by `/trader-receivables/:id`. */
   receivableDetailId?: string | undefined;
@@ -469,6 +473,19 @@ export function TraderReceivablesWorkspace({
   const [collectMoneyPresetReceivableId, setCollectMoneyPresetReceivableId] = useState<string | undefined>(
     directCollectQuery.collectReceivableId,
   );
+  // One-screen settlement switch; `undefined` while loading. A link straight
+  // into this form (from an older screen or bookmark) goes to the Trader
+  // Settlement instead once the switch says so.
+  const oneScreenSetting = useOneScreenSettlementSetting(api);
+  const settlementCollectPath = (traderId?: string) =>
+    `/trader-settlements?openDialog=new_settlement${
+      traderId === undefined || traderId === "" ? "" : `&traderId=${encodeURIComponent(traderId)}`
+    }&returnTo=${encodeURIComponent("/trader-receivables")}`;
+  useEffect(() => {
+    if (oneScreenSetting !== true || !collectMoneyOpen || onNavigate === undefined) return;
+    setCollectMoneyOpen(false);
+    onNavigate(settlementCollectPath(collectMoneyPresetTraderId));
+  }, [oneScreenSetting, collectMoneyOpen, onNavigate, collectMoneyPresetTraderId]);
   const {
     close: closeReceivable,
     detailId: receivableDetailId,
@@ -605,6 +622,12 @@ export function TraderReceivablesWorkspace({
   };
 
   const openCollectMoney = (traderId?: string, receivableId?: string) => {
+    // One-screen settlement Companies (CMP-000001, 22 Oct 2026) collect every
+    // Trader fee on the Trader Settlement, never on this form.
+    if (oneScreenSetting === true && onNavigate !== undefined) {
+      onNavigate(settlementCollectPath(traderId));
+      return;
+    }
     setCollectMoneyPresetTraderId(traderId);
     setCollectMoneyPresetReceivableId(receivableId);
     setCollectMoneyOpen(true);
@@ -981,7 +1004,8 @@ export function TraderReceivablesWorkspace({
         />
       )}
 
-      {!collectMoneyOpen ? null : (
+      {/* Not until the settlement switch has loaded, and never for one-screen Companies. */}
+      {!collectMoneyOpen || (onNavigate !== undefined && oneScreenSetting !== false) ? null : (
         <CollectMoneyDialog
           api={api}
           {...(collectMoneyPresetTraderId === undefined

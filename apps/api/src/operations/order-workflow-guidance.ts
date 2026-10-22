@@ -158,6 +158,8 @@ export interface OrderWorkflowInput {
    * Trader leg, so "money sent" is treated as complete here.
    */
   readonly traderReceiptNotRequired?: boolean;
+  /** One-screen settlement Companies: "Collect from Trader" opens the Trader Settlement. */
+  readonly collectFeesOnSettlement?: boolean;
 }
 
 /** Delivery states that end the Order without a delivery outcome. */
@@ -193,6 +195,7 @@ export function deriveOrderWorkflowGuidance(input: OrderWorkflowInput): OrderWor
     traderReceivableStatus = null,
     traderSettlementStatus: rawTraderSettlementStatus,
     traderReceiptNotRequired = false,
+    collectFeesOnSettlement = false,
   } = input;
   const storedTraderSettlementStatus =
     traderReceiptNotRequired && rawTraderSettlementStatus === "money_sent_to_trader"
@@ -486,6 +489,20 @@ export function deriveOrderWorkflowGuidance(input: OrderWorkflowInput): OrderWor
   }
 
   if (hasOpenTraderReceivable) {
+    if (collectFeesOnSettlement) {
+      // One-screen settlement Companies collect the Trader's fees on the
+      // Trader Settlement (CMP-000001, 22 Oct 2026), never on Collect Money
+      // from Trader: open it for this Order's Trader.
+      return {
+        completionBlockerCode: null,
+        isFinanciallyComplete: false,
+        nextActionCode: "collect_trader_receivable",
+        nextActionParams: { ...orderParams, ...traderParams, openDialog: "new_settlement" },
+        nextActionRoute: "/trader-settlements",
+        waitingFor: "awaiting_trader_receivable_collection",
+        workflowState: "awaiting_trader_receivable_collection",
+      };
+    }
     return {
       completionBlockerCode: null,
       isFinanciallyComplete: false,

@@ -1691,6 +1691,7 @@ export class OperationsService {
         traderReceivableStatus: row.traderReceivableStatus ?? null,
         traderSettlementStatus: row.traderSettlementStatus,
         traderReceiptNotRequired,
+        collectFeesOnSettlement: traderReceiptNotRequired,
       }),
     }));
     return {

@@ -156,6 +156,21 @@ describe("the money chain after delivery", () => {
     expect(guidance.isFinanciallyComplete).toBe(false);
   });
 
+  it("sends a one-screen settlement Company's open Trader fee to the Trader Settlement, not Collect Money", () => {
+    const guidance = derive({
+      collectFeesOnSettlement: true,
+      driverReconciliationStatus: "reconciled",
+      traderReceivableId: "rcv-1",
+      traderReceivableOutstanding: "30.00",
+      traderReceivableStatus: "outstanding",
+      traderSettlementStatus: "not_eligible",
+    });
+    expect(guidance.nextActionCode).toBe("collect_trader_receivable");
+    expect(guidance.nextActionRoute).toBe("/trader-settlements");
+    expect(guidance.nextActionParams).toMatchObject({ openDialog: "new_settlement" });
+    expect(guidance.nextActionParams).not.toHaveProperty("receivableId");
+  });
+
   it("never asks a one-screen settlement Company to confirm receipt: posting was the last step", () => {
     const guidance = derive({
       confirmableSettlementCount: 1,
