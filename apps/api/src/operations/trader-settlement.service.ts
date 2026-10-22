@@ -454,7 +454,10 @@ export interface TraderSettlementReportData {
     readonly reversedBySettlementNumber: string | null;
     readonly settlementNumber: string;
     readonly sourceBank: { readonly accountName: string; readonly bankName: string } | null;
-    readonly status: "confirmed" | "reversed";
+    /** "draft": an unposted settlement previewed from the one-screen flow. */
+    readonly status: "confirmed" | "reversed" | "draft";
+    /** One-screen Companies have no Money Received step: leave it off the invoice. */
+    readonly hideMoneyReceived?: boolean;
     /** Trader's mobile from his record (Aiman, 21 Oct 2026); null when none. */
     readonly traderMobile?: string | null;
     readonly traderName: string;
@@ -2100,8 +2103,6 @@ export class TraderSettlementService {
     correlationId: string,
   ): Promise<{ readonly orderCount: number; readonly settlementId: string }> {
     this.assertAnyPermission("settlements.reverse");
-    const companyId = this.tenants.current().companyId;
-    const identity = this.identities.current();
     const reason = input.reason.trim();
     if (reason === "") {
       throw new ApplicationException(
@@ -2110,112 +2111,124 @@ export class TraderSettlementService {
         HttpStatus.BAD_REQUEST,
       );
     }
-    return this.transactions.execute(async (transaction) => {
-      const settlement = (await sql<{ id: string; status: string; reversalOfId: string | null }>`
-        select id, status, reversal_of_id as "reversalOfId"
-          from trader_settlements
-         where id=${settlementId}::uuid and company_id=${companyId}::uuid
-         for update
-      `.execute(transaction)).rows[0];
-      if (settlement === undefined) {
-        throw new ApplicationException(
-          "settlement_not_found",
-          "Trader settlement not found",
-          HttpStatus.NOT_FOUND,
-        );
-      }
-      if (settlement.status !== "confirmed" || settlement.reversalOfId !== null) {
-        throw new ApplicationException(
-          "settlement_receipt_reversal_invalid",
-          "Only an original confirmed settlement can reverse Money Received",
-          HttpStatus.CONFLICT,
-        );
-      }
-      const receipt = (await sql<{ id: string }>`
-        select id from audit_events
-         where company_id=${companyId}::uuid and subject_type='trader_settlement'
-           and subject_id=${settlementId} and action=${receiptConfirmedAction}
-         limit 1
-      `.execute(transaction)).rows[0];
-      if (receipt === undefined) {
-        throw new ApplicationException(
-          "settlement_receipt_not_confirmed",
-          "Money Received has not been confirmed",
-          HttpStatus.CONFLICT,
-        );
-      }
-      const receiptActive = (await sql<{ active: boolean }>`
-        select ${activeMoneyReceived(sql`${companyId}::uuid`, sql`${settlementId}`)} as active
-      `.execute(transaction)).rows[0]?.active === true;
-      if (!receiptActive) {
-        throw new ApplicationException(
-          "settlement_receipt_already_reversed",
-          "Money Received has already been reversed",
-          HttpStatus.CONFLICT,
-        );
-      }
-      const links = (await sql<{ orderId: string; orderNumber: string; status: string }>`
-        -- Plain row lock, no grouping: PostgreSQL rejects FOR UPDATE on grouped rows, which
-        -- made every Reverse Money Received fail with a 500 (XYZ SET-000053).
-        select o.id as "orderId", o.order_number as "orderNumber", o.trader_settlement_status as status
-          from orders o
-         where o.company_id=${companyId}::uuid
-           and o.id in (
-             select e.order_id from order_events e
-              where e.company_id=${companyId}::uuid and e.related_settlement_id=${settlementId}::uuid
-                and e.event_type='trader_settlement.money_received'
-           )
-         for update
-      `.execute(transaction)).rows;
-      if (links.length === 0) {
-        throw new ApplicationException(
-          "settlement_receipt_reversal_missing_order_effects",
-          "Money Received reversal cannot proceed because its Order effects could not be identified",
-          HttpStatus.CONFLICT,
-        );
-      }
-      if (links.some((link) => link.status !== "money_received_by_trader")) {
-        throw new ApplicationException(
-          "settlement_receipt_reversal_stale",
-          "An affected Order is no longer in Money Received state",
-          HttpStatus.CONFLICT,
-        );
-      }
-      const actorRole = await this.history.actorRole(transaction, companyId, identity.identityId);
-      for (const link of links) {
-        await sql`
-          update orders
-             set trader_settlement_status = 'money_sent_to_trader', updated_at = now(), version = version + 1
-           where id = ${link.orderId}::uuid and company_id = ${companyId}::uuid
-        `.execute(transaction);
-        await this.history.statusHistory(transaction, { actorId: identity.identityId, companyId, from: "money_received_by_trader", orderId: link.orderId, statusDimension: "trader_settlement", to: "money_sent_to_trader", reason });
-        await this.history.orderEvent(transaction, {
-          actorId: identity.identityId,
-          actorRole,
-          category: "financial_change",
-          companyId,
-          correlationId,
-          eventType: "trader_settlement.money_received_reversed",
-          fieldName: "trader_settlement_status",
-          newValue: "money_sent_to_trader",
-          orderId: link.orderId,
-          previousValue: "money_received_by_trader",
-          relatedSettlementId: settlementId,
-          reason,
-          source: "web_portal",
-        });
-      }
-      await this.history.audit(transaction, {
-        action: receiptConfirmationReversedAction,
+    return this.transactions.execute((transaction) =>
+      this.reverseMoneyReceivedInTransaction(transaction, settlementId, reason, correlationId),
+    );
+  }
+
+  /** Reverse Money Received inside a caller-owned transaction (also used by Un-post). */
+  private async reverseMoneyReceivedInTransaction(
+    transaction: Transaction<DatabaseSchema>,
+    settlementId: string,
+    reason: string,
+    correlationId: string,
+  ): Promise<{ readonly orderCount: number; readonly settlementId: string }> {
+    const companyId = this.tenants.current().companyId;
+    const identity = this.identities.current();
+    const settlement = (await sql<{ id: string; status: string; reversalOfId: string | null }>`
+      select id, status, reversal_of_id as "reversalOfId"
+        from trader_settlements
+       where id=${settlementId}::uuid and company_id=${companyId}::uuid
+       for update
+    `.execute(transaction)).rows[0];
+    if (settlement === undefined) {
+      throw new ApplicationException(
+        "settlement_not_found",
+        "Trader settlement not found",
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    if (settlement.status !== "confirmed" || settlement.reversalOfId !== null) {
+      throw new ApplicationException(
+        "settlement_receipt_reversal_invalid",
+        "Only an original confirmed settlement can reverse Money Received",
+        HttpStatus.CONFLICT,
+      );
+    }
+    const receipt = (await sql<{ id: string }>`
+      select id from audit_events
+       where company_id=${companyId}::uuid and subject_type='trader_settlement'
+         and subject_id=${settlementId} and action=${receiptConfirmedAction}
+       limit 1
+    `.execute(transaction)).rows[0];
+    if (receipt === undefined) {
+      throw new ApplicationException(
+        "settlement_receipt_not_confirmed",
+        "Money Received has not been confirmed",
+        HttpStatus.CONFLICT,
+      );
+    }
+    const receiptActive = (await sql<{ active: boolean }>`
+      select ${activeMoneyReceived(sql`${companyId}::uuid`, sql`${settlementId}`)} as active
+    `.execute(transaction)).rows[0]?.active === true;
+    if (!receiptActive) {
+      throw new ApplicationException(
+        "settlement_receipt_already_reversed",
+        "Money Received has already been reversed",
+        HttpStatus.CONFLICT,
+      );
+    }
+    const links = (await sql<{ orderId: string; orderNumber: string; status: string }>`
+      -- Plain row lock, no grouping: PostgreSQL rejects FOR UPDATE on grouped rows, which
+      -- made every Reverse Money Received fail with a 500 (XYZ SET-000053).
+      select o.id as "orderId", o.order_number as "orderNumber", o.trader_settlement_status as status
+        from orders o
+       where o.company_id=${companyId}::uuid
+         and o.id in (
+           select e.order_id from order_events e
+            where e.company_id=${companyId}::uuid and e.related_settlement_id=${settlementId}::uuid
+              and e.event_type='trader_settlement.money_received'
+         )
+       for update
+    `.execute(transaction)).rows;
+    if (links.length === 0) {
+      throw new ApplicationException(
+        "settlement_receipt_reversal_missing_order_effects",
+        "Money Received reversal cannot proceed because its Order effects could not be identified",
+        HttpStatus.CONFLICT,
+      );
+    }
+    if (links.some((link) => link.status !== "money_received_by_trader")) {
+      throw new ApplicationException(
+        "settlement_receipt_reversal_stale",
+        "An affected Order is no longer in Money Received state",
+        HttpStatus.CONFLICT,
+      );
+    }
+    const actorRole = await this.history.actorRole(transaction, companyId, identity.identityId);
+    for (const link of links) {
+      await sql`
+        update orders
+           set trader_settlement_status = 'money_sent_to_trader', updated_at = now(), version = version + 1
+         where id = ${link.orderId}::uuid and company_id = ${companyId}::uuid
+      `.execute(transaction);
+      await this.history.statusHistory(transaction, { actorId: identity.identityId, companyId, from: "money_received_by_trader", orderId: link.orderId, statusDimension: "trader_settlement", to: "money_sent_to_trader", reason });
+      await this.history.orderEvent(transaction, {
         actorId: identity.identityId,
-        after: { reason, orderCount: links.length, restoredOrderIds: links.map((link) => link.orderId) },
+        actorRole,
+        category: "financial_change",
         companyId,
         correlationId,
-        subjectId: settlementId,
-        subjectType: "trader_settlement",
+        eventType: "trader_settlement.money_received_reversed",
+        fieldName: "trader_settlement_status",
+        newValue: "money_sent_to_trader",
+        orderId: link.orderId,
+        previousValue: "money_received_by_trader",
+        relatedSettlementId: settlementId,
+        reason,
+        source: "web_portal",
       });
-      return { orderCount: links.length, settlementId };
+    }
+    await this.history.audit(transaction, {
+      action: receiptConfirmationReversedAction,
+      actorId: identity.identityId,
+      after: { reason, orderCount: links.length, restoredOrderIds: links.map((link) => link.orderId) },
+      companyId,
+      correlationId,
+      subjectId: settlementId,
+      subjectType: "trader_settlement",
     });
+    return { orderCount: links.length, settlementId };
   }
 
   /** Execute settlement reversal inside a caller-owned transaction. */
@@ -2903,6 +2916,8 @@ export class TraderSettlementService {
         status: header.status,
         traderMobile: header.traderMobile,
         traderName: header.traderName,
+        // One-screen Companies have no Money Received step.
+        hideMoneyReceived: await this.oneScreenEnabled(this.database, companyId),
       },
       orders: orders.lines,
       receivableOffsets,
@@ -3065,6 +3080,519 @@ export class TraderSettlementService {
       subjectType: "trader_settlement",
     });
     return { bytes, filename };
+  }
+
+  // ---------------------------------------------------------------------
+  // One-screen settlement (per Company switch; Aiman, 22 Oct 2026)
+  // ---------------------------------------------------------------------
+
+  /** Whether this Company uses the one-screen settlement flow. */
+  public async settlementSettings(): Promise<{ readonly oneScreen: boolean }> {
+    const { companyId } = this.tenants.current();
+    return { oneScreen: await this.oneScreenEnabled(this.database, companyId) };
+  }
+
+  private async oneScreenEnabled(
+    executor: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
+    companyId: string,
+  ): Promise<boolean> {
+    const row = (
+      await sql<{ enabled: boolean | null }>`
+        select (to_jsonb(c) ->> 'settlement_one_screen_enabled')::boolean as enabled
+          from companies c where c.id = ${companyId}::uuid
+      `.execute(executor)
+    ).rows[0];
+    return row?.enabled === true;
+  }
+
+  /**
+   * Un-post and adjust: reverse a posted Settlement and open a Draft with the
+   * same lines, so it can be changed, previewed and posted again. Money
+   * Received, if it was ever confirmed, is reversed first (the one-screen flow
+   * has no Money Received step). Everything happens in one transaction.
+   */
+  public async unpostSettlement(
+    settlementId: string,
+    reason: string,
+    correlationId: string,
+  ): Promise<{
+    readonly draftId: string;
+    readonly reversalSettlementNumber: string;
+    readonly settlementNumber: string;
+  }> {
+    this.assertAnyPermission("settlements.reverse");
+    this.assertAnyPermission("settlements.create");
+    const { companyId } = this.tenants.current();
+    const identity = this.identities.current();
+    const trimmedReason = reason.trim();
+    if (trimmedReason === "") {
+      throw new ApplicationException(
+        "settlement_reversal_reason_required",
+        "A reason is required to un-post a Trader settlement",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return this.transactions.execute(async (transaction) => {
+      if (!(await this.oneScreenEnabled(transaction, companyId))) {
+        throw new ApplicationException(
+          "settlement_unpost_not_enabled",
+          "Un-post is not enabled for this Company",
+          HttpStatus.FORBIDDEN,
+        );
+      }
+      const settlement = (
+        await sql<{
+          businessDate: string;
+          id: string;
+          netPayable: string;
+          reversalOfId: string | null;
+          reversed: boolean;
+          settlementNumber: string;
+          status: string;
+          traderId: string;
+        }>`
+          select s.id, s.settlement_number as "settlementNumber", s.status,
+                 s.reversal_of_id as "reversalOfId", s.trader_id as "traderId",
+                 s.business_date::text as "businessDate", s.net_payable::text as "netPayable",
+                 exists (select 1 from trader_settlements rv
+                          where rv.company_id = s.company_id and rv.reversal_of_id = s.id) as reversed
+            from trader_settlements s
+           where s.id = ${settlementId}::uuid and s.company_id = ${companyId}::uuid
+           for update
+        `.execute(transaction)
+      ).rows[0];
+      if (settlement === undefined) {
+        throw new ApplicationException("settlement_not_found", "Trader settlement not found", HttpStatus.NOT_FOUND);
+      }
+      if (settlement.status !== "confirmed" || settlement.reversalOfId !== null || settlement.reversed) {
+        throw new ApplicationException(
+          "settlement_unpost_invalid",
+          "Only a posted settlement that has not been reversed can be un-posted",
+          HttpStatus.CONFLICT,
+        );
+      }
+      const openDraft = (
+        await sql<{ id: string }>`
+          select id from trader_settlement_drafts
+           where company_id = ${companyId}::uuid and trader_id = ${settlement.traderId}::uuid
+             and status = 'draft'
+        `.execute(transaction)
+      ).rows[0];
+      if (openDraft !== undefined) {
+        throw new ApplicationException(
+          "trader_settlement_draft_already_open",
+          "This Trader already has a draft. Post or delete it before un-posting another settlement.",
+          HttpStatus.CONFLICT,
+          [openDraft.id],
+        );
+      }
+      const payload = await this.payloadFromSettlement(transaction, companyId, settlement);
+
+      const receiptActive =
+        (
+          await sql<{ active: boolean }>`
+            select ${activeMoneyReceived(sql`${companyId}::uuid`, sql`${settlementId}`)} as active
+          `.execute(transaction)
+        ).rows[0]?.active === true;
+      if (receiptActive) {
+        await this.reverseMoneyReceivedInTransaction(transaction, settlementId, trimmedReason, correlationId);
+      }
+      const reversal = await this.reverseInTransaction(transaction, settlementId, trimmedReason, correlationId);
+      const draft = (
+        await sql<{ id: string }>`
+          insert into trader_settlement_drafts(
+            company_id, trader_id, payload, created_by_account_id, updated_by_account_id
+          ) values (
+            ${companyId}::uuid, ${settlement.traderId}::uuid, ${JSON.stringify(payload)}::jsonb,
+            ${identity.identityId}::uuid, ${identity.identityId}::uuid
+          )
+          returning id
+        `.execute(transaction)
+      ).rows[0];
+      if (draft === undefined) throw new Error("Un-post draft was not saved");
+      await this.history.audit(transaction, {
+        action: "trader_settlement.unposted",
+        actorId: identity.identityId,
+        after: {
+          draftId: draft.id,
+          reason: trimmedReason,
+          reversalSettlementNumber: reversal.reversalSettlementNumber,
+          settlementNumber: settlement.settlementNumber,
+        },
+        companyId,
+        correlationId,
+        subjectId: settlementId,
+        subjectType: "trader_settlement",
+      });
+      return {
+        draftId: draft.id,
+        reversalSettlementNumber: reversal.reversalSettlementNumber,
+        settlementNumber: settlement.settlementNumber,
+      };
+    });
+  }
+
+  /** The Create Settlement request a posted Settlement was made from. */
+  private async payloadFromSettlement(
+    transaction: Transaction<DatabaseSchema>,
+    companyId: string,
+    settlement: { readonly businessDate: string; readonly id: string; readonly netPayable: string; readonly traderId: string },
+  ): Promise<CreateTraderSettlementDto> {
+    const allocations = (
+      await sql<{ amount: string; orderId: string }>`
+        select order_id as "orderId", allocated_amount::text as amount
+          from trader_settlement_orders
+         where company_id = ${companyId}::uuid and settlement_id = ${settlement.id}::uuid
+           and allocated_amount > 0
+         order by created_at, id
+      `.execute(transaction)
+    ).rows;
+    const offsets = (
+      await sql<{ amount: string; receivableId: string }>`
+        select receivable_id as "receivableId", amount_allocated::text as amount
+          from trader_settlement_receivable_offsets
+         where company_id = ${companyId}::uuid and settlement_id = ${settlement.id}::uuid
+           and amount_allocated > 0
+      `.execute(transaction)
+    ).rows;
+    const credits = (
+      await sql<{ amount: string; creditId: string }>`
+        select credit_id as "creditId", amount_applied::text as amount
+          from trader_settlement_credit_applications
+         where company_id = ${companyId}::uuid and settlement_id = ${settlement.id}::uuid
+      `.execute(transaction)
+    ).rows;
+    const zeroDue = (
+      await sql<{ orderId: string }>`
+        select order_id as "orderId" from trader_settlement_zero_due_orders
+         where company_id = ${companyId}::uuid and settlement_id = ${settlement.id}::uuid
+      `.execute(transaction)
+    ).rows;
+    const payment = (
+      await sql<{
+        bankAccountId: string | null;
+        bankReference: string | null;
+        cashAccountId: string | null;
+        method: "bank_transfer" | "cash";
+        traderBankAccountId: string | null;
+      }>`
+        select payment_method as method, company_bank_account_id as "bankAccountId",
+               company_cash_account_id as "cashAccountId", bank_reference as "bankReference",
+               trader_bank_account_id as "traderBankAccountId"
+          from trader_settlement_payments
+         where company_id = ${companyId}::uuid and settlement_id = ${settlement.id}::uuid
+         limit 1
+      `.execute(transaction)
+    ).rows[0];
+    const notes = (
+      await sql<{ notes: string | null }>`
+        select after_data ->> 'notes' as notes from audit_events
+         where company_id = ${companyId}::uuid and subject_type = 'trader_settlement'
+           and subject_id = ${settlement.id} and action = 'trader_settlement.create'
+         order by occurred_at limit 1
+      `.execute(transaction)
+    ).rows[0]?.notes;
+    const method = payment?.method ?? "cash";
+    return {
+      allocations: allocations.map((line) => ({ amount: Number(line.amount), orderId: line.orderId })),
+      amount: Number(settlement.netPayable),
+      ...(method === "bank_transfer"
+        ? {
+            ...(payment?.bankAccountId ? { bankAccountId: payment.bankAccountId } : {}),
+            ...(payment?.bankReference ? { bankReference: payment.bankReference } : {}),
+            ...(payment?.traderBankAccountId ? { traderBankAccountId: payment.traderBankAccountId } : {}),
+          }
+        : payment?.cashAccountId
+          ? { cashAccountId: payment.cashAccountId }
+          : {}),
+      ...(credits.length === 0
+        ? {}
+        : { creditApplications: credits.map((line) => ({ amount: Number(line.amount), creditId: line.creditId })) }),
+      ...(notes ? { notes } : {}),
+      paymentDate: settlement.businessDate.slice(0, 10),
+      paymentMethod: method,
+      receivableOffsets: offsets.map((line) => ({ amount: Number(line.amount), receivableId: line.receivableId })),
+      traderId: settlement.traderId,
+      ...(zeroDue.length === 0 ? {} : { zeroDueOrderIds: zeroDue.map((row) => row.orderId) }),
+    } as CreateTraderSettlementDto;
+  }
+
+  /** PDF of a saved Draft, marked DRAFT (nothing posted). */
+  public async draftPdf(
+    draftId: string,
+    language: ReportLanguage,
+  ): Promise<{ bytes: Buffer; filename: string }> {
+    const draft = await this.draft(draftId);
+    return this.draftPreviewPdf(draft.payload, language);
+  }
+
+  /** PDF of an unsaved settlement as it would print, marked DRAFT. */
+  public async draftPreviewPdf(
+    input: CreateTraderSettlementDto,
+    language: ReportLanguage,
+  ): Promise<{ bytes: Buffer; filename: string }> {
+    this.assertAnyPermission("settlements.create");
+    const data = await this.draftReportData(input);
+    const html = buildTraderSettlementStatementHtml(data, language);
+    const footerTemplate =
+      language === "ar"
+        ? `<div style="font-size:9px;width:100%;text-align:center;color:#666;direction:rtl;">مسودة — الصفحة <span class="pageNumber"></span> من <span class="totalPages"></span></div>`
+        : `<div style="font-size:9px;width:100%;text-align:center;color:#666;">DRAFT — Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>`;
+    const bytes = await this.pdf.renderPdf(html, footerTemplate);
+    return { bytes, filename: "Trader-Settlement-DRAFT.pdf" };
+  }
+
+  private async draftReportData(input: CreateTraderSettlementDto): Promise<TraderSettlementReportData> {
+    const { companyId } = this.tenants.current();
+    const identity = this.identities.current();
+    const trader = (
+      await sql<{ mobile: string | null; name: string }>`
+        select name_en as name, nullif(btrim(mobile_number), '') as mobile
+          from traders where id = ${input.traderId}::uuid and company_id = ${companyId}::uuid
+      `.execute(this.database)
+    ).rows[0];
+    if (trader === undefined) {
+      throw new ApplicationException("trader_not_found", "Trader not found", HttpStatus.NOT_FOUND);
+    }
+    const amountByOrder = new Map(
+      (input.allocations ?? []).filter((line) => line.amount > 0).map((line) => [line.orderId, new Decimal(line.amount)]),
+    );
+    const orderIds = [...amountByOrder.keys()];
+    const orderRows =
+      orderIds.length === 0
+        ? []
+        : (
+            await sql<{
+              additionalFees: string; areaName: string; areaNameAr: string | null; codAmount: string;
+              customerMobileNumber: string; customerName: string; deliveryDate: string | null;
+              emirateName: string | null; emirateNameAr: string | null; id: string; orderNumber: string;
+              orderSettlementStatus: string; orderType: "collect_order" | "delivery" | "gcc_international";
+              outstandingBalance: string; paidAmount: string; referenceNumber: string | null;
+              serialNumber: string; serviceFee: string; totalDeductions: string;
+              traderNetPayable: string; vatAmount: string;
+            }>`
+              select o.id, o.order_number as "orderNumber", o.order_type as "orderType",
+                     coalesce(o.serial_number, o.order_number) as "serialNumber",
+                     o.reference_number as "referenceNumber", o.delivered_at::text as "deliveryDate",
+                     o.customer_name as "customerName", o.customer_mobile_number as "customerMobileNumber",
+                     e.name_en as "emirateName", e.name_ar as "emirateNameAr",
+                     coalesce(o.customer_area_name_snapshot, a.name_en, '') as "areaName", a.name_ar as "areaNameAr",
+                     o.cod_amount::text as "codAmount", o.service_fee::text as "serviceFee",
+                     coalesce(o.additional_fees, 0)::text as "additionalFees",
+                     coalesce(o.vat_amount, 0)::text as "vatAmount",
+                     coalesce(o.total_deductions, 0)::text as "totalDeductions",
+                     o.trader_net_payable::text as "traderNetPayable",
+                     o.trader_paid_amount::text as "paidAmount",
+                     o.trader_outstanding_balance::text as "outstandingBalance",
+                     o.trader_settlement_status as "orderSettlementStatus"
+                from orders o
+                left join areas a on a.id = o.area_id and a.company_id = o.company_id
+                left join emirates e on e.id = a.emirate_id
+               where o.company_id = ${companyId}::uuid and o.trader_id = ${input.traderId}::uuid
+                 and o.id = any(${orderIds}::uuid[])
+               order by nullif(regexp_replace(o.reference_number, '[^0-9]', '', 'g'), '')::numeric asc nulls last,
+                        o.reference_number asc nulls last,
+                        nullif(regexp_replace(coalesce(o.serial_number, o.order_number), '[^0-9]', '', 'g'), '')::numeric asc nulls last,
+                        o.id asc
+            `.execute(this.database)
+          ).rows;
+    const lines: TraderSettlementDetailOrder[] = orderRows.map((row) => {
+      const amount = amountByOrder.get(row.id) ?? new Decimal(0);
+      return {
+        additionalFees: new Decimal(row.additionalFees).toFixed(2),
+        amountPaidNow: amount.toFixed(2),
+        areaName: row.areaName,
+        areaNameAr: row.areaNameAr,
+        codAmount: new Decimal(row.codAmount).toFixed(2),
+        customerMobileNumber: row.customerMobileNumber,
+        customerName: row.customerName,
+        deliveryDate: row.deliveryDate,
+        emirateName: row.emirateName,
+        emirateNameAr: row.emirateNameAr,
+        orderNumber: row.orderNumber,
+        orderSettlementStatus: row.orderSettlementStatus,
+        orderType: row.orderType,
+        originalTraderPayable: new Decimal(row.traderNetPayable).toFixed(2),
+        paidBeforeThisPayment: new Decimal(row.paidAmount).toFixed(2),
+        previouslyPaid: new Decimal(row.paidAmount).toFixed(2),
+        referenceNumber: row.referenceNumber,
+        remainingAfterThisPayment: Decimal.max(new Decimal(row.outstandingBalance).minus(amount), 0).toFixed(2),
+        remainingOutstanding: new Decimal(row.outstandingBalance).toFixed(2),
+        serialNumber: row.serialNumber,
+        serviceFee: new Decimal(row.serviceFee).toFixed(2),
+        totalDeductions: new Decimal(row.totalDeductions).toFixed(2),
+        vatAmount: new Decimal(row.vatAmount).toFixed(2),
+      };
+    });
+    const sum = (pick: (line: TraderSettlementDetailOrder) => string) =>
+      lines.reduce((total, line) => total.plus(pick(line)), new Decimal(0)).toFixed(2);
+    const settled = {
+      lines,
+      summary: {
+        amountPaidNow: sum((line) => line.amountPaidNow),
+        grossOrderPayable: sum((line) => line.amountPaidNow),
+        netPayment: sum((line) => line.amountPaidNow),
+        orderCount: lines.length,
+        previouslyPaid: sum((line) => line.previouslyPaid),
+        remainingOutstanding: sum((line) => line.remainingOutstanding),
+        totalAdditionalFees: sum((line) => line.additionalFees),
+        totalCod: sum((line) => line.codAmount),
+        totalDeductions: sum((line) => line.totalDeductions),
+        totalOriginalTraderPayable: sum((line) => line.originalTraderPayable),
+        totalServiceFees: sum((line) => line.serviceFee),
+        totalVat: sum((line) => line.vatAmount),
+        traderFeeDeductions: "0.00",
+      },
+    };
+    const zeroIds = [...new Set(input.zeroDueOrderIds ?? [])];
+    const zero =
+      zeroIds.length === 0
+        ? []
+        : await this.zeroDueCandidates(this.database, companyId, input.traderId, zeroIds);
+    const zeroLines: TraderSettlementDetailOrder[] = zero.map((row) => ({
+      additionalFees: new Decimal(row.additionalFees).toFixed(2),
+      amountPaidNow: "0.00",
+      areaName: row.areaName,
+      areaNameAr: null,
+      codAmount: new Decimal(row.codAmount).toFixed(2),
+      customerMobileNumber: row.customerMobileNumber,
+      customerName: row.customerName,
+      deliveryDate: row.deliveryDate,
+      emirateName: row.emirateName,
+      emirateNameAr: null,
+      orderNumber: row.orderNumber,
+      orderSettlementStatus: "not_eligible",
+      orderType: row.orderType,
+      originalTraderPayable: "0.00",
+      paidBeforeThisPayment: "0.00",
+      previouslyPaid: "0.00",
+      referenceNumber: row.referenceNumber,
+      remainingAfterThisPayment: "0.00",
+      remainingOutstanding: "0.00",
+      serialNumber: row.serialNumber,
+      serviceFee: new Decimal(row.serviceFee).toFixed(2),
+      totalDeductions: new Decimal(row.serviceFee).plus(row.additionalFees).toFixed(2),
+      vatAmount: "0.00",
+    }));
+    const orders = zeroLines.length === 0 ? settled : mergeZeroDueLines(settled, zeroLines);
+
+    const offsetAmounts = new Map(
+      (input.receivableOffsets ?? []).filter((line) => line.amount > 0).map((line) => [line.receivableId, new Decimal(line.amount)]),
+    );
+    const offsetIds = [...offsetAmounts.keys()];
+    const receivableOffsets: TraderSettlementReceivableOffset[] =
+      offsetIds.length === 0
+        ? []
+        : (
+            await sql<Omit<TraderSettlementReceivableOffset, "amountApplied"> & { id: string }>`
+              select r.id, r.business_date::text as "businessDate", r.receivable_number as "receivableNumber",
+                     r.source_type as "sourceType", r.source_reference as "sourceReference", r.reason,
+                     o.serial_number as "orderSerialNumber", o.order_number as "orderNumber",
+                     o.reference_number as "referenceNumber",
+                     o.customer_name as "customerName", o.customer_mobile_number as "customerMobileNumber",
+                     e.name_en as "emirateName", coalesce(o.customer_area_name_snapshot, a.name_en, '') as "areaName",
+                     e.name_ar as "emirateNameAr", a.name_ar as "areaNameAr"
+                from trader_receivables r
+                left join orders o on o.company_id = r.company_id
+                  and r.source_type = 'service_charge' and o.order_number = r.source_reference
+                left join areas a on a.id = o.area_id and a.company_id = o.company_id
+                left join emirates e on e.id = a.emirate_id
+               where r.company_id = ${companyId}::uuid and r.trader_id = ${input.traderId}::uuid
+                 and r.id = any(${offsetIds}::uuid[])
+               order by r.business_date, r.receivable_number
+            `.execute(this.database)
+          ).rows.map(({ id, ...row }) => ({
+            ...row,
+            amountApplied: (offsetAmounts.get(id) ?? new Decimal(0)).toFixed(2),
+          }));
+    const creditAmounts = new Map(
+      (input.creditApplications ?? []).filter((line) => line.amount > 0).map((line) => [line.creditId, new Decimal(line.amount)]),
+    );
+    const creditIds = [...creditAmounts.keys()];
+    const creditApplications: TraderSettlementCreditApplied[] =
+      creditIds.length === 0
+        ? []
+        : (
+            await sql<Omit<TraderSettlementCreditApplied, "amountApplied"> & { id: string }>`
+              select c.id, c.credit_number as "creditNumber", c.business_date::text as "businessDate", c.reason,
+                     o.order_number as "sourceOrderNumber", o.reference_number as "sourceReferenceNumber"
+                from trader_credits c
+                left join orders o on o.id = c.source_order_id and o.company_id = c.company_id
+               where c.company_id = ${companyId}::uuid and c.trader_id = ${input.traderId}::uuid
+                 and c.id = any(${creditIds}::uuid[])
+               order by c.credit_number
+            `.execute(this.database)
+          ).rows.map(({ id, ...row }) => ({
+            ...row,
+            amountApplied: (creditAmounts.get(id) ?? new Decimal(0)).toFixed(2),
+          }));
+
+    const sourceBank =
+      input.paymentMethod === "bank_transfer" && input.bankAccountId
+        ? ((
+            await sql<{ accountName: string; bankName: string }>`
+              select account_name as "accountName", bank_name as "bankName"
+                from company_bank_accounts
+               where id = ${input.bankAccountId}::uuid and company_id = ${companyId}::uuid
+            `.execute(this.database)
+          ).rows[0] ?? null)
+        : null;
+    const preparer = (
+      await sql<{ username: string }>`
+        select username from accounts where id = ${identity.identityId}::uuid and company_id = ${companyId}::uuid
+      `.execute(this.database)
+    ).rows[0]?.username ?? "";
+    const branding = await this.companyProfile.branding();
+    const logoDataUri = branding.hasLogo
+      ? await this.companyProfile
+          .logoContent()
+          .then((logo) => `data:${logo.mediaType};base64,${logo.bytes.toString("base64")}`)
+          .catch(() => null)
+      : null;
+    const generatedAt = new Intl.DateTimeFormat("en-GB", {
+      day: "2-digit", hour: "2-digit", minute: "2-digit", month: "2-digit", timeZone: "Asia/Dubai", year: "numeric",
+    }).format(new Date());
+    return {
+      companyId,
+      header: {
+        beneficiaryBank: null,
+        company: {
+          hasLogo: branding.hasLogo,
+          logoDataUri,
+          nameAr: branding.nameAr,
+          nameEn: branding.nameEn,
+          subtitleAr: branding.subtitleAr,
+          subtitleEn: branding.subtitleEn,
+          telephone: branding.telephone,
+        },
+        confirmedBy: "",
+        createdBy: preparer,
+        generatedAt: `${generatedAt} (UAE)`,
+        hideMoneyReceived: true,
+        moneyReceivedBy: null,
+        moneyReceivedDate: null,
+        moneyReceivedNotes: null,
+        moneyReceivedReference: null,
+        moneySentAt: null,
+        paymentDate: input.paymentDate ?? new Date().toISOString().slice(0, 10),
+        paymentMethod: input.paymentMethod === "bank_transfer" ? "bank_transfer" : "cash",
+        paymentReference: input.bankReference?.trim() || null,
+        reversalDate: null,
+        reversalOfSettlementNumber: null,
+        reversalReason: null,
+        reversedBy: null,
+        reversedBySettlementNumber: null,
+        settlementNumber: "—",
+        sourceBank,
+        status: "draft",
+        traderMobile: trader.mobile,
+        traderName: trader.name,
+      },
+      orders: orders.lines,
+      receivableOffsets,
+      creditApplications,
+      summary: this.settlementSummaryWithOffsets(orders.summary, receivableOffsets, creditApplications),
+    };
   }
 
   // ---------------------------------------------------------------------

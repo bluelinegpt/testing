@@ -1254,6 +1254,144 @@
 .row-zero-due td {
   color: #64748b;
 }
+.one-screen-settlement__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.one-screen-settlement__top .field {
+  min-width: 260px;
+}
+.one-screen-settlement__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.one-screen-settlement__chips .chip {
+  padding: 5px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 13px;
+}
+.one-screen-settlement__chips .chip-on {
+  border-color: #1e3a8a;
+  background: #1e3a8a;
+  color: #fff;
+}
+.one-screen-settlement__search {
+  flex: 1;
+  min-width: 220px;
+}
+.one-screen-settlement__edit-amounts {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.one-screen-settlement__table {
+  max-height: min(52vh, 560px);
+  overflow: auto;
+}
+.one-screen-settlement__table td.numeric,
+.one-screen-settlement__table th.numeric {
+  text-align: end;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.one-line--off td {
+  opacity: 0.5;
+}
+.one-line--fee .one-amount {
+  color: #b91c1c;
+  font-weight: 600;
+}
+.one-line--pay .one-amount,
+.one-line--credit .one-amount {
+  color: #166534;
+  font-weight: 600;
+}
+.one-line--zero td {
+  color: #64748b;
+}
+.one-amount input {
+  width: 110px;
+  text-align: end;
+}
+.one-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.one-tag--pay {
+  background: #dcfce7;
+  color: #166534;
+}
+.one-tag--fee {
+  background: #fee2e2;
+  color: #991b1b;
+}
+.one-tag--credit {
+  background: #dbeafe;
+  color: #1e40af;
+}
+.one-tag--zero {
+  background: #f1f5f9;
+  color: #475569;
+}
+.one-screen-settlement__totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+.one-total {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+.one-total strong {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.one-total small {
+  color: #64748b;
+}
+.one-total--net {
+  border: 2px solid #1d4ed8;
+  background: #eff6ff;
+  color: #1e3a8a;
+}
+.one-total--net strong {
+  color: #1d4ed8;
+  font-size: 22px;
+}
+.one-total--net small {
+  color: #334155;
+}
+.one-plus {
+  color: #166534;
+}
+.one-minus {
+  color: #b91c1c;
+}
+.one-screen-settlement__payment {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+}
+.one-screen-settlement__notes {
+  flex: 1;
+  min-width: 240px;
+}
 .fast-entry-toolbar {
   display: flex;
   align-items: center;

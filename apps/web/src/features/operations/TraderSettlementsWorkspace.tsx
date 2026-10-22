@@ -34,6 +34,11 @@ import { formatMoneyValue, parseMoneyInput, safeMoneyValue } from "../../utils/n
 import { type PdfAction, useReconciliationPdfActions } from "./reconciliation-pdf.js";
 import { useWorkflowDeepLink, type WorkflowDialog } from "./use-workflow-deep-link.js";
 import { useIdempotencyKey } from "./useIdempotencyKey.js";
+import {
+  OneScreenSettlementDialog,
+  UnpostSettlementDialog,
+  useOneScreenSettlement,
+} from "./OneScreenSettlementDialog.js";
 
 // ---- Server response shapes (mirror trader-settlement.service.ts). ----
 
@@ -645,6 +650,48 @@ export function TraderSettlementsWorkspace({
   const pdf = useReconciliationPdfActions(api);
   const [pdfError, setPdfError] = useState<string>();
   const [pdfBusyId, setPdfBusyId] = useState<string>();
+  // One-screen settlement (per Company switch): Draft -> Preview -> Post,
+  // Un-post & adjust, and no Money Received step.
+  const oneScreen = useOneScreenSettlement(api);
+  const [unpostTarget, setUnpostTarget] = useState<{ id: string; number: string }>();
+  const openUnpostedDraft = (result: { draftId: string; notice: string }) => {
+    setUnpostTarget(undefined);
+    setReceiptNotice(result.notice);
+    refresh();
+    setDraftToEdit(result.draftId);
+    setNewSettlementOpen(true);
+  };
+  const previewDraft = async (draft: TraderSettlementDraftRow) => {
+    setDraftError(undefined);
+    const failure = await pdf.run(
+      `operations/settlements/drafts/${draft.id}/pdf?language=${reportLanguage}`,
+      "Trader-Settlement-DRAFT.pdf",
+      "preview",
+    );
+    if (failure !== undefined) setDraftError(message(failure, t("traderSettlements.pdfGenerationFailed")));
+  };
+  const postDraft = async (draft: TraderSettlementDraftRow) => {
+    if (
+      !window.confirm(
+        t("traderSettlements.oneScreen.postConfirm", { amount: money(draft.amount), trader: draft.traderName }),
+      )
+    ) {
+      return;
+    }
+    setDraftBusyId(draft.id);
+    setDraftError(undefined);
+    try {
+      const result = await api.post<{ settlementId: string }>(
+        `operations/settlements/drafts/${draft.id}/confirm`,
+      );
+      refresh();
+      openDetail(result.settlementId);
+    } catch (error) {
+      setDraftError(message(error, t("traderSettlements.oneScreen.postDraftFailed")));
+    } finally {
+      setDraftBusyId(undefined);
+    }
+  };
 
   const clearFilters = () => list.clearFilters();
 
@@ -914,6 +961,21 @@ export function TraderSettlementsWorkspace({
                             ? t("traderSettlements.editDraft")
                             : t("traderSettlements.viewDraft")}
                         </button>
+                        {oneScreen && draft.status === "draft" ? (
+                          <>
+                            <button onClick={() => void previewDraft(draft)} type="button">
+                              {t("traderSettlements.oneScreen.previewDraft")}
+                            </button>
+                            <button
+                              className="button-primary"
+                              disabled={draftBusyId === draft.id}
+                              onClick={() => void postDraft(draft)}
+                              type="button"
+                            >
+                              {t("traderSettlements.oneScreen.postDraft")}
+                            </button>
+                          </>
+                        ) : null}
                         {draft.status === "draft" ? (
                           <button
                             className="is-destructive"
@@ -962,7 +1024,9 @@ export function TraderSettlementsWorkspace({
                 <th scope="col">{t("traderSettlements.columnPaymentAmount")}</th>
                 <th scope="col">{t("traderSettlements.columnRemainingOutstanding")}</th>
                 <th scope="col">{t("traderSettlements.columnMoneySent")}</th>
-                <th scope="col">{t("traderSettlements.columnMoneyReceived")}</th>
+                {oneScreen ? null : (
+                  <th scope="col">{t("traderSettlements.columnMoneyReceived")}</th>
+                )}
                 <th scope="col">{t("traderSettlements.columnStatus")}</th>
                 <th scope="col">
                   <span className="sr-only">{t("common.actions")}</span>
@@ -1000,13 +1064,15 @@ export function TraderSettlementsWorkspace({
                   <td>{money(row.paymentAmount)}</td>
                   <td>{money(row.remainingOutstanding)}</td>
                   <td>{row.moneySentAt === null ? "-" : row.moneySentAt.slice(0, 10)}</td>
-                  <td>
-                    {row.moneyReceivedAt === null
-                      ? row.moneyReceivedConfirmed
-                        ? t("common.yes")
-                        : "-"
-                      : row.moneyReceivedAt.slice(0, 10)}
-                  </td>
+                  {oneScreen ? null : (
+                    <td>
+                      {row.moneyReceivedAt === null
+                        ? row.moneyReceivedConfirmed
+                          ? t("common.yes")
+                          : "-"
+                        : row.moneyReceivedAt.slice(0, 10)}
+                    </td>
+                  )}
                   <td>
                     {t(
                       row.status === "reversed"
@@ -1054,12 +1120,24 @@ export function TraderSettlementsWorkspace({
                         </button>
                       </>
                     )}
-                    {row.status === "reversed" || row.moneyReceivedConfirmed ? null : (
+                    {oneScreen || row.status === "reversed" || row.moneyReceivedConfirmed ? null : (
                       <button onClick={() => setReceiptTarget(row)} type="button">
                         {t("traderSettlements.actionConfirmMoneyReceived")}
                       </button>
                     )}
-                    {!canReverse ||
+                    {!oneScreen ||
+                    !canReverse ||
+                    row.status === "reversed" ||
+                    row.isReversed ? null : (
+                      <button
+                        onClick={() => setUnpostTarget({ id: row.settlementId, number: row.settlementNumber })}
+                        type="button"
+                      >
+                        {t("traderSettlements.oneScreen.unpost")}
+                      </button>
+                    )}
+                    {oneScreen ||
+                    !canReverse ||
                     row.status === "reversed" ||
                     row.moneyReceivedConfirmed ? null : (
                       <button onClick={() => setReverseTarget(row)} type="button">
@@ -1090,7 +1168,34 @@ export function TraderSettlementsWorkspace({
         </nav>
       </section>
 
-      {!newSettlementOpen ? null : (
+      {!newSettlementOpen || !oneScreen ? null : (
+        <OneScreenSettlementDialog
+          api={api}
+          draftId={draftToEdit}
+          initialTraderId={deepLinkTraderId ?? presetTraderId}
+          onClose={() => {
+            setNewSettlementOpen(false);
+            setDraftToEdit(undefined);
+            if (returnToOrigin()) return;
+            refresh();
+          }}
+          onDraftSaved={(traderName) => {
+            setNewSettlementOpen(false);
+            setDraftToEdit(undefined);
+            setReceiptNotice(t("traderSettlements.draftSavedAndClosed", { trader: traderName }));
+            refresh();
+          }}
+          onPosted={(settlementId) => {
+            setNewSettlementOpen(false);
+            setDraftToEdit(undefined);
+            refresh();
+            openDetail(settlementId);
+          }}
+          reportLanguage={reportLanguage}
+        />
+      )}
+
+      {!newSettlementOpen || oneScreen ? null : (
         <NewSettlementDialog
           api={api}
           draftId={draftToEdit}
@@ -1161,8 +1266,22 @@ export function TraderSettlementsWorkspace({
             closeDetail();
             refresh();
           }}
+          onUnposted={(result) => {
+            closeDetail();
+            openUnpostedDraft(result);
+          }}
           reportLanguage={reportLanguage}
           settlementId={detailId}
+        />
+      )}
+
+      {unpostTarget === undefined ? null : (
+        <UnpostSettlementDialog
+          api={api}
+          onClose={() => setUnpostTarget(undefined)}
+          onUnposted={openUnpostedDraft}
+          settlementId={unpostTarget.id}
+          settlementNumber={unpostTarget.number}
         />
       )}
 
@@ -4375,6 +4494,7 @@ export function SettlementDetailDialog({
   onClose,
   onOpenAccountStatement,
   onReversed,
+  onUnposted,
   reportLanguage,
   settlementId,
 }: {
@@ -4384,10 +4504,14 @@ export function SettlementDetailDialog({
   onClose: () => void;
   onOpenAccountStatement: (traderId: string) => void;
   onReversed: () => void;
+  /** One-screen Companies: a settlement was un-posted into this draft. */
+  onUnposted?: (result: { draftId: string; notice: string }) => void;
   reportLanguage: "ar" | "en";
   settlementId: string;
 }) {
   const { t } = useTranslation();
+  const oneScreen = useOneScreenSettlement(api);
+  const [unpostOpen, setUnpostOpen] = useState(false);
   const [detail, setDetail] = useState<TraderSettlementDetail>();
   const [error, setError] = useState<string>();
   const [receiptOpen, setReceiptOpen] = useState(false);
@@ -4762,17 +4886,22 @@ export function SettlementDetailDialog({
                 </button>
               </>
             )}
-            {detail.status === "reversed" || moneyReceivedConfirmed ? null : (
+            {oneScreen || detail.status === "reversed" || moneyReceivedConfirmed ? null : (
               <button onClick={() => setReceiptOpen(true)} type="button">
                 {t("traderSettlements.actionConfirmMoneyReceived")}
               </button>
             )}
-            {!canReverse || detail.status === "reversed" || !moneyReceivedConfirmed ? null : (
+            {oneScreen || !canReverse || detail.status === "reversed" || !moneyReceivedConfirmed ? null : (
               <button onClick={() => setReverseReceiptOpen(true)} type="button">
                 {t("traderSettlements.actionReverseMoneyReceived")}
               </button>
             )}
-            {!canReverse || detail.status === "reversed" || moneyReceivedConfirmed ? null : (
+            {!oneScreen || !canReverse || detail.status === "reversed" ? null : (
+              <button onClick={() => setUnpostOpen(true)} type="button">
+                {t("traderSettlements.oneScreen.unpost")}
+              </button>
+            )}
+            {oneScreen || !canReverse || detail.status === "reversed" || moneyReceivedConfirmed ? null : (
               <button onClick={() => setReverseOpen(true)} type="button">
                 {t("traderSettlements.actionReverse")}
               </button>
@@ -4782,6 +4911,20 @@ export function SettlementDetailDialog({
             </button>
           </div>
         </>
+      )}
+
+      {!unpostOpen || detail === undefined ? null : (
+        <UnpostSettlementDialog
+          api={api}
+          onClose={() => setUnpostOpen(false)}
+          onUnposted={(result) => {
+            setUnpostOpen(false);
+            if (onUnposted !== undefined) onUnposted(result);
+            else onReversed();
+          }}
+          settlementId={detail.settlementId}
+          settlementNumber={detail.settlementNumber}
+        />
       )}
 
       {!receiptOpen || detail === undefined ? null : (

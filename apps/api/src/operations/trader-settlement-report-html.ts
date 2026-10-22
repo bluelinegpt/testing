@@ -68,6 +68,8 @@ interface Labels {
   readonly sourceBank: string;
   readonly status: string;
   readonly statusConfirmed: string;
+  readonly statusDraft: string;
+  readonly draftNotice: string;
   readonly statusMoneyReceived: string;
   readonly statusMoneySent: string;
   readonly statusNotEligible: string;
@@ -139,6 +141,8 @@ const LABELS: Record<ReportLanguage, Labels> = {
     sourceBank: "حساب الشركة المرسل",
     status: "الحالة",
     statusConfirmed: "مؤكدة",
+    statusDraft: "مسودة — غير مرحّلة",
+    draftNotice: "مسودة للمراجعة فقط — لم يتم ترحيلها ولم يُدفع أي مبلغ.",
     statusMoneyReceived: "استلم التاجر المبلغ",
     statusMoneySent: "تم إرسال المبلغ للتاجر",
     statusNotEligible: "غير مؤهل",
@@ -208,6 +212,8 @@ const LABELS: Record<ReportLanguage, Labels> = {
     sourceBank: "Company Source Bank",
     status: "Status",
     statusConfirmed: "Confirmed",
+    statusDraft: "Draft — not posted",
+    draftNotice: "Draft for review only — not posted, no money has been paid.",
     statusMoneyReceived: "Money Received by Trader",
     statusMoneySent: "Money Sent to Trader",
     statusNotEligible: "Not Eligible",
@@ -267,7 +273,8 @@ function paymentMethodLabel(labels: Labels, method: "bank_transfer" | "cash"): s
   return method === "bank_transfer" ? labels.paymentMethodBankTransfer : labels.paymentMethodCash;
 }
 
-function settlementStatusLabel(labels: Labels, status: "confirmed" | "reversed"): string {
+function settlementStatusLabel(labels: Labels, status: "confirmed" | "reversed" | "draft"): string {
+  if (status === "draft") return labels.statusDraft;
   return status === "reversed" ? labels.statusReversed : labels.statusConfirmed;
 }
 
@@ -312,6 +319,7 @@ export function buildTraderSettlementStatementHtml(
   const dir = language === "ar" ? "rtl" : "ltr";
   const header = data.header;
   const isFahdAlMalikiCompany = data.companyId === "2f0703c3-2b3b-45ef-a6ab-de9b3694c0a1";
+  const isDraft = data.header.status === "draft";
   // XYZ Deliver services asked (11 Oct 2026) for a compact Trader Invoice PDF:
   // no Delivery Date, COD Amount or Service Fee -- only Amount Paid Now, in the
   // table and in the summary. Every other Company keeps the full invoice.
@@ -519,6 +527,7 @@ export function buildTraderSettlementStatementHtml(
         `</div>`;
 
   const reportHeader =
+    (isDraft ? `<div class="draft-watermark">${escapeHtml(labels.statusDraft)}</div>` : "") +
     `<header class="report-header">` +
     `<div class="company-block${isFahdAlMalikiCompany ? " company-block-special" : ""}">` +
     (header.company.logoDataUri == null
@@ -548,19 +557,24 @@ export function buildTraderSettlementStatementHtml(
     headerMeta(labels.paymentDate, header.paymentDate) +
     headerMeta(labels.paymentMethod, paymentMethodLabel(labels, header.paymentMethod)) +
     headerMeta(labels.paymentReference, header.paymentReference ?? "") +
-    headerMeta(labels.moneySentDate, dateTime(header.moneySentAt)) +
-    headerMeta(labels.moneyReceivedDate, dateTime(header.moneyReceivedDate)) +
+    (isDraft ? "" : headerMeta(labels.moneySentDate, dateTime(header.moneySentAt))) +
+    (header.hideMoneyReceived === true
+      ? ""
+      : headerMeta(labels.moneyReceivedDate, dateTime(header.moneyReceivedDate))) +
     // AL Fahd Al Maliky asked for the creating user and the user who sent
     // the money ("Money Sent By" / "أرسله") to be left off its invoices;
     // every other Company still prints both.
     (isFahdAlMalikiCompany ? "" : headerMeta(labels.createdBy, header.createdBy)) +
-    (isFahdAlMalikiCompany ? "" : headerMeta(labels.confirmedBy, header.confirmedBy)) +
+    (isFahdAlMalikiCompany || isDraft ? "" : headerMeta(labels.confirmedBy, header.confirmedBy)) +
     headerMeta(labels.generatedAt, header.generatedAt) +
     `</div>` +
     bankSection +
     `</header>`;
 
   const notices: string[] = [];
+  if (isDraft) {
+    notices.push(`<div class="notice notice-draft"><strong>${escapeHtml(labels.draftNotice)}</strong></div>`);
+  }
   if (header.moneyReceivedDate !== null) {
     notices.push(
       `<div class="notice notice-positive"><strong>${escapeHtml(labels.moneyReceivedNotice)}</strong>` +
@@ -677,6 +691,10 @@ export function buildTraderSettlementStatementHtml(
     .notice { font-size: 11px; padding: 4px 8px; margin-bottom: 4px; border-inline-start: 3px solid; }
     .notice-positive { background: #eef8f0; border-color: #2e7d32; }
     .notice-negative { background: #fdeeee; border-color: #c62828; }
+    .notice-draft { background: #fff7e0; border-color: #b45309; }
+    .draft-watermark { position: fixed; top: 40%; left: 0; right: 0; text-align: center;
+      font-size: 64px; font-weight: 800; color: rgba(180, 83, 9, 0.12); transform: rotate(-24deg);
+      pointer-events: none; z-index: 0; }
      .section-title { font-size: 13px; margin: 14px 0 6px; }
      .subsection-title { font-size: 11px; margin: 8px 0 4px; }
     table.grid { width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 10px; }

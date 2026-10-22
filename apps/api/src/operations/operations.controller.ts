@@ -1432,6 +1432,13 @@ export class OperationsController {
     return this.traderSettlementService.zeroDueOrders(traderId);
   }
 
+  @RequireAnyPermission("settlements.create", "reports.export", "users_roles.manage")
+  @ApiOperation({ summary: "Whether this Company uses the one-screen settlement flow" })
+  @Get("settlements/payments/settings")
+  public traderSettlementSettings(): Promise<{ readonly oneScreen: boolean }> {
+    return this.traderSettlementService.settlementSettings();
+  }
+
   @RequireAnyPermission("settlements.create", "users_roles.manage")
   @ApiOperation({ summary: "Open Trader Credits the Company still owes one Trader" })
   @Get("settlements/payments/open-credits")
@@ -1524,6 +1531,38 @@ export class OperationsController {
     @Param("draftId", new ParseUUIDPipe()) draftId: string,
   ): Promise<{ readonly id: string }> {
     return this.traderSettlementService.deleteDraft(draftId);
+  }
+
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
+  @ApiOperation({ summary: "Preview an unsaved settlement's invoice, marked DRAFT" })
+  @Post("settlements/drafts/preview-pdf")
+  public async previewTraderSettlementDraftPdf(
+    @Body() input: CreateTraderSettlementDto,
+    @Query("language") language: string | undefined,
+    @Res() response: Response,
+  ): Promise<void> {
+    const file = await this.traderSettlementService.draftPreviewPdf(input, language === "ar" ? "ar" : "en");
+    this.sendDraftPdf(response, file);
+  }
+
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
+  @ApiOperation({ summary: "A saved draft's invoice, marked DRAFT" })
+  @Get("settlements/drafts/:draftId/pdf")
+  public async traderSettlementDraftPdf(
+    @Param("draftId", new ParseUUIDPipe()) draftId: string,
+    @Query("language") language: string | undefined,
+    @Res() response: Response,
+  ): Promise<void> {
+    const file = await this.traderSettlementService.draftPdf(draftId, language === "ar" ? "ar" : "en");
+    this.sendDraftPdf(response, file);
+  }
+
+  private sendDraftPdf(response: Response, file: { bytes: Buffer; filename: string }): void {
+    response.setHeader("Content-Type", "application/pdf");
+    response.setHeader("Content-Disposition", `attachment; filename="${file.filename}"`);
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("Cache-Control", "private, max-age=0, must-revalidate");
+    response.send(file.bytes);
   }
 
   @RequireAnyPermission("settlements.create", "users_roles.manage")
@@ -1664,6 +1703,25 @@ export class OperationsController {
     readonly settlementId: string;
   }> {
     return this.traderSettlementService.reverse(
+      settlementId,
+      input.reason,
+      this.correlationId(request),
+    );
+  }
+
+  @RequireAnyPermission("settlements.reverse", "users_roles.manage")
+  @ApiOperation({ summary: "Un-post a settlement: reverse it and reopen its lines as a Draft" })
+  @Post("settlements/payments/:settlementId/unpost")
+  public unpostTraderSettlement(
+    @Param("settlementId", new ParseUUIDPipe()) settlementId: string,
+    @Body() input: ReverseTraderSettlementDto,
+    @Req() request: Request,
+  ): Promise<{
+    readonly draftId: string;
+    readonly reversalSettlementNumber: string;
+    readonly settlementNumber: string;
+  }> {
+    return this.traderSettlementService.unpostSettlement(
       settlementId,
       input.reason,
       this.correlationId(request),

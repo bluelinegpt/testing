@@ -113,6 +113,37 @@ describe("buildTraderSettlementStatementHtml", () => {
     expect(html).toContain("Trader Acknowledgement");
   });
 
+  it("marks a draft as not posted and leaves off the posting fields (one-screen flow)", () => {
+    const html = buildTraderSettlementStatementHtml(
+      {
+        ...sample,
+        header: {
+          ...sample.header,
+          confirmedBy: "",
+          hideMoneyReceived: true,
+          moneySentAt: null,
+          settlementNumber: "—",
+          status: "draft",
+        },
+      },
+      "en",
+    );
+    expect(html).toContain("Draft — not posted");
+    expect(html).toContain('class="draft-watermark"');
+    expect(html).toContain("not posted, no money has been paid");
+    expect(html).not.toContain("Money Received Date");
+    expect(html).not.toContain("Money Sent Date");
+  });
+
+  it("leaves Money Received off a posted invoice when the Company has no such step", () => {
+    const html = buildTraderSettlementStatementHtml(
+      { ...sample, header: { ...sample.header, hideMoneyReceived: true } },
+      "en",
+    );
+    expect(html).not.toContain("Money Received Date");
+    expect(html).not.toContain('class="draft-watermark"');
+  });
+
   it("renders the Arabic statement RTL with Arabic business names and labels", () => {
     const html = buildTraderSettlementStatementHtml(sample, "ar");
     expect(html).toContain('dir="rtl"');
