@@ -1251,6 +1251,16 @@
 .fast-entry-workspace > .form-hint {
   margin: 0;
 }
+.zero-due-orders {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #d8e0ef;
+  border-radius: 10px;
+}
+.zero-due-orders > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
 .fast-entry-toolbar {
   display: flex;
   align-items: center;

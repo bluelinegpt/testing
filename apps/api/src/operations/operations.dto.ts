@@ -1470,6 +1470,16 @@ export class CreateTraderSettlementDto {
   @Type(() => TraderSettlementCreditApplicationDto)
   public readonly creditApplications?: readonly TraderSettlementCreditApplicationDto[];
 
+  /**
+   * Delivered 0-due Orders (nothing to pay the Trader) to print on this
+   * Settlement's invoice at 0.00. No money: they never become settlement lines.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @IsUUID("all", { each: true })
+  public readonly zeroDueOrderIds?: readonly string[];
+
   @IsOptional()
   @IsIn(paymentMethods)
   public readonly paymentMethod?: (typeof paymentMethods)[number];

@@ -145,6 +145,22 @@ interface TraderSettlementDraftPayload {
   readonly creditApplications?: readonly { amount: number | string; creditId: string }[];
   readonly traderBankAccountId?: string;
   readonly traderId?: string;
+  readonly zeroDueOrderIds?: readonly string[];
+}
+
+/** A delivered Order that pays the Trader 0, offered to print on the new invoice. */
+interface ZeroDueOrderRow {
+  readonly additionalFees: string;
+  readonly areaName: string;
+  readonly codAmount: string;
+  readonly customerName: string;
+  readonly deliveryDate: string | null;
+  readonly id: string;
+  readonly orderNumber: string;
+  readonly printedOnSettlementNumber: string | null;
+  readonly referenceNumber: string | null;
+  readonly serialNumber: string;
+  readonly serviceFee: string;
 }
 
 /** A Trader Credit paid back inside a Settlement. */
@@ -1971,6 +1987,10 @@ function NewSettlementDialog({
   const [creditApplications, setCreditApplications] = useState<
     readonly { amount: string; creditId: string }[]
   >([]);
+  // Delivered Orders that pay the Trader 0: never ticked automatically. Ticked
+  // ones print on this Settlement's invoice at 0.00 (no money).
+  const [zeroDueOrders, setZeroDueOrders] = useState<readonly ZeroDueOrderRow[]>([]);
+  const [zeroDueOrderIds, setZeroDueOrderIds] = useState<readonly string[]>([]);
 
   // Step 3 — Payment Details.
   const [amount, setAmount] = useState("");
@@ -2176,6 +2196,7 @@ function NewSettlementDialog({
       creditId: line.creditId,
     }));
     setCreditApplications(draftCredits);
+    setZeroDueOrderIds(payload.zeroDueOrderIds ?? []);
     if (draftCredits.length > 0) {
       // The saved amount is the net payment, which includes the Credits; the
       // Orders' amount is what remains once they are taken back out.
@@ -2290,6 +2311,30 @@ function NewSettlementDialog({
     // keep the result of whatever filter was in force when the Trader was
     // chosen, and changing Emirate silently reloads only half the table.
   }, [api, trader, t, orderFilters.emirateId, orderFilters.areaId, orderFilters.driverId]);
+
+  useEffect(() => {
+    if (trader === undefined) {
+      setZeroDueOrders([]);
+      setZeroDueOrderIds([]);
+      return;
+    }
+    const controller = new AbortController();
+    void api
+      .get<readonly ZeroDueOrderRow[]>(
+        `operations/settlements/payments/zero-due-orders?traderId=${trader.id}`,
+        controller.signal,
+      )
+      .then((response) => {
+        // An older API answers this route with nothing usable; show none.
+        const rows = Array.isArray(response) ? response : [];
+        setZeroDueOrders(rows);
+        setZeroDueOrderIds((current) => current.filter((id) => rows.some((row) => row.id === id)));
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setZeroDueOrders([]);
+      });
+    return () => controller.abort();
+  }, [api, trader]);
 
   useEffect(() => {
     if (trader === undefined) {
@@ -2741,6 +2786,7 @@ function NewSettlementDialog({
             creditId: line.creditId,
           })),
         }),
+    ...(zeroDueOrderIds.length === 0 ? {} : { zeroDueOrderIds: [...zeroDueOrderIds] }),
     traderId: trader!.id,
   });
 
@@ -3476,6 +3522,73 @@ function NewSettlementDialog({
                     </button>
                   </nav>
                 )}
+                {zeroDueOrders.length === 0 ? null : (
+                  <details className="zero-due-orders" open={zeroDueOrderIds.length > 0}>
+                    <summary>
+                      {t("traderSettlements.zeroDueTitle", { count: zeroDueOrders.length })}
+                      {zeroDueOrderIds.length === 0 ? null : (
+                        <strong>
+                          {" · "}
+                          {t("traderSettlements.zeroDueSelected", { count: zeroDueOrderIds.length })}
+                        </strong>
+                      )}
+                    </summary>
+                    <p className="form-hint">{t("traderSettlements.zeroDueHelp")}</p>
+                    <div className="table-scroll">
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th aria-label={t("common.select")} scope="col" />
+                            <th scope="col">{t("operations.orderNumber")}</th>
+                            <th scope="col">{t("traderSettlements.filterOrderSerialNumber")}</th>
+                            <th scope="col">{t("traderSettlements.filterExternalReference")}</th>
+                            <th scope="col">{t("traderSettlements.filterDeliveryDateFrom")}</th>
+                            <th scope="col">{t("traderSettlements.filterArea")}</th>
+                            <th scope="col">{t("operations.codAmount")}</th>
+                            <th scope="col">{t("traderSettlements.zeroDueFees")}</th>
+                            <th scope="col">{t("traderSettlements.zeroDuePrintedOn")}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {zeroDueOrders.map((order) => {
+                            const checked = zeroDueOrderIds.includes(order.id);
+                            return (
+                              <tr key={order.id}>
+                                <td>
+                                  <input
+                                    aria-label={t("traderSettlements.zeroDueAdd", {
+                                      number: order.referenceNumber ?? order.orderNumber,
+                                    })}
+                                    checked={checked}
+                                    disabled={draftReadOnly}
+                                    onChange={(event) =>
+                                      setZeroDueOrderIds((current) =>
+                                        event.target.checked
+                                          ? [...current, order.id]
+                                          : current.filter((id) => id !== order.id),
+                                      )
+                                    }
+                                    type="checkbox"
+                                  />
+                                </td>
+                                <td className="mono">{order.orderNumber}</td>
+                                <td className="mono">{order.serialNumber}</td>
+                                <td className="mono">{order.referenceNumber ?? "-"}</td>
+                                <td>{order.deliveryDate?.slice(0, 10) ?? "-"}</td>
+                                <td>{order.areaName || "-"}</td>
+                                <td className="numeric">{money(order.codAmount)}</td>
+                                <td className="numeric">
+                                  {money(safeMoneyValue(order.serviceFee) + safeMoneyValue(order.additionalFees))}
+                                </td>
+                                <td className="mono">{order.printedOnSettlementNumber ?? "-"}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </details>
+                )}
               </section>
 
               {/* Step 3 — Payment Details.
@@ -3820,6 +3933,17 @@ function NewSettlementDialog({
                       <dt>{t("traderSettlements.netPaymentToTrader")}</dt>
                       <dd>{money(netPayment)}</dd>
                     </div>
+                    {zeroDueOrderIds.length === 0 ? null : (
+                      <div className="detail-line">
+                        <dt>{t("traderSettlements.zeroDueReview")}</dt>
+                        <dd>
+                          {zeroDueOrders
+                            .filter((order) => zeroDueOrderIds.includes(order.id))
+                            .map((order) => order.referenceNumber ?? order.orderNumber)
+                            .join(", ")}
+                        </dd>
+                      </div>
+                    )}
                     <div className="detail-line">
                       <dt>{t("traderSettlements.paymentDate")}</dt>
                       <dd>{paymentDate}</dd>

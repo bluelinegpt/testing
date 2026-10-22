@@ -67,6 +67,7 @@ export const PURGE_TABLES = new Set([
   "trader_settlement_orders",
   "trader_settlement_payments",
   "trader_settlement_receivable_offsets",
+  "trader_settlement_zero_due_orders",
   "trader_settlement_drafts",
   "trader_settlements",
   "trader_credits",

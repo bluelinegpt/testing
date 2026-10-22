@@ -142,6 +142,7 @@ export const DOMAIN_TABLES: Readonly<Record<ResetDomain, readonly string[]>> = {
     "trader_settlement_orders",
     "trader_settlement_payments",
     "trader_settlement_receivable_offsets",
+    "trader_settlement_zero_due_orders",
     "trader_settlements",
   ],
   TRADERS_CUSTOMERS: [

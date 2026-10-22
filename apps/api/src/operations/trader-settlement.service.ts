@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { Decimal } from "decimal.js";
-import { type Kysely, sql, type Transaction } from "kysely";
+import { type Kysely, type RawBuilder, sql, type Transaction } from "kysely";
 
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
@@ -210,6 +210,25 @@ export interface TraderEligibleOrderRow {
   readonly settlementStatus: string;
   readonly totalDeductions: string;
   readonly vatAmount: string;
+}
+
+/** A delivered Order that pays the Trader 0, offered on Create Settlement. */
+export interface TraderZeroDueOrderRow {
+  readonly additionalFees: string;
+  readonly areaName: string;
+  readonly codAmount: string;
+  readonly customerMobileNumber: string;
+  readonly customerName: string;
+  readonly deliveryDate: string | null;
+  readonly emirateName: string | null;
+  readonly id: string;
+  readonly orderNumber: string;
+  readonly paymentCondition: string;
+  /** The invoice it prints on today by date, if any (e.g. SET-000155). */
+  readonly printedOnSettlementNumber: string | null;
+  readonly referenceNumber: string | null;
+  readonly serialNumber: string;
+  readonly serviceFee: string;
 }
 
 export interface TraderAllocationProposalLine {
@@ -888,6 +907,119 @@ export class TraderSettlementService {
   }
 
   /**
+   * Delivered 0-due Orders of one Trader that the user may tick on Create
+   * Settlement so they print on that Settlement's invoice (Aiman, 22 Oct
+   * 2026). Excludes any Order already chosen on an effective Settlement.
+   */
+  public async zeroDueOrders(traderId: string): Promise<readonly TraderZeroDueOrderRow[]> {
+    this.assertAnyPermission("settlements.create");
+    const { companyId } = this.tenants.current();
+    return this.zeroDueCandidates(this.database, companyId, traderId);
+  }
+
+  private async zeroDueCandidates(
+    executor: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
+    companyId: string,
+    traderId: string,
+    onlyOrderIds?: readonly string[],
+  ): Promise<readonly TraderZeroDueOrderRow[]> {
+    const idFilter =
+      onlyOrderIds === undefined
+        ? sql`true`
+        : sql`o.id = any(${[...onlyOrderIds]}::uuid[])`;
+    const result = await sql<TraderZeroDueOrderRow>`
+      select o.id, o.order_number as "orderNumber",
+             coalesce(o.serial_number, o.order_number) as "serialNumber",
+             o.reference_number as "referenceNumber", o.delivered_at::text as "deliveryDate",
+             o.customer_name as "customerName", o.customer_mobile_number as "customerMobileNumber",
+             e.name_en as "emirateName",
+             coalesce(o.customer_area_name_snapshot, a.name_en, '') as "areaName",
+             o.cod_amount::text as "codAmount", o.service_fee::text as "serviceFee",
+             coalesce(o.additional_fees, 0)::text as "additionalFees",
+             o.payment_condition as "paymentCondition",
+             (select s.settlement_number
+                from trader_settlements s
+               where s.company_id = o.company_id and s.trader_id = o.trader_id
+                 and ${this.effectiveSettlement(sql`s`)}
+                 and s.created_at >= o.delivered_at
+               order by s.created_at
+               limit 1) as "printedOnSettlementNumber"
+        from orders o
+        left join areas a on a.id = o.area_id and a.company_id = o.company_id
+        left join emirates e on e.id = a.emirate_id
+       where o.company_id = ${companyId}::uuid
+         and o.trader_id = ${traderId}::uuid
+         and ${idFilter}
+         and ${this.zeroDueOrderQualifies()}
+         and not ${this.zeroDueChosenOnEffectiveSettlement()}
+       order by o.delivered_at desc, coalesce(o.serial_number, o.order_number) desc
+       limit 500
+    `.execute(executor);
+    return result.rows;
+  }
+
+  /** `alias` is a confirmed Settlement that is not a reversal entry and not reversed. */
+  private effectiveSettlement(alias: RawBuilder<unknown>): RawBuilder<unknown> {
+    return sql`(${alias}.status = 'confirmed' and ${alias}.reversal_of_id is null
+      and not exists (select 1 from trader_settlements rv
+           where rv.company_id = ${alias}.company_id and rv.reversal_of_id = ${alias}.id))`;
+  }
+
+  /** Order `o` already chosen to print on an effective Settlement. */
+  private zeroDueChosenOnEffectiveSettlement(): RawBuilder<unknown> {
+    return sql`exists (
+      select 1
+        from trader_settlement_zero_due_orders zc
+        join trader_settlements zs on zs.id = zc.settlement_id and zs.company_id = zc.company_id
+       where zc.company_id = o.company_id and zc.order_id = o.id
+         and ${this.effectiveSettlement(sql`zs`)})`;
+  }
+
+  /**
+   * Order `o` is a delivered Order that pays its Trader 0 and is never a
+   * settlement line: "Pay by Customer", or "Pay by Trader" whose fee was
+   * collected DIRECTLY (Collect Money from Trader) rather than deducted in a
+   * Settlement -- e.g. 05220, RCV-000067 (Aiman, 22 Oct 2026). A fee deducted
+   * in a Settlement already prints there as a deduction line; one still unpaid
+   * prints when it is deducted or collected.
+   */
+  private zeroDueOrderQualifies(): RawBuilder<unknown> {
+    return sql`(
+      (
+        o.payment_condition = 'customer_pays_cod_and_fee'
+        or (o.payment_condition = 'customer_pays_cod_trader_pays_fee'
+          and exists (
+            select 1
+              from trader_receivables r
+              join trader_collection_allocations alloc
+                on alloc.company_id = r.company_id and alloc.receivable_id = r.id
+              join trader_collections c
+                on c.id = alloc.collection_id and c.company_id = alloc.company_id
+             where r.company_id = o.company_id and r.source_type = 'service_charge'
+               and r.source_reference = o.order_number
+               and r.status not in ('cancelled', 'reversed')
+               and c.status <> 'reversed')
+          and not exists (
+            select 1
+              from trader_receivables r
+              join trader_settlement_receivable_offsets off
+                on off.company_id = r.company_id and off.receivable_id = r.id
+              join trader_settlements os
+                on os.id = off.settlement_id and os.company_id = off.company_id
+             where r.company_id = o.company_id and r.source_type = 'service_charge'
+               and r.source_reference = o.order_number
+               and ${this.effectiveSettlement(sql`os`)}))
+      )
+      and o.order_type <> 'collect_order'
+      and o.delivery_status in ('delivered', 'closed')
+      and o.trader_net_payable = 0
+      and o.delivered_at is not null
+      and not exists (select 1 from trader_settlement_orders l
+           where l.company_id = o.company_id and l.order_id = o.id)
+    )`;
+  }
+
+  /**
    * Oldest-first default allocation (§6): read-only, writes nothing. Sorted by
    * Delivery Date ascending with the Serial Number as a stable tie-breaker.
    * The final Order in the walk absorbs whatever remains of the payment, up to
@@ -1389,6 +1521,33 @@ export class TraderSettlementService {
            where company_id=${companyId}::uuid and id=${credit.id}::uuid
         `.execute(transaction);
       }
+      // 0-due Orders the user ticked: printed on this invoice at 0.00, no money.
+      const zeroDueOrderIds = [...new Set(input.zeroDueOrderIds ?? [])];
+      if (zeroDueOrderIds.length > 0) {
+        const chosen = await this.zeroDueCandidates(
+          transaction,
+          companyId,
+          input.traderId,
+          zeroDueOrderIds,
+        );
+        if (chosen.length !== zeroDueOrderIds.length) {
+          throw new ApplicationException(
+            "settlement_zero_due_order_ineligible",
+            "One or more Orders with nothing to pay can no longer be added to this Settlement. Refresh and try again.",
+            HttpStatus.CONFLICT,
+          );
+        }
+        for (const order of chosen) {
+          await sql`
+            insert into trader_settlement_zero_due_orders(
+              company_id, settlement_id, order_id, created_by_account_id
+            ) values (
+              ${companyId}::uuid, ${settlementId}::uuid, ${order.id}::uuid,
+              ${identity.identityId}::uuid
+            )
+          `.execute(transaction);
+        }
+      }
       // A bank transfer names its Bank account and nothing else. Rejecting a
       // stray cash account rather than ignoring it: silently dropping a field
       // the caller supplied leaves them believing something untrue, and the
@@ -1567,6 +1726,7 @@ export class TraderSettlementService {
             creditNumber: credit.creditNumber,
           })),
           traderCreditsApplied: creditTotal.toFixed(2),
+          zeroDueOrderIds,
           settlementNumber,
           traderId: input.traderId,
         },
@@ -2761,10 +2921,12 @@ export class TraderSettlementService {
    * Settlement (nothing to pay), so without this the Trader never saw them.
    * Display only: Amount Paid Now is 0.00 and no money moves.
    *
-   * Each such Order prints once: on the first effective Settlement of that
-   * Trader created after it was delivered -- delivered after the previous
-   * effective Settlement and no later than this one. A reversal entry lists
-   * none.
+   * Each such Order prints once: on the Settlement the user ticked it on in
+   * Create Settlement (trader_settlement_zero_due_orders), otherwise on the
+   * first effective Settlement of that Trader created after it was delivered
+   * -- delivered after the previous effective Settlement and no later than
+   * this one. A reversal entry lists none; a reversed Settlement's choices are
+   * ignored, so those Orders go back to printing by date.
    */
   private async withZeroDueOrders(
     companyId: string,
@@ -2821,46 +2983,18 @@ export class TraderSettlementService {
           join orders o on o.company_id = cur.company_id and o.trader_id = cur.trader_id
           left join areas a on a.id = o.area_id and a.company_id = o.company_id
           left join emirates e on e.id = a.emirate_id
-         where (
-             o.payment_condition = 'customer_pays_cod_and_fee'
-             -- "Pay by Trader" too when its fee was collected DIRECTLY (Collect
-             -- Money from Trader) rather than deducted in a Settlement -- e.g.
-             -- 05220, RCV-000067 (Aiman, 22 Oct 2026). A fee deducted in a
-             -- Settlement already prints there as a deduction line; one still
-             -- unpaid prints when it is deducted or collected.
-             or (o.payment_condition = 'customer_pays_cod_trader_pays_fee'
-               and exists (
-                 select 1
-                   from trader_receivables r
-                   join trader_collection_allocations alloc
-                     on alloc.company_id = r.company_id and alloc.receivable_id = r.id
-                   join trader_collections c
-                     on c.id = alloc.collection_id and c.company_id = alloc.company_id
-                  where r.company_id = o.company_id and r.source_type = 'service_charge'
-                    and r.source_reference = o.order_number
-                    and r.status not in ('cancelled', 'reversed')
-                    and c.status <> 'reversed')
-               and not exists (
-                 select 1
-                   from trader_receivables r
-                   join trader_settlement_receivable_offsets off
-                     on off.company_id = r.company_id and off.receivable_id = r.id
-                   join trader_settlements os
-                     on os.id = off.settlement_id and os.company_id = off.company_id
-                  where r.company_id = o.company_id and r.source_type = 'service_charge'
-                    and r.source_reference = o.order_number
-                    and os.status = 'confirmed' and os.reversal_of_id is null
-                    and not exists (select 1 from trader_settlements orv
-                         where orv.company_id = os.company_id and orv.reversal_of_id = os.id)))
+         where ${this.zeroDueOrderQualifies()}
+           and (
+             -- Chosen for this Settlement on Create Settlement.
+             exists (select 1 from trader_settlement_zero_due_orders z
+                      where z.company_id = cur.company_id and z.settlement_id = cur.id
+                        and z.order_id = o.id)
+             -- Otherwise by date: delivered after the previous effective
+             -- Settlement and no later than this one, unless chosen elsewhere.
+             or (o.delivered_at <= cur.created_at
+               and (prev.created_at is null or o.delivered_at > prev.created_at)
+               and not ${this.zeroDueChosenOnEffectiveSettlement()})
            )
-           and o.order_type <> 'collect_order'
-           and o.delivery_status in ('delivered', 'closed')
-           and o.trader_net_payable = 0
-           and o.delivered_at is not null
-           and o.delivered_at <= cur.created_at
-           and (prev.created_at is null or o.delivered_at > prev.created_at)
-           and not exists (select 1 from trader_settlement_orders l
-                where l.company_id = o.company_id and l.order_id = o.id)
       `.execute(this.database)
     ).rows;
     if (rows.length === 0) return settled;
@@ -3788,6 +3922,9 @@ export class TraderSettlementService {
               .map((line) => [line.creditId, new Decimal(line.amount).toFixed(2)].join("|"))
               .sort(),
           }),
+      ...((input.zeroDueOrderIds ?? []).length === 0
+        ? {}
+        : { zeroDueOrderIds: [...new Set(input.zeroDueOrderIds ?? [])].sort() }),
     };
     return createHash("sha256").update(JSON.stringify(material)).digest("hex");
   }

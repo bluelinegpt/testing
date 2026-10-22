@@ -592,6 +592,53 @@ describe("TraderSettlementsWorkspace", () => {
     expect(draft.creditApplications).toEqual([{ amount: 18, creditId: "credit-1" }]);
   });
 
+  it("prints a ticked 0-due Order on the new invoice without changing the payment", async () => {
+    const { postCalls } = setup({
+      getExtra: (path) =>
+        path.startsWith("operations/settlements/payments/zero-due-orders")
+          ? [
+              {
+                additionalFees: "0.00",
+                areaName: "Deira",
+                codAmount: "15.00",
+                customerName: "Customer",
+                deliveryDate: "2026-10-21T02:02:24.231Z",
+                id: "order-zero",
+                orderNumber: "ORD-001377",
+                printedOnSettlementNumber: "SET-000155",
+                referenceNumber: "04980",
+                serialNumber: "SER-9",
+                serviceFee: "16.00",
+              },
+            ]
+          : undefined,
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Traders New Settlement" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.click(await dialog.findByRole("button", { name: /Test Trader/ }));
+    const tick = await dialog.findByRole("checkbox", { name: "Print 04980 on this invoice" });
+    expect(tick).not.toBeChecked();
+    expect(dialog.getByText("SET-000155")).toBeInTheDocument();
+    fireEvent.click(tick);
+    fireEvent.change(dialog.getByLabelText("Gross Order Payable (+)"), { target: { value: "100" } });
+    await dialog.findByText("Outstanding Before");
+    fireEvent.change(dialog.getByLabelText("Cash Account"), {
+      target: { value: "cash-company-1" },
+    });
+    expect(await dialog.findByText("Also printed at 0.00")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(dialog.getByText("Confirm Money Sent to Trader")).toBeInTheDocument(),
+    );
+    fireEvent.click(dialog.getByText("Confirm Money Sent to Trader"));
+    await waitFor(() =>
+      expect(postCalls.some((call) => call.path === "operations/settlements/drafts")).toBe(true),
+    );
+    const draft = postCalls.find((call) => call.path === "operations/settlements/drafts")!
+      .body as { amount: number; zeroDueOrderIds: unknown };
+    expect(draft.amount).toBe(100);
+    expect(draft.zeroDueOrderIds).toEqual(["order-zero"]);
+  });
+
   it("saves a draft without calling the legacy posting endpoint", async () => {
     const { api } = setup();
     fireEvent.click(await screen.findByRole("button", { name: "Traders New Settlement" }));

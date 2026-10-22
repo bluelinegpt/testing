@@ -104,7 +104,9 @@ describe("permanent Company deletion manifest", () => {
     // its scenario). The live-schema certification proves the set.
     // 179 -> 180 (11 Oct 2026): `trader_settlement_credit_applications`
     // (Trader Credits paid in Settlements; PURGE, with its Settlement).
-    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(180);
+    // 180 -> 181 (22 Oct 2026): `trader_settlement_zero_due_orders` (0-due
+    // Orders printed on a chosen Settlement; PURGE, with its Settlement).
+    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(181);
     expect(COMPANY_DELETION_MANIFEST_HASH).toMatch(/^[a-f0-9]{64}$/);
   });
 

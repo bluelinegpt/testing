@@ -105,6 +105,7 @@ import {
   type Page as TraderSettlementPage,
   type TraderAllocationProposal,
   type TraderEligibleOrderRow,
+  type TraderZeroDueOrderRow,
   type TraderSettlementDetail,
   type TraderSettlementListRow,
   type TraderSettlementReportData,
@@ -1420,6 +1421,15 @@ export class OperationsController {
     @Query() query: TraderSettlementEligibleOrdersQueryDto,
   ): Promise<TraderSettlementPage<TraderEligibleOrderRow>> {
     return this.traderSettlementService.eligibleOrders(query);
+  }
+
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
+  @ApiOperation({ summary: "Delivered 0-due Orders one Trader's new Settlement may print at 0.00" })
+  @Get("settlements/payments/zero-due-orders")
+  public traderSettlementZeroDueOrders(
+    @Query("traderId", new ParseUUIDPipe()) traderId: string,
+  ): Promise<readonly TraderZeroDueOrderRow[]> {
+    return this.traderSettlementService.zeroDueOrders(traderId);
   }
 
   @RequireAnyPermission("settlements.create", "users_roles.manage")
