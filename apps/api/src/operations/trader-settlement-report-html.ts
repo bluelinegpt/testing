@@ -411,7 +411,11 @@ export function buildTraderSettlementStatementHtml(
         `<td class="mono">${escapeHtml(
           row.kind === "order"
             ? (row.order.referenceNumber ?? row.order.orderNumber)
-            : (row.line.referenceNumber ?? row.line.orderNumber ?? row.line.sourceReference ?? ""),
+            : (row.line.referenceNumber ??
+                row.line.orderNumber ??
+                row.line.sourceReference ??
+                // A charge added by hand has no Order: its own number identifies it.
+                row.line.receivableNumber),
         )}</td>`,
       has: () => true,
       label: labels.externalReference,
@@ -424,7 +428,11 @@ export function buildTraderSettlementStatementHtml(
           ),
         ]
       : []),
-    textColumn(labels.customer, (row) => (row.kind === "order" ? row.order.customerName : row.line.customerName)),
+    textColumn(labels.customer, (row) =>
+      row.kind === "order"
+        ? row.order.customerName
+        : // A charge added by hand has no customer: print what it is for.
+          (row.line.customerName ?? (row.line.orderNumber == null ? row.line.reason : null))),
     textColumn(
       labels.customerMobile,
       (row) => (row.kind === "order" ? row.order.customerMobileNumber : row.line.customerMobileNumber),
@@ -646,10 +654,25 @@ export function buildTraderSettlementStatementHtml(
 
   // A deduction row's fee is COD + amount deducted, so its COD joins both
   // totals (0 unless the Company prints deduction rows with their Order money).
+  // COD-shortfall Companies: a 0-due Order (pays the Trader 0.00) counts in
+  // the fee total only up to its COD -- the rest of its fee was paid by the
+  // customer directly or collected elsewhere, never through this invoice
+  // (ORD-000037: COD 0, fee 30, paid by the customer). The row still prints
+  // its full fee; the totals then read COD - fees = amount paid / collected.
+  const zeroDueFeesOutsideInvoice = deductionMoney
+    ? data.orders.reduce((sum, order) => {
+        const zeroDue =
+          new Decimal(order.amountPaidNow).isZero() && new Decimal(order.originalTraderPayable).isZero();
+        if (!zeroDue) return sum;
+        const fee = new Decimal(orderFee(order));
+        return sum.plus(Decimal.max(fee.minus(Decimal.min(fee, new Decimal(order.codAmount))), 0));
+      }, new Decimal(0))
+    : new Decimal(0);
   const totalFees = new Decimal(data.summary.totalServiceFees)
     .plus(data.summary.traderFeeDeductions)
     .plus(totalAdditionalFees)
-    .plus(totalDeductionCod);
+    .plus(totalDeductionCod)
+    .minus(zeroDueFeesOutsideInvoice);
   const totalCod = new Decimal(data.summary.totalCod).plus(totalDeductionCod).toFixed(2);
   const totalPaidBefore = data.orders.reduce((sum, order) => sum.plus(paidBefore(order)), new Decimal(0));
   const totalRemainingAfter = data.orders.reduce((sum, order) => sum.plus(remainingAfter(order)), new Decimal(0));

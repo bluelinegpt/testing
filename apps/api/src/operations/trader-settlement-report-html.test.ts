@@ -528,6 +528,56 @@ describe("buildTraderSettlementStatementHtml", () => {
       { ...shortfall, summary: { ...shortfall.summary, netPayment: "-20.00" } },
       "ar",
     )).toContain("المبلغ المحصّل من التاجر");
+    // A charge added by hand (no Order) prints its number and reason, and a
+    // 0-due Order whose fee the customer paid directly stays out of the fee
+    // total: fees 150 -> collected 150 (ORD-000037 + RCV-000007, 22 Oct 2026).
+    const manual: TraderSettlementReportData = {
+      ...shortfall,
+      orders: [
+        {
+          ...sample.orders[0]!,
+          amountPaidNow: "0.00",
+          codAmount: "0.00",
+          orderNumber: "ORD-000037",
+          originalTraderPayable: "0.00",
+          referenceNumber: "5002",
+          serviceFee: "30.00",
+        },
+      ],
+      receivableOffsets: [
+        {
+          amountApplied: "150.00",
+          businessDate: "2026-10-22",
+          customerMobileNumber: null,
+          customerName: null,
+          orderCodAmount: null,
+          orderNumber: null,
+          orderSerialNumber: null,
+          reason: "test",
+          receivableNumber: "RCV-000007",
+          referenceNumber: null,
+          sourceReference: null,
+          sourceType: "service_charge",
+        },
+      ],
+      summary: {
+        ...sample.summary,
+        netPayment: "-150.00",
+        totalCod: "0.00",
+        totalServiceFees: "30.00",
+        traderFeeDeductions: "150.00",
+      },
+    };
+    const manualHtml = buildTraderSettlementStatementHtml(manual, "en");
+    const manualRow =
+      (manualHtml.split("<tbody>")[1] ?? "").split("<tr>").find((cell) => cell.includes("RCV-000007")) ?? "";
+    expect(manualRow).toContain(">test<");
+    const manualSummary = manualHtml.slice(
+      manualHtml.indexOf('<section class="summary-section">'),
+      manualHtml.indexOf('<div class="signatures">'),
+    );
+    expect(manualSummary).toContain('<span>Service Fee</span><span><bdi dir="ltr">150.00</bdi>');
+    expect(manualSummary).toContain("Amount Collected from Trader");
     // Without the switch the row keeps the existing layout.
     const plain = buildTraderSettlementStatementHtml({ ...shortfall, header: sample.header }, "en");
     expect(plain).toContain('<bdi dir="ltr">110.00</bdi>');
