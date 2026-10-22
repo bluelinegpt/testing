@@ -3345,7 +3345,6 @@ function FastOrderEntryDialog({
   onClose,
   onCreated,
   onSaved,
-  textLanguage,
 }: {
   api: ApiClient;
   /** Active Drivers, for the Driver column (assign now or later). */
@@ -3355,10 +3354,15 @@ function FastOrderEntryDialog({
   /** Called once every filled row was created; the sheet then closes. */
   onCreated?: (notice: string) => void;
   onSaved: () => Promise<void> | void;
-  textLanguage: "ar" | "en";
+  /** Kept for callers; names now follow the screen language instead. */
+  textLanguage?: "ar" | "en";
 }) {
   const { i18n, t } = useTranslation();
   const locale = normalizeLocale(i18n.resolvedLanguage);
+  // Trader, Emirate and Area names follow the screen language (Aiman, 22 Oct
+  // 2026): an Arabic screen lists Arabic names, falling back to English only
+  // when a record has no Arabic name.
+  const nameLanguage = locale;
   // Row errors in English and Arabic together, whatever the screen language.
   const tEnglish = useMemo(() => i18n.getFixedT("en"), [i18n]);
   const tArabic = useMemo(() => i18n.getFixedT("ar"), [i18n]);
@@ -3370,8 +3374,8 @@ function FastOrderEntryDialog({
   const emirateOptions = Array.isArray(emirates) ? emirates : [];
   const fastEntryTraderLabel = useCallback(
     (option: OperationsTraderOption) =>
-      localizeName(textLanguage, { ar: option.nameAr, en: option.nameEn }),
-    [textLanguage],
+      localizeName(nameLanguage, { ar: option.nameAr, en: option.nameEn }),
+    [nameLanguage],
   );
   const [rows, setRows] = useState<FastEntryRow[]>(() =>
     Array.from({ length: 3 }, () => createFastEntryRow()),
@@ -4205,7 +4209,7 @@ function FastOrderEntryDialog({
                       <option value="">{t("areas.selectEmirate")}</option>
                       {emirateOptions.map((emirate) => (
                         <option key={emirate.id} value={emirate.id}>
-                          {localizeName(textLanguage, { ar: emirate.nameAr, en: emirate.nameEn })}
+                          {localizeName(nameLanguage, { ar: emirate.nameAr, en: emirate.nameEn })}
                         </option>
                       ))}
                     </select>
@@ -4224,7 +4228,7 @@ function FastOrderEntryDialog({
                       api={api}
                       emptyText={t("areas.noneFound")}
                       getLabel={(area) =>
-                        localizeName(textLanguage, { ar: area.nameAr, en: area.nameEn })
+                        localizeName(nameLanguage, { ar: area.nameAr, en: area.nameEn })
                       }
                       label={t("operations.areaField")}
                       key={`${row.id}-${row.emirateId}`}
