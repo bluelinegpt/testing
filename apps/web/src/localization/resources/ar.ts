@@ -4471,6 +4471,12 @@ export const arabicTranslations = {
     applyTraderCredit: "دفع الرصيد الدائن للتاجر {{number}}",
     oneScreen: {
       all: "الكل",
+      allTraders: "← كل التجار",
+      countOrders: "{{count}} طلب",
+      noOpenTraders: "لا يوجد تاجر لديه طلبات بانتظار الفوترة.",
+      searchTrader: "بحث باسم التاجر أو الكود",
+      totalAll: "الإجمالي ({{count}} تاجر)",
+      traderOwesShort: "التاجر مدين بـ {{amount}}",
       amount: "المبلغ",
       amountFor: "المبلغ لـ {{number}}",
       amountInvalid: "يجب أن يكون كل مبلغ أكبر من 0 ولا يزيد عن كامل مبلغ السطر.",

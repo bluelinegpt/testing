@@ -108,6 +108,7 @@ import {
   type Page as TraderSettlementPage,
   type TraderAllocationProposal,
   type TraderEligibleOrderRow,
+  type TraderOpenSettlementRow,
   type TraderZeroDueOrderRow,
   type TraderSettlementDetail,
   type TraderSettlementListRow,
@@ -1460,6 +1461,13 @@ export class OperationsController {
     @Query("traderId", new ParseUUIDPipe()) traderId: string,
   ): Promise<readonly TraderZeroDueOrderRow[]> {
     return this.traderSettlementService.zeroDueOrders(traderId);
+  }
+
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
+  @ApiOperation({ summary: "Traders with something still to invoice, with their amounts" })
+  @Get("settlements/payments/open-traders")
+  public traderSettlementOpenTraders(): Promise<readonly TraderOpenSettlementRow[]> {
+    return this.traderSettlementService.openTraders();
   }
 
   @RequireAnyPermission("settlements.create", "reports.export", "users_roles.manage")

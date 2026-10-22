@@ -1264,6 +1264,24 @@
 .one-screen-settlement__top .field {
   min-width: 260px;
 }
+.one-screen-settlement__trader {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 260px;
+}
+.one-screen-settlement__trader strong {
+  font-size: 16px;
+}
+.one-trader-row .link-button {
+  font-weight: 600;
+  text-align: start;
+}
+.one-screen-settlement__table tfoot th,
+.one-screen-settlement__table tfoot td {
+  border-top: 2px solid #cbd5e1;
+  font-weight: 600;
+}
 .one-screen-settlement__chips {
   display: flex;
   flex-wrap: wrap;

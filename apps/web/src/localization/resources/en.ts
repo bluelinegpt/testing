@@ -4517,6 +4517,12 @@ export const englishTranslations = {
     applyTraderCredit: "Pay back Trader Credit {{number}}",
     oneScreen: {
       all: "All",
+      allTraders: "← All Traders",
+      countOrders: "{{count}} orders",
+      noOpenTraders: "No Trader has anything left to invoice.",
+      searchTrader: "Search Trader name or code",
+      totalAll: "Total ({{count}} Traders)",
+      traderOwesShort: "Trader owes {{amount}}",
       amount: "Amount",
       amountFor: "Amount for {{number}}",
       amountInvalid: "Each amount must be more than 0 and not more than the line's full amount.",

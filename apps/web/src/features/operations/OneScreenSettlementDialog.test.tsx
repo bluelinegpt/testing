@@ -37,6 +37,11 @@ function setup() {
         );
       }
       if (path.startsWith("operations/settlements/payments/open-credits")) return Promise.resolve([]);
+      if (path === "operations/settlements/payments/open-traders") {
+        return Promise.resolve([
+          { code: "TRD-1", creditCount: 0, credits: "0.00", feeCount: 1, fees: "25.00", name: "ARMAN ABYA", net: "338.00", payCount: 2, toPay: "363.00", traderId: "trader-1", zeroCount: 1 },
+        ]);
+      }
       if (path.startsWith("operations/settlements/payments/zero-due-orders")) {
         return Promise.resolve([
           { additionalFees: "0.00", areaName: "Al Aahad", codAmount: "15.00", customerMobileNumber: "0503", customerName: "Customer C", deliveryDate: "2026-10-21", emirateName: "Dubai", id: "zero-1", orderNumber: "ORD-001377", printedOnSettlementNumber: "SET-000155", referenceNumber: "04980", serviceFee: "16.00" },
@@ -70,10 +75,21 @@ function setup() {
 }
 
 describe("One-screen Trader Settlement", () => {
+  it("opens on the Traders with something to invoice, with their amounts", async () => {
+    setup();
+    const dialog = within(await screen.findByRole("dialog"));
+    const row = (await dialog.findByRole("button", { name: "ARMAN ABYA (TRD-1)" })).closest("tr")!;
+    expect(row.textContent).toContain("363.00");
+    expect(row.textContent).toContain("−25.00");
+    expect(row.textContent).toContain("338.00");
+    fireEvent.change(dialog.getByLabelText("Search Trader name or code"), { target: { value: "zzz" } });
+    expect(await dialog.findByText("No Trader has anything left to invoice.")).toBeInTheDocument();
+  });
+
   it("lists orders to pay, Trader fees and 0-due orders in one table, with the totals at the end", async () => {
     setup();
     const dialog = within(await screen.findByRole("dialog"));
-    fireEvent.change(await dialog.findByLabelText("Trader"), { target: { value: "trader-1" } });
+    fireEvent.click(await dialog.findByRole("button", { name: "ARMAN ABYA (TRD-1)" }));
     await dialog.findByText("5183");
     expect(dialog.getByText("RCV-000070")).toBeInTheDocument();
     expect(dialog.getByText("Prints on SET-000155")).toBeInTheDocument();
@@ -94,7 +110,7 @@ describe("One-screen Trader Settlement", () => {
   it("posts the ticked lines in full, with the 0-due order printed at 0.00", async () => {
     const { onPosted, posts } = setup();
     const dialog = within(await screen.findByRole("dialog"));
-    fireEvent.change(await dialog.findByLabelText("Trader"), { target: { value: "trader-1" } });
+    fireEvent.click(await dialog.findByRole("button", { name: "ARMAN ABYA (TRD-1)" }));
     await dialog.findByText("5183");
     fireEvent.click(dialog.getByRole("checkbox", { name: "Include 04980" }));
     vi.spyOn(window, "confirm").mockReturnValue(true);
@@ -118,7 +134,7 @@ describe("One-screen Trader Settlement", () => {
   it("pays part of an order when Edit amounts is on", async () => {
     const { posts } = setup();
     const dialog = within(await screen.findByRole("dialog"));
-    fireEvent.change(await dialog.findByLabelText("Trader"), { target: { value: "trader-1" } });
+    fireEvent.click(await dialog.findByRole("button", { name: "ARMAN ABYA (TRD-1)" }));
     await dialog.findByText("5183");
     fireEvent.click(dialog.getByLabelText("Edit amounts (partial payment)"));
     fireEvent.change(dialog.getByLabelText("Amount for 5183"), { target: { value: "100" } });

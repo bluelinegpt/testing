@@ -212,6 +212,21 @@ export interface TraderEligibleOrderRow {
   readonly vatAmount: string;
 }
 
+/** One Trader with something still to invoice (one-screen settlement start page). */
+export interface TraderOpenSettlementRow {
+  readonly code: string;
+  readonly creditCount: number;
+  readonly credits: string;
+  readonly feeCount: number;
+  readonly fees: string;
+  readonly name: string;
+  readonly net: string;
+  readonly payCount: number;
+  readonly toPay: string;
+  readonly traderId: string;
+  readonly zeroCount: number;
+}
+
 /** A delivered Order that pays the Trader 0, offered on Create Settlement. */
 export interface TraderZeroDueOrderRow {
   readonly additionalFees: string;
@@ -3085,6 +3100,77 @@ export class TraderSettlementService {
   // ---------------------------------------------------------------------
   // One-screen settlement (per Company switch; Aiman, 22 Oct 2026)
   // ---------------------------------------------------------------------
+
+  /**
+   * Every Trader with something still to invoice, biggest net first: orders
+   * with money due to him, delivered fees he owes, open credits, and delivered
+   * 0-due orders not yet on any invoice. Traders with nothing left are left
+   * out. Read-only; the same rules as the lists the settlement screen loads.
+   */
+  public async openTraders(): Promise<readonly TraderOpenSettlementRow[]> {
+    this.assertAnyPermission("settlements.create");
+    const { companyId } = this.tenants.current();
+    const result = await sql<TraderOpenSettlementRow>`
+      with pay as (
+        select o.trader_id, sum(o.trader_outstanding_balance) as amount, count(*)::int as n
+          from orders o
+         where o.company_id = ${companyId}::uuid
+           and o.delivery_status = 'delivered'
+           and o.driver_reconciliation_status in ('reconciled', 'not_applicable')
+           and o.trader_settlement_status not in ('not_eligible', 'reversed')
+           and o.trader_outstanding_balance > 0
+         group by o.trader_id
+      ), fee as (
+        select r.trader_id, sum(r.outstanding_amount) as amount, count(*)::int as n
+          from trader_receivables r
+         where r.company_id = ${companyId}::uuid
+           and r.status in ('outstanding', 'partially_collected')
+           and r.outstanding_amount > 0
+           and (r.source_type <> 'service_charge' or exists (
+                select 1 from orders delivered_order
+                 where delivered_order.company_id = r.company_id
+                   and delivered_order.order_number = r.source_reference
+                   and delivered_order.delivered_at is not null
+                   and delivered_order.payment_condition = 'customer_pays_cod_trader_pays_fee'))
+         group by r.trader_id
+      ), credit as (
+        select c.trader_id, sum(c.remaining_amount) as amount, count(*)::int as n
+          from trader_credits c
+         where c.company_id = ${companyId}::uuid and c.status in ('open', 'partially_applied')
+           and c.remaining_amount > 0
+         group by c.trader_id
+      ), zero as (
+        select o.trader_id, count(*)::int as n
+          from orders o
+         where o.company_id = ${companyId}::uuid
+           and ${this.zeroDueOrderQualifies()}
+           and not ${this.zeroDueChosenOnEffectiveSettlement()}
+           -- Not printed on any invoice yet: no effective Settlement of this
+           -- Trader was created after it was delivered.
+           and not exists (
+             select 1 from trader_settlements s
+              where s.company_id = o.company_id and s.trader_id = o.trader_id
+                and ${this.effectiveSettlement(sql`s`)}
+                and s.created_at >= o.delivered_at)
+         group by o.trader_id
+      )
+      select t.id as "traderId", t.code, t.name_en as name,
+             coalesce(pay.amount, 0)::numeric(18,2)::text as "toPay", coalesce(pay.n, 0) as "payCount",
+             coalesce(fee.amount, 0)::numeric(18,2)::text as fees, coalesce(fee.n, 0) as "feeCount",
+             coalesce(credit.amount, 0)::numeric(18,2)::text as credits, coalesce(credit.n, 0) as "creditCount",
+             coalesce(zero.n, 0) as "zeroCount",
+             (coalesce(pay.amount, 0) - coalesce(fee.amount, 0) + coalesce(credit.amount, 0))::numeric(18,2)::text as net
+        from traders t
+        left join pay on pay.trader_id = t.id
+        left join fee on fee.trader_id = t.id
+        left join credit on credit.trader_id = t.id
+        left join zero on zero.trader_id = t.id
+       where t.company_id = ${companyId}::uuid
+         and (pay.n is not null or fee.n is not null or credit.n is not null or zero.n is not null)
+       order by (coalesce(pay.amount, 0) - coalesce(fee.amount, 0) + coalesce(credit.amount, 0)) desc, t.name_en
+    `.execute(this.database);
+    return result.rows;
+  }
 
   /** Whether this Company uses the one-screen settlement flow. */
   public async settlementSettings(): Promise<{ readonly oneScreen: boolean }> {

@@ -122,6 +122,20 @@ interface DraftRow {
   readonly traderName: string;
 }
 
+interface OpenTrader {
+  readonly code: string;
+  readonly creditCount: number;
+  readonly credits: string;
+  readonly feeCount: number;
+  readonly fees: string;
+  readonly name: string;
+  readonly net: string;
+  readonly payCount: number;
+  readonly toPay: string;
+  readonly traderId: string;
+  readonly zeroCount: number;
+}
+
 interface TraderBank {
   readonly accountName: string;
   readonly bankName: string;
@@ -186,6 +200,28 @@ export function OneScreenSettlementDialog({
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  // Start page: every Trader with something to invoice, with the amounts.
+  const [openTraders, setOpenTraders] = useState<readonly OpenTrader[]>();
+  const [traderSearch, setTraderSearch] = useState("");
+  const [openTradersNonce, setOpenTradersNonce] = useState(0);
+  useEffect(() => {
+    if (traderId !== "") return;
+    let active = true;
+    setOpenTraders(undefined);
+    void Promise.resolve(api.get<readonly OpenTrader[]>("operations/settlements/payments/open-traders"))
+      .then((rows) => {
+        if (active) setOpenTraders(Array.isArray(rows) ? rows : []);
+      })
+      .catch((reason: unknown) => {
+        if (active) {
+          setOpenTraders([]);
+          setError(errorText(reason, t("traderSettlements.oneScreen.loadFailed")));
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [api, traderId, openTradersNonce, t]);
 
   // Traders, cash accounts and company banks: once.
   useEffect(() => {
@@ -423,6 +459,20 @@ export function OneScreenSettlementDialog({
     });
 
   const trader = traders.find((row) => row.id === traderId);
+  const openTrader = openTraders?.find((row) => row.traderId === traderId);
+  const traderLabel = trader
+    ? `${trader.name} (${trader.code})`
+    : openTrader
+      ? `${openTrader.name} (${openTrader.code})`
+      : (draft?.traderName ?? "");
+  const searchTerm = traderSearch.trim().toLowerCase();
+  const shownTraders = (openTraders ?? []).filter(
+    (row) => searchTerm === "" || `${row.name} ${row.code}`.toLowerCase().includes(searchTerm),
+  );
+  const netLabel = (net: string) =>
+    safeMoneyValue(net) < 0
+      ? t("traderSettlements.oneScreen.traderOwesShort", { amount: money(-safeMoneyValue(net)) })
+      : money(net);
   const paymentReady =
     paymentMethod === "cash"
       ? cashAccountId !== ""
@@ -545,26 +595,133 @@ export function OneScreenSettlementDialog({
       }
       titleId="one-screen-settlement-title"
     >
+      {traderId === "" ? (
+        <div className="one-screen-settlement__start">
+          <div className="one-screen-settlement__top">
+            <input
+              aria-label={t("traderSettlements.oneScreen.searchTrader")}
+              autoFocus
+              className="one-screen-settlement__search"
+              onChange={(event) => setTraderSearch(event.target.value)}
+              placeholder={t("traderSettlements.oneScreen.searchTrader")}
+              value={traderSearch}
+            />
+          </div>
+          {error === undefined ? null : (
+            <div className="alert alert-error" role="alert">
+              {error}
+            </div>
+          )}
+          <div className="table-scroll one-screen-settlement__table">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">{t("traderSettlements.filterTrader")}</th>
+                  <th className="numeric" scope="col">{t("traderSettlements.oneScreen.totalPay")}</th>
+                  <th className="numeric" scope="col">{t("traderSettlements.oneScreen.totalFees")}</th>
+                  <th className="numeric" scope="col">{t("traderSettlements.oneScreen.totalCredits")}</th>
+                  <th className="numeric" scope="col">{t("traderSettlements.oneScreen.totalZero")}</th>
+                  <th className="numeric" scope="col">{t("traderSettlements.oneScreen.net")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shownTraders.map((row) => (
+                  <tr className="one-trader-row" key={row.traderId}>
+                    <td>
+                      <button
+                        className="link-button"
+                        onClick={() => {
+                          setTraderId(row.traderId);
+                          setKindFilter("all");
+                          setSearch("");
+                        }}
+                        type="button"
+                      >
+                        {row.name} ({row.code})
+                      </button>
+                    </td>
+                    <td className="numeric one-plus">
+                      {money(row.toPay)}
+                      {row.payCount === 0 ? null : (
+                        <small> · {t("traderSettlements.oneScreen.countOrders", { count: row.payCount })}</small>
+                      )}
+                    </td>
+                    <td className="numeric one-minus">
+                      {safeMoneyValue(row.fees) === 0 ? money(0) : `−${money(row.fees)}`}
+                      {row.feeCount === 0 ? null : <small> · {row.feeCount}</small>}
+                    </td>
+                    <td className="numeric">{money(row.credits)}</td>
+                    <td className="numeric">{row.zeroCount}</td>
+                    <td className={safeMoneyValue(row.net) < 0 ? "numeric one-minus" : "numeric"}>
+                      <strong>{netLabel(row.net)}</strong>
+                    </td>
+                  </tr>
+                ))}
+                {openTraders !== undefined && shownTraders.length === 0 ? (
+                  <tr>
+                    <td className="empty-state" colSpan={6}>
+                      {t("traderSettlements.oneScreen.noOpenTraders")}
+                    </td>
+                  </tr>
+                ) : null}
+                {openTraders === undefined ? (
+                  <tr>
+                    <td className="empty-state" colSpan={6}>
+                      {t("common.loading")}
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+              {shownTraders.length === 0 ? null : (
+                <tfoot>
+                  <tr>
+                    <th scope="row">{t("traderSettlements.oneScreen.totalAll", { count: shownTraders.length })}</th>
+                    <td className="numeric">
+                      {money(shownTraders.reduce((sum, row) => sum + safeMoneyValue(row.toPay), 0))}
+                    </td>
+                    <td className="numeric">
+                      −{money(shownTraders.reduce((sum, row) => sum + safeMoneyValue(row.fees), 0))}
+                    </td>
+                    <td className="numeric">
+                      {money(shownTraders.reduce((sum, row) => sum + safeMoneyValue(row.credits), 0))}
+                    </td>
+                    <td className="numeric">{shownTraders.reduce((sum, row) => sum + row.zeroCount, 0)}</td>
+                    <td className="numeric">
+                      <strong>{money(shownTraders.reduce((sum, row) => sum + safeMoneyValue(row.net), 0))}</strong>
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+          <div className="modal-actions">
+            <button className="button button-secondary" onClick={onClose} type="button">
+              {t("common.close")}
+            </button>
+          </div>
+        </div>
+      ) : (
+      <>
       <div className="one-screen-settlement__top">
-        <label className="field">
+        <div className="one-screen-settlement__trader">
           <span>{t("traderSettlements.filterTrader")}</span>
-          <select
-            aria-label={t("traderSettlements.filterTrader")}
-            disabled={initialDraftId !== undefined}
-            onChange={(event) => {
-              setTraderId(event.target.value);
-              setDraftId(undefined);
-            }}
-            value={traderId}
-          >
-            <option value="">{t("traderSettlements.oneScreen.chooseTrader")}</option>
-            {traders.map((row) => (
-              <option key={row.id} value={row.id}>
-                {row.name} ({row.code})
-              </option>
-            ))}
-          </select>
-        </label>
+          <strong>{traderLabel}</strong>
+          {initialDraftId === undefined ? (
+            <button
+              className="link-button"
+              onClick={() => {
+                setTraderId("");
+                setDraftId(undefined);
+                setLines([]);
+                setError(undefined);
+                setOpenTradersNonce((value) => value + 1);
+              }}
+              type="button"
+            >
+              {t("traderSettlements.oneScreen.allTraders")}
+            </button>
+          ) : null}
+        </div>
         <div aria-label={t("traderSettlements.oneScreen.show")} className="one-screen-settlement__chips" role="group">
           {chips.map((chip) => (
             <button
@@ -837,6 +994,8 @@ export function OneScreenSettlementDialog({
           {t("traderSettlements.oneScreen.post", { amount: money(totals.net) })}
         </button>
       </div>
+      </>
+      )}
     </Modal>
   );
 }
