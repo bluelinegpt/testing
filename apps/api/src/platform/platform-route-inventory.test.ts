@@ -32,6 +32,7 @@ import { PlatformCompanyWhatsAppController } from "./platform-company-whatsapp.c
 import { PlatformAnnouncementController } from "./platform-announcement.controller.js";
 import { PlatformRouteOptimizationController } from "./platform-route-optimization.controller.js";
 import { PlatformCompanyAccountingController } from "./platform-company-accounting.controller.js";
+import { PlatformCompanySettlementOptionsController } from "./platform-company-settlement-options.controller.js";
 import { PlatformRepairCenterController } from "./platform-repair-center.controller.js";
 import { CompanyDataResetController } from "./company-data-reset.controller.js";
 
@@ -70,6 +71,7 @@ const platformControllers = [
   PlatformAnnouncementController,
   PlatformRouteOptimizationController,
   PlatformCompanyAccountingController,
+  PlatformCompanySettlementOptionsController,
   PlatformRepairCenterController,
   CompanyDataResetController,
 ];
@@ -248,6 +250,7 @@ describe("Platform route inventory", () => {
       "updateAvatarSettings", // Website AI Avatar settings (PATCH, agent manage).
       "updateOrdersAi", // Orders AI switch per Company (PUT, companies manage).
       "updateMobileApp", // Mobile app switch per Company (PUT, companies manage).
+      "updateSettlementOptions", // Trader Settlement options per Company (PUT, companies manage).
     ];
     const bad: string[] = [];
     for (const route of routes) {
@@ -317,6 +320,7 @@ describe("Platform route inventory", () => {
       "PlatformCompanyWhatsAppController",
       "PlatformRouteOptimizationController",
       "PlatformCompanyAccountingController",
+      "PlatformCompanySettlementOptionsController",
       "PlatformRepairCenterController",
       "CompanyDataResetController",
     ]);
@@ -341,6 +345,8 @@ describe("Platform route inventory", () => {
                   ? "src/platform/platform-route-optimization.controller.ts"
                   : controller === "PlatformCompanyAccountingController"
                     ? "src/platform/platform-company-accounting.controller.ts"
+                    : controller === "PlatformCompanySettlementOptionsController"
+                    ? "src/platform/platform-company-settlement-options.controller.ts"
                     : controller === "PlatformRepairCenterController"
                       ? "src/platform/platform-repair-center.controller.ts"
                       : controller === "CompanyDataResetController"

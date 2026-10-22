@@ -59,6 +59,7 @@ import { RouteOptimizationAdminService } from "../route-planning/route-optimizat
 import { PlatformAnnouncementController } from "./platform-announcement.controller.js";
 import { AnnouncementsService } from "../announcements/announcements.service.js";
 import { PlatformCompanyAccountingController } from "./platform-company-accounting.controller.js";
+import { PlatformCompanySettlementOptionsController } from "./platform-company-settlement-options.controller.js";
 import { PlatformRepairCenterController } from "./platform-repair-center.controller.js";
 import { CompanyDataResetController } from "./company-data-reset.controller.js";
 import { CompanyDataResetService } from "./company-data-reset.service.js";
@@ -121,6 +122,7 @@ import { CompanyWebsiteAiSetupProvider } from "./company-website-ai-setup.provid
     PlatformRouteOptimizationController,
     PlatformAnnouncementController,
     PlatformCompanyAccountingController,
+    PlatformCompanySettlementOptionsController,
     PlatformRepairCenterController,
     CompanyDataResetController,
     PublicCompanyWebsiteController,

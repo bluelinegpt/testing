@@ -70,8 +70,17 @@ export function receivableCollectableNowSql(alias: string): RawBuilder<boolean> 
  */
 export function traderMayOweFeeSql(alias: string): RawBuilder<boolean> {
   const column = (name: string) => sql.ref(`${alias}.${name}`);
+  // A shortfall charge already made stays owed after the Company turns the
+  // switch off again (rollback from Platform Administration): it is still
+  // shown, collectable and healthy; only new Orders stop being charged.
   return sql<boolean>`(${column("payment_condition")} = 'customer_pays_cod_trader_pays_fee'
     or (${column("payment_condition")} = 'customer_pays_cod_and_fee'
         and ${column("cod_amount")} > 0
-        and ${codShortfallEnabledSql(alias)}))`;
+        and (${codShortfallEnabledSql(alias)}
+          or exists (
+            select 1 from trader_receivables kept_shortfall
+             where kept_shortfall.company_id = ${column("company_id")}
+               and kept_shortfall.source_type = 'service_charge'
+               and kept_shortfall.source_reference = ${column("order_number")}
+               and kept_shortfall.status not in ('cancelled', 'reversed')))))`;
 }

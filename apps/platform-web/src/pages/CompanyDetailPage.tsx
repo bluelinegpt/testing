@@ -20,6 +20,7 @@ import { CompanyAccountingModePanel } from "./CompanyAccountingModePanel.js";
 import { CompanyAdministrators } from "./CompanyAdministrators.js";
 import { CompanyMobileAppPanel } from "./CompanyMobileAppPanel.js";
 import { CompanyOrdersAiPanel } from "./CompanyOrdersAiPanel.js";
+import { CompanySettlementOptionsPanel } from "./CompanySettlementOptionsPanel.js";
 import { CompanyRouteOptimizationPanel } from "./CompanyRouteOptimizationPanel.js";
 import { CompanyWhatsAppPanel } from "./CompanyWhatsAppPanel.js";
 
@@ -31,6 +32,7 @@ type CompanyDetailTab =
   | "routes"
   | "mobile"
   | "ai"
+  | "settlement"
   | "configuration"
   | "audit"
   | "lifecycle";
@@ -499,6 +501,7 @@ export function CompanyDetailPage(): ReactElement {
             ["routes", "Route planning"],
             ["mobile", "Mobile app"],
             ["ai", "AI (Beta)"],
+            ["settlement", "Trader Settlement"],
             ["configuration", "Configuration & Accounting"],
             ["audit", "Audit"],
             ["lifecycle", "Lifecycle"],
@@ -682,6 +685,15 @@ export function CompanyDetailPage(): ReactElement {
         role="tabpanel"
       >
         {activeTab === "ai" && companyId ? <CompanyOrdersAiPanel companyId={companyId} /> : null}
+      </section>
+
+      <section
+        aria-labelledby="company-tab-button-settlement"
+        hidden={activeTab !== "settlement"}
+        id="company-tab-settlement"
+        role="tabpanel"
+      >
+        {activeTab === "settlement" && companyId ? <CompanySettlementOptionsPanel companyId={companyId} /> : null}
       </section>
 
       <section hidden={activeTab !== "information"}>

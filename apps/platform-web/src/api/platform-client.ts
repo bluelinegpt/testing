@@ -1080,6 +1080,16 @@ export interface CompanyAccountingModePreview {
   readonly expectedConfigurationVersion: string | null;
 }
 
+/** Trader Settlement options of one Company (Platform switches, 22 Oct 2026). */
+export interface CompanySettlementOptions {
+  /** COD below the fee on a "Pay by Customer" Order is charged to the Trader (new Orders). */
+  readonly codShortfall: boolean;
+  /** One-screen Trader Settlement: Draft, Preview, Post; no Money Received; collect from the Trader. */
+  readonly oneScreen: boolean;
+  readonly openDrafts: number;
+  readonly ordersWaitingReceipt: number;
+}
+
 /** Orders AI (the AI tab) for one Company. Version 0 = never saved (off). */
 export interface CompanyOrdersAi {
   readonly isEnabled: boolean;
@@ -2886,6 +2896,27 @@ export const platformApi = {
       body: input,
       method: "POST",
     });
+  },
+
+  async companySettlementOptions(companyId: string): Promise<CompanySettlementOptions> {
+    const result = await request<CompanySettlementOptions>(
+      `platform/companies/${companyId}/settlement-options`,
+      { method: "GET" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty settlement options response", "empty", 500);
+    return result;
+  },
+
+  async updateCompanySettlementOptions(
+    companyId: string,
+    input: { codShortfall?: boolean; oneScreen?: boolean; reason: string },
+  ): Promise<CompanySettlementOptions> {
+    const result = await request<CompanySettlementOptions>(
+      `platform/companies/${companyId}/settlement-options`,
+      { body: input, method: "PUT" },
+    );
+    if (result === undefined) throw new PlatformApiError("Empty settlement options response", "empty", 500);
+    return result;
   },
 
   async companyOrdersAi(companyId: string): Promise<CompanyOrdersAi> {

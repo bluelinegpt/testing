@@ -721,7 +721,11 @@ export class OrderMaintenanceService {
       this.settlements(companyId, order.id),
       this.vatPolicy(companyId),
     ]);
-    const shortfallSwitch = await traderPaysCodShortfall(this.database, companyId);
+    // A shortfall charge already made stays owed if the Company later turns
+    // the switch off (rollback): the rule then still holds for this Order.
+    const shortfallSwitch =
+      (await traderPaysCodShortfall(this.database, companyId)) ||
+      receivables.some((row) => row.status !== "cancelled" && row.status !== "reversed");
     const expected = this.expectedReceivableDue(order, vatPolicy, shortfallSwitch);
     const expectedAlternate = this.expectedReceivableDueAlternate(order, vatPolicy, shortfallSwitch);
     const findings = this.evaluate(

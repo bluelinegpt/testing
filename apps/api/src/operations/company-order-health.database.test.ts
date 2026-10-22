@@ -1115,14 +1115,14 @@ describe.skipIf(!runDatabaseTests)("Company Order Health (Repair Center, read-on
     const values = sql.join(
       cases.map(
         (c, index) =>
-          sql`(${index}::int, null::uuid, ${c.condition}::text, ${c.cod}::numeric, ${c.fee}::numeric, ${c.add}::numeric,
+          sql`(${index}::int, null::uuid, null::text, ${c.condition}::text, ${c.cod}::numeric, ${c.fee}::numeric, ${c.add}::numeric,
                ${policies[c.p]!.enabled}::boolean, ${policies[c.p]!.priceMode}::text, ${policies[c.p]!.rate}::numeric)`,
       ),
     );
     // company_id is null: no Company, so the COD-shortfall switch is off.
     const result = await sql<{ index: number; due: string }>`
       select o.index, (${traderReceivableDueSql()})::text as due
-        from (values ${values}) as o(index, company_id, payment_condition, cod_amount, service_fee, additional_fees,
+        from (values ${values}) as o(index, company_id, order_number, payment_condition, cod_amount, service_fee, additional_fees,
                                      enabled, price_mode, rate)
         cross join lateral (select o.enabled, o.price_mode, o.rate) vat
     `.execute(db);
