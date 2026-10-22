@@ -32,7 +32,7 @@ function setup() {
       if (path.startsWith("operations/trader-receivables/eligible")) {
         return Promise.resolve(
           page([
-            { businessDate: "2026-10-21", id: "rcv-1", orderNumber: "ORD-003", outstandingAmount: "25.00", reason: "Order service fee owed by Trader", receivableNumber: "RCV-000070", sourceReference: "ORD-003" },
+            { businessDate: "2026-10-21", id: "rcv-1", orderCodAmount: "1.00", orderFees: "26.00", orderNumber: "ORD-003", orderReferenceNumber: "5000", outstandingAmount: "25.00", reason: "Order service fee owed by Trader", receivableNumber: "RCV-000070", sourceReference: "ORD-003" },
           ]),
         );
       }
@@ -92,10 +92,15 @@ describe("One-screen Trader Settlement", () => {
     fireEvent.click(await dialog.findByRole("button", { name: "ARMAN ABYA (TRD-1)" }));
     await dialog.findByText("5183");
     expect(dialog.getByText("RCV-000070")).toBeInTheDocument();
+    // A fee line shows its Order's reference, COD and fees (COD shortfall: 26 - 1 = 25).
+    const feeRow = dialog.getByText("RCV-000070").closest("tr")!;
+    expect(feeRow.textContent).toContain("5000");
+    expect(feeRow.textContent).toContain("1.00");
+    expect(feeRow.textContent).toContain("26.00");
     expect(dialog.getByText("Prints on SET-000155")).toBeInTheDocument();
     // Orders and fees are ticked; the 0-due order is not.
     await waitFor(() => expect(dialog.getByRole("checkbox", { name: "Include 5183" })).toBeChecked());
-    expect(dialog.getByRole("checkbox", { name: "Include ORD-003" })).toBeChecked();
+    expect(dialog.getByRole("checkbox", { name: "Include 5000" })).toBeChecked();
     expect(dialog.getByRole("checkbox", { name: "Include 04980" })).not.toBeChecked();
     // 279 + 84 - 25 = 338
     const totals = dialog.getByRole("status");
@@ -103,7 +108,7 @@ describe("One-screen Trader Settlement", () => {
     expect(totals.textContent).toContain("−25.00");
     expect(totals.textContent).toContain("338.00");
     // Unticking a fee raises the net.
-    fireEvent.click(dialog.getByRole("checkbox", { name: "Include ORD-003" }));
+    fireEvent.click(dialog.getByRole("checkbox", { name: "Include 5000" }));
     await waitFor(() => expect(dialog.getByRole("status").textContent).toContain("363.00"));
   });
 

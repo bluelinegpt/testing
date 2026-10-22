@@ -61,6 +61,12 @@ export function calculateOrderFinancials(input: {
   readonly paymentCondition?: "customer_pays_cod_and_fee" | "customer_pays_cod_trader_pays_fee";
   readonly prospective?: boolean;
   readonly serviceFee: Decimal;
+  /**
+   * The Company's "Trader pays the COD shortfall" switch (`cod-shortfall.ts`):
+   * a "Pay by Customer" Order with a COD above 0 but below its fees makes the
+   * Trader owe the rest of the fee. Off (absent) everywhere else.
+   */
+  readonly traderPaysCodShortfall?: boolean;
   readonly vatPolicy: VatPolicy;
 }): OrderFinancials {
   const additionalFeeInput = input.additionalFees ?? new Decimal(0);
@@ -113,9 +119,16 @@ export function calculateOrderFinancials(input: {
   // edit changes the payment condition to "Trader pays fee". Previously the
   // `prospective` guard made every edit calculate AED 0 here, so the update
   // path never created the receivable even though the fee remained payable.
-  const traderReceivableDue = !customerPaysFee
-    ? Decimal.max(signedTraderPosition.negated(), 0)
-    : new Decimal(0);
+  // COD shortfall (CMP-000001, 22 Oct 2026): "Pay by Customer" with a COD
+  // above 0 but below the fees -- the customer pays only the COD, so the
+  // Trader owes the rest (ORD-000023: COD 1, fee 20 -> 19). COD 0 stays the
+  // customer's: the driver collects the fee itself.
+  const shortfallOwedByTrader =
+    customerPaysFee && input.traderPaysCodShortfall === true && input.codAmount.greaterThan(0);
+  const traderReceivableDue =
+    !customerPaysFee || shortfallOwedByTrader
+      ? Decimal.max(signedTraderPosition.negated(), 0)
+      : new Decimal(0);
   return {
     additionalFees: roundMoney(additionalFees),
     additionalFeeVatAmount: roundMoney(additionalFeeVatAmount),

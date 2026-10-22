@@ -21,6 +21,7 @@ import {
 
 import { CompanyProfileService } from "../company-profile/company-profile.service.js";
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
+import { codShortfallEnabledSql, traderMayOweFeeSql, traderPaysCodShortfall } from "./cod-shortfall.js";
 import { restoredDeliveryStatus, reversalInvalidatesClose } from "./order-close-eligibility.js";
 import { expectedReceivableStatus } from "./trader-receivable-reconciliation.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
@@ -361,6 +362,8 @@ export interface TraderSettlementReceivableOffset {
   readonly receivableNumber: string;
   readonly sourceReference: string | null;
   readonly sourceType: string;
+  /** COD of the Receivable's own Order (null when it has none). */
+  readonly orderCodAmount?: string | null;
   readonly emirateName?: string | null;
   readonly areaName?: string | null;
   readonly emirateNameAr?: string | null;
@@ -473,6 +476,12 @@ export interface TraderSettlementReportData {
     readonly status: "confirmed" | "reversed" | "draft";
     /** One-screen Companies have no Money Received step: leave it off the invoice. */
     readonly hideMoneyReceived?: boolean;
+    /**
+     * COD-shortfall Companies (cod-shortfall.ts): a fee deduction row prints
+     * its Order's COD and fee and a negative Amount Paid Now, so every row
+     * reads COD - fee = paid and the columns add up to the totals.
+     */
+    readonly deductionRowsShowOrderMoney?: boolean;
     /** Trader's mobile from his record (Aiman, 21 Oct 2026); null when none. */
     readonly traderMobile?: string | null;
     readonly traderName: string;
@@ -1001,12 +1010,23 @@ export class TraderSettlementService {
    * Settlement -- e.g. 05220, RCV-000067 (Aiman, 22 Oct 2026). A fee deducted
    * in a Settlement already prints there as a deduction line; one still unpaid
    * prints when it is deducted or collected.
+   *
+   * COD shortfall (cod-shortfall.ts): a "Pay by Customer" Order whose Trader
+   * owes the uncovered fee has a live service-charge Receivable; it is then
+   * treated like "Pay by Trader" -- a deduction line while unpaid, a 0-due
+   * line only once collected directly (ORD-000023, 22 Oct 2026).
    */
   private zeroDueOrderQualifies(): RawBuilder<unknown> {
     return sql`(
       (
-        o.payment_condition = 'customer_pays_cod_and_fee'
-        or (o.payment_condition = 'customer_pays_cod_trader_pays_fee'
+        (o.payment_condition = 'customer_pays_cod_and_fee'
+          and (not ${codShortfallEnabledSql("o")}
+            or not exists (
+              select 1 from trader_receivables live_fee
+               where live_fee.company_id = o.company_id and live_fee.source_type = 'service_charge'
+                 and live_fee.source_reference = o.order_number
+                 and live_fee.status not in ('cancelled', 'reversed'))))
+        or (${traderMayOweFeeSql("o")}
           and exists (
             select 1
               from trader_receivables r
@@ -1269,8 +1289,7 @@ export class TraderSettlementService {
                            where earned_order.company_id = trader_receivables.company_id
                              and earned_order.order_number = trader_receivables.source_reference
                              and earned_order.delivered_at is not null
-                             and earned_order.payment_condition
-                                   = 'customer_pays_cod_trader_pays_fee'
+                             and ${traderMayOweFeeSql("earned_order")}
                         )) as "deliveryEarned"
                 from trader_receivables
                where company_id=${companyId}::uuid
@@ -2933,6 +2952,7 @@ export class TraderSettlementService {
         traderName: header.traderName,
         // One-screen Companies have no Money Received step.
         hideMoneyReceived: await this.oneScreenEnabled(this.database, companyId),
+        deductionRowsShowOrderMoney: await traderPaysCodShortfall(this.database, companyId),
       },
       orders: orders.lines,
       receivableOffsets,
@@ -3131,7 +3151,7 @@ export class TraderSettlementService {
                  where delivered_order.company_id = r.company_id
                    and delivered_order.order_number = r.source_reference
                    and delivered_order.delivered_at is not null
-                   and delivered_order.payment_condition = 'customer_pays_cod_trader_pays_fee'))
+                   and ${traderMayOweFeeSql("delivered_order")}))
          group by r.trader_id
       ), credit as (
         select c.trader_id, sum(c.remaining_amount) as amount, count(*)::int as n
@@ -3574,7 +3594,7 @@ export class TraderSettlementService {
               select r.id, r.business_date::text as "businessDate", r.receivable_number as "receivableNumber",
                      r.source_type as "sourceType", r.source_reference as "sourceReference", r.reason,
                      o.serial_number as "orderSerialNumber", o.order_number as "orderNumber",
-                     o.reference_number as "referenceNumber",
+                     o.reference_number as "referenceNumber", o.cod_amount::text as "orderCodAmount",
                      o.customer_name as "customerName", o.customer_mobile_number as "customerMobileNumber",
                      e.name_en as "emirateName", coalesce(o.customer_area_name_snapshot, a.name_en, '') as "areaName",
                      e.name_ar as "emirateNameAr", a.name_ar as "areaNameAr"
@@ -3655,6 +3675,7 @@ export class TraderSettlementService {
         createdBy: preparer,
         generatedAt: `${generatedAt} (UAE)`,
         hideMoneyReceived: true,
+        deductionRowsShowOrderMoney: await traderPaysCodShortfall(this.database, companyId),
         moneyReceivedBy: null,
         moneyReceivedDate: null,
         moneyReceivedNotes: null,
@@ -4022,7 +4043,7 @@ export class TraderSettlementService {
              r.business_date::text as "businessDate", r.receivable_number as "receivableNumber",
              r.source_type as "sourceType", r.source_reference as "sourceReference", r.reason,
              o.serial_number as "orderSerialNumber", o.order_number as "orderNumber",
-             o.reference_number as "referenceNumber",
+             o.reference_number as "referenceNumber", o.cod_amount::text as "orderCodAmount",
              o.customer_name as "customerName", o.customer_mobile_number as "customerMobileNumber",
              e.name_en as "emirateName", coalesce(o.customer_area_name_snapshot, a.name_en, '') as "areaName",
              e.name_ar as "emirateNameAr", a.name_ar as "areaNameAr"

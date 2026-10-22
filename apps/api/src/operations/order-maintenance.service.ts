@@ -24,6 +24,7 @@ import type {
   FinancialVerificationClassification,
   OrderFinancialHealth,
 } from "./order-financial-classification.js";
+import { traderPaysCodShortfall } from "./cod-shortfall.js";
 import { calculateOrderFinancials, type VatPolicy } from "./order-financial-model.js";
 import type { CapabilityCode } from "./repair-capability.registry.js";
 import type { Repairability } from "./repair-center.model.js";
@@ -720,8 +721,9 @@ export class OrderMaintenanceService {
       this.settlements(companyId, order.id),
       this.vatPolicy(companyId),
     ]);
-    const expected = this.expectedReceivableDue(order, vatPolicy);
-    const expectedAlternate = this.expectedReceivableDueAlternate(order, vatPolicy);
+    const shortfallSwitch = await traderPaysCodShortfall(this.database, companyId);
+    const expected = this.expectedReceivableDue(order, vatPolicy, shortfallSwitch);
+    const expectedAlternate = this.expectedReceivableDueAlternate(order, vatPolicy, shortfallSwitch);
     const findings = this.evaluate(
       order,
       history,
@@ -904,7 +906,11 @@ export class OrderMaintenanceService {
    * A finding is only ever raised when BOTH modes disagree with the stored
    * Receivable.
    */
-  private expectedReceivableDue(order: OrderSnapshotRow, vatPolicy: VatPolicy): Decimal {
+  private expectedReceivableDue(
+    order: OrderSnapshotRow,
+    vatPolicy: VatPolicy,
+    traderPaysCodShortfall: boolean,
+  ): Decimal {
     const input = {
       additionalFees: new Decimal(order.additionalFees ?? 0),
       codAmount: new Decimal(order.codAmount),
@@ -913,6 +919,7 @@ export class OrderMaintenanceService {
         | "customer_pays_cod_and_fee"
         | "customer_pays_cod_trader_pays_fee",
       serviceFee: new Decimal(order.serviceFee),
+      traderPaysCodShortfall,
       vatPolicy,
     };
     return calculateOrderFinancials({ ...input, prospective: true }).traderReceivableDue;
@@ -921,6 +928,7 @@ export class OrderMaintenanceService {
   private expectedReceivableDueAlternate(
     order: OrderSnapshotRow,
     vatPolicy: VatPolicy,
+    traderPaysCodShortfall: boolean,
   ): Decimal {
     return calculateOrderFinancials({
       additionalFees: new Decimal(order.additionalFees ?? 0),
@@ -931,6 +939,7 @@ export class OrderMaintenanceService {
         | "customer_pays_cod_trader_pays_fee",
       prospective: false,
       serviceFee: new Decimal(order.serviceFee),
+      traderPaysCodShortfall,
       vatPolicy,
     }).traderReceivableDue;
   }

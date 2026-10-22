@@ -23,6 +23,7 @@ import {
   type OrderFinancials,
   type VatPolicy,
 } from "./order-financial-model.js";
+import { traderPaysCodShortfall } from "./cod-shortfall.js";
 import { closeSettlementComplete } from "./order-close-eligibility.js";
 import {
   isOrderQuestionKey,
@@ -4455,6 +4456,7 @@ export class OperationsService {
         prospective: true,
         serviceFee: pricing.finalFee,
         paymentCondition: input.paymentCondition ?? "customer_pays_cod_and_fee",
+        traderPaysCodShortfall: await traderPaysCodShortfall(transaction, companyId),
         vatPolicy,
       });
       // A Collect Order is not complete when it is created. Without a Driver
@@ -4792,6 +4794,7 @@ export class OperationsService {
       prospective: true,
       serviceFee: pricing.finalFee,
       paymentCondition: input.paymentCondition ?? "customer_pays_cod_and_fee",
+      traderPaysCodShortfall: await traderPaysCodShortfall(this.database, companyId),
       vatPolicy,
     });
     return {
@@ -5602,6 +5605,7 @@ export class OperationsService {
             rate: new Decimal(current.vatRateSnapshot ?? 0),
           }
         : await this.vatPolicy(transaction, companyId);
+      const codShortfallSwitch = await traderPaysCodShortfall(transaction, companyId);
       const financials = this.calculateOrderFinancials({
         additionalFees: new Decimal(
           isFreeOrder
@@ -5614,6 +5618,7 @@ export class OperationsService {
         serviceFee: finalFee,
         paymentCondition: nextPaymentCondition as
           "customer_pays_cod_and_fee" | "customer_pays_cod_trader_pays_fee",
+        traderPaysCodShortfall: codShortfallSwitch,
         vatPolicy: currentVatPolicy,
       });
 
@@ -6013,16 +6018,38 @@ export class OperationsService {
     actor?: { readonly actorAccountId: null; readonly actorRole: string },
   ): Promise<{ created: boolean; amount: string }> {
     const identity = this.identities.current();
-      const result = await sql<{ orderNumber: string; traderId: string; paymentCondition: string; serviceFee: string }>`
+      const result = await sql<{
+        codAmount: string;
+        orderNumber: string;
+        traderId: string;
+        paymentCondition: string;
+        serviceFee: string;
+        totalDeductions: string | null;
+      }>`
         select order_number as "orderNumber", trader_id as "traderId",
-               payment_condition as "paymentCondition", service_fee::text as "serviceFee"
+               payment_condition as "paymentCondition", service_fee::text as "serviceFee",
+               cod_amount::text as "codAmount", total_deductions::text as "totalDeductions"
           from orders where id=${orderId}::uuid and company_id=${companyId}::uuid for update
       `.execute(transaction);
     const order = result.rows[0];
     if (order === undefined) throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
-    if (order.paymentCondition !== "customer_pays_cod_trader_pays_fee") {
+    // COD shortfall (per Company switch, cod-shortfall.ts): a "Pay by
+    // Customer" Order whose COD is above 0 but below its fees bills the Trader
+    // the uncovered part, not the whole fee (ORD-000023: 20 - 1 = 19).
+    const codAmount = new Decimal(order.codAmount);
+    const shortfall =
+      order.paymentCondition === "customer_pays_cod_and_fee" &&
+      codAmount.greaterThan(0) &&
+      (await traderPaysCodShortfall(transaction, companyId))
+        ? Decimal.max(new Decimal(order.totalDeductions ?? order.serviceFee).minus(codAmount), 0)
+        : null;
+    if (
+      order.paymentCondition !== "customer_pays_cod_trader_pays_fee" &&
+      (shortfall === null || !shortfall.greaterThan(0))
+    ) {
         throw new ApplicationException("trader_receivable_not_required", "This Order is not configured for Trader-paid fees", HttpStatus.CONFLICT);
     }
+    const repairAmount = shortfall ?? new Decimal(order.serviceFee);
       // Any usable Receivable for this Order blocks the repair. A reversed
       // Receivable is historical output of the financial reset path and must
       // not be reactivated or prevent a fresh active Receivable.
@@ -6047,7 +6074,7 @@ export class OperationsService {
            and status not in ('reversed', 'cancelled')
          limit 1 for update
     `.execute(transaction);
-    if (existing.rows[0] !== undefined) return { created: false, amount: order.serviceFee };
+    if (existing.rows[0] !== undefined) return { created: false, amount: repairAmount.toFixed(2) };
     const creditNumber = await this.liveCreditForReversedFee(
       transaction,
       companyId,
@@ -6064,10 +6091,10 @@ export class OperationsService {
     await this.createOrderTraderReceivableIfNeeded(transaction, {
         actorAccountId: actor === undefined ? identity.identityId : actor.actorAccountId,
         ...(actor === undefined ? {} : { actorRole: actor.actorRole }),
-        amountDue: new Decimal(order.serviceFee), companyId,
+        amountDue: repairAmount, companyId,
         correlationId, orderId, orderNumber: order.orderNumber, traderId: order.traderId,
     });
-    return { created: true, amount: order.serviceFee };
+    return { created: true, amount: repairAmount.toFixed(2) };
   }
 
   public async changeOrderStatus(
@@ -8123,6 +8150,7 @@ export class OperationsService {
       prospective: true,
       serviceFee: pricing.finalFee,
       paymentCondition: input.paymentCondition ?? "customer_pays_cod_and_fee",
+      traderPaysCodShortfall: await traderPaysCodShortfall(database, companyId),
       vatPolicy,
     });
     const deliveryStatus = driverRow === undefined ? "new" : "assigned_to_driver";

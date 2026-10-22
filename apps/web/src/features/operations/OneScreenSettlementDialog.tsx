@@ -67,7 +67,10 @@ interface EligibleReceivable {
   readonly customerName?: string | null;
   readonly emirateName?: string | null;
   readonly id: string;
+  readonly orderCodAmount?: string | null;
+  readonly orderFees?: string | null;
   readonly orderNumber?: string | null;
+  readonly orderReferenceNumber?: string | null;
   readonly outstandingAmount: string;
   readonly reason: string;
   readonly receivableNumber: string;
@@ -312,11 +315,16 @@ export function OneScreenSettlementDialog({
           })),
           ...receivables.map((receivable) => ({
             area: receivable.areaName ?? "",
-            cod: null,
+            // The fee's own Order: its COD (ORD-000023: 1.00) and fees (20.00),
+            // so the row reads COD - fees = amount deducted.
+            cod:
+              receivable.orderCodAmount != null && safeMoneyValue(receivable.orderCodAmount) > 0
+                ? receivable.orderCodAmount
+                : null,
             customer: receivable.customerName ?? receivable.reason,
             date: receivable.businessDate,
             emirate: receivable.emirateName ?? "",
-            fees: receivable.outstandingAmount,
+            fees: receivable.orderFees ?? receivable.outstandingAmount,
             full: safeMoneyValue(receivable.outstandingAmount),
             id: receivable.id,
             key: `fee:${receivable.id}`,
@@ -324,7 +332,7 @@ export function OneScreenSettlementDialog({
             mobile: receivable.customerMobileNumber ?? "",
             note: receivable.receivableNumber,
             orderNumber: receivable.orderNumber ?? receivable.sourceReference ?? "",
-            reference: "",
+            reference: receivable.orderReferenceNumber ?? "",
           })),
           ...(Array.isArray(credits) ? credits : []).map((credit) => ({
             area: "",

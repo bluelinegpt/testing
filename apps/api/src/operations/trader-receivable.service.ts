@@ -18,6 +18,7 @@ import {
 
 import { CompanyProfileService } from "../company-profile/company-profile.service.js";
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
+import { traderMayOweFeeSql } from "./cod-shortfall.js";
 import { effectiveSettlement } from "./effective-settlement-offsets.js";
 import {
   correlatedReceivableInputs,
@@ -214,6 +215,10 @@ export interface TraderReceivableEligibleRow {
   readonly orderSerialNumber: string | null;
   readonly orderNumber: string | null;
   readonly orderType: "collect_order" | "delivery" | "gcc_international" | null;
+  /** The Receivable's own Order: its Reference Number, COD and fees (service + additional). */
+  readonly orderReferenceNumber?: string | null;
+  readonly orderCodAmount?: string | null;
+  readonly orderFees?: string | null;
   readonly customerName: string | null;
   readonly customerMobileNumber: string | null;
   readonly originalAmountDue: string;
@@ -953,7 +958,7 @@ export class TraderReceivableService {
              where delivered_order.company_id = r.company_id
                and delivered_order.order_number = r.source_reference
                and delivered_order.delivered_at is not null
-               and delivered_order.payment_condition = 'customer_pays_cod_trader_pays_fee'
+               and ${traderMayOweFeeSql("delivered_order")}
           )
         )
         -- Emirate / Area / Driver of the Receivable's own Order, so the
@@ -976,6 +981,9 @@ export class TraderReceivableService {
              r.business_date::text as "businessDate", r.source_type as "sourceType",
              r.source_reference as "sourceReference", ord.serial_number as "orderSerialNumber",
              ord.order_number as "orderNumber", ord.order_type as "orderType",
+             ord.reference_number as "orderReferenceNumber",
+             ord.cod_amount::text as "orderCodAmount",
+             (ord.service_fee + coalesce(ord.additional_fees, 0))::text as "orderFees",
              ord.customer_name as "customerName", ord.customer_mobile_number as "customerMobileNumber", r.reason,
              receivable_emirate.name_en as "emirateName",
              coalesce(ord.customer_area_name_snapshot, receivable_area.name_en) as "areaName",

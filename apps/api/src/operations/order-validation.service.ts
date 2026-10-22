@@ -10,6 +10,7 @@ import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
 import { effectiveSettlement } from "./effective-settlement-offsets.js";
 import { closeSettlementComplete } from "./order-close-eligibility.js";
+import { traderPaysCodShortfall } from "./cod-shortfall.js";
 import { calculateOrderFinancials } from "./order-financial-model.js";
 import { expectedReceivableStatus } from "./trader-receivable-reconciliation.js";
 
@@ -480,7 +481,14 @@ export class OrderValidationService {
 
   /** F4: a Trader-pays-fee Order has a matching service_charge receivable with the expected amounts and status. */
   private async f4(companyId: string, order: OrderSnapshot): Promise<OrderValidationCheck> {
-    if (order.paymentCondition !== "customer_pays_cod_trader_pays_fee") {
+    // COD shortfall (cod-shortfall.ts): a "Pay by Customer" Order with a COD
+    // above 0 is checked too where the Company charges the shortfall to the
+    // Trader -- the model then says whether a receivable is due.
+    const shortfallApplies =
+      order.paymentCondition === "customer_pays_cod_and_fee" &&
+      new Decimal(order.codAmount).greaterThan(0) &&
+      (await traderPaysCodShortfall(this.database, companyId));
+    if (order.paymentCondition !== "customer_pays_cod_trader_pays_fee" && !shortfallApplies) {
       return this.check(
         "F4",
         "pass",
@@ -490,7 +498,7 @@ export class OrderValidationService {
       );
     }
     const expectedDue =
-      order.financialModelVersion === "trader_deduction_v1"
+      order.financialModelVersion === "trader_deduction_v1" || shortfallApplies
         ? calculateOrderFinancials({
             prospective: true,
             additionalFees: new Decimal(order.additionalFees),
@@ -498,6 +506,7 @@ export class OrderValidationService {
             driverCost: new Decimal(order.driverCost),
             paymentCondition: order.paymentCondition,
             serviceFee: new Decimal(order.serviceFee),
+            traderPaysCodShortfall: shortfallApplies,
             vatPolicy: {
               enabled: order.vatEnabled,
               priceMode: order.vatPriceMode,

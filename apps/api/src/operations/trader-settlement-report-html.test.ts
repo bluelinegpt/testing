@@ -478,4 +478,47 @@ describe("buildTraderSettlementStatementHtml", () => {
     expect(buildTraderSettlementStatementHtml(withMobile, "ar")).toContain("جوال التاجر");
     expect(buildTraderSettlementStatementHtml(sample, "en")).not.toContain("Trader Mobile");
   });
+
+  it("prints a COD-shortfall deduction with its Order's COD and fee and a negative Amount Paid Now, so the totals add up", () => {
+    // ORD-000023 (CMP-000001): COD 1.00, fee 20.00 -> the Trader owes 19.00.
+    const shortfall: TraderSettlementReportData = {
+      ...sample,
+      header: { ...sample.header, deductionRowsShowOrderMoney: true },
+      receivableOffsets: [
+        {
+          amountApplied: "19.00",
+          businessDate: "2026-10-22",
+          customerMobileNumber: null,
+          customerName: null,
+          orderCodAmount: "1.00",
+          orderSerialNumber: "1",
+          orderNumber: "ORD-000023",
+          referenceNumber: null,
+          reason: "Order service fee owed by Trader",
+          receivableNumber: "RCV-000005",
+          sourceReference: "ORD-000023",
+          sourceType: "service_charge",
+        },
+      ],
+      summary: { ...sample.summary, netPayment: "81.00", traderFeeDeductions: "19.00" },
+    };
+    const html = buildTraderSettlementStatementHtml(shortfall, "en");
+    const body = html.split("<tbody>")[1]?.split("</tbody>")[0] ?? "";
+    const row = body.split("<tr>").find((cell) => cell.includes("ORD-000023")) ?? "";
+    // COD 1.00, fee 20.00 (1 + 19), Amount Paid Now -19.00.
+    expect(row).toContain('<bdi dir="ltr">1.00</bdi>');
+    expect(row).toContain('<bdi dir="ltr">20.00</bdi>');
+    expect(row).toContain("−19.00");
+    const summary = html.slice(
+      html.indexOf('<section class="summary-section">'),
+      html.indexOf('<div class="signatures">'),
+    );
+    // COD 110 + 1 = 111, fees 10 + 20 = 30, paid 111 - 30 = 81.
+    expect(summary).toContain('<bdi dir="ltr">111.00</bdi>');
+    expect(summary).toContain('<bdi dir="ltr">30.00</bdi>');
+    expect(summary).toContain('<bdi dir="ltr">81.00</bdi>');
+    // Without the switch the row keeps the existing layout.
+    const plain = buildTraderSettlementStatementHtml({ ...shortfall, header: sample.header }, "en");
+    expect(plain).toContain('<bdi dir="ltr">110.00</bdi>');
+  });
 });

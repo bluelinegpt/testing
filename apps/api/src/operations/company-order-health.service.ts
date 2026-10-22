@@ -4,6 +4,7 @@ import { type Kysely, type RawBuilder, sql } from "kysely";
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
+import { traderMayOweFeeSql } from "./cod-shortfall.js";
 import { effectiveSettlement } from "./effective-settlement-offsets.js";
 import { issueAnomalyListSql, receivableAnomalySql } from "./trader-receivable-reconciliation.js";
 import {
@@ -464,7 +465,10 @@ function vatSql(amount: RawBuilder<unknown>): RawBuilder<string> {
  *
  * For a "Trader pays fee" Order both calculation modes of the model reduce to
  * the same value -- max(fee incl. VAT + additional fees incl. VAT - COD, 0) --
- * and for every other payment condition the model returns 0. The parity test
+ * and for every other payment condition the model returns 0 -- except a "Pay
+ * by Customer" Order with a COD above 0 in a Company that charges the COD
+ * shortfall to the Trader (cod-shortfall.ts), which reduces to the same
+ * max(fees - COD, 0). The parity test
  * (`company-order-health.database.test.ts`) evaluates this expression and the
  * TypeScript model over a grid of fees, COD amounts and VAT policies.
  */
@@ -472,7 +476,7 @@ export function traderReceivableDueSql(): RawBuilder<string> {
   const fee = sql`o.service_fee`;
   const additional = sql`coalesce(o.additional_fees, 0)`;
   return sql<string>`(case
-    when o.payment_condition <> 'customer_pays_cod_trader_pays_fee' then 0::numeric
+    when not ${traderMayOweFeeSql("o")} then 0::numeric
     else greatest(
       (case
         when vat.enabled and vat.price_mode = 'inclusive' then ${fee} + ${additional}
@@ -511,7 +515,7 @@ function snapshotVatSql(amount: RawBuilder<unknown>): RawBuilder<string> {
  * of the VAT policy it was created under, and none is ever guessed.
  */
 export function historicalAmountProvableSql(): RawBuilder<boolean> {
-  return sql<boolean>`(o.payment_condition <> 'customer_pays_cod_trader_pays_fee'
+  return sql<boolean>`(not ${traderMayOweFeeSql("o")}
     or (o.financial_model_version = 'trader_deduction_v1'
         and o.vat_enabled_snapshot is not null
         and o.total_deductions is not null and o.service_fee_net_amount is not null
@@ -546,7 +550,7 @@ export function expectedTraderReceivableSql(
   provable: RawBuilder<unknown> = historicalAmountProvableSql(),
 ): RawBuilder<string> {
   return sql<string>`(case
-    when o.payment_condition <> 'customer_pays_cod_trader_pays_fee' then 0::numeric
+    when not ${traderMayOweFeeSql("o")} then 0::numeric
     when ${provable} then greatest(o.total_deductions - o.cod_amount, 0)
     else ${traderReceivableDueSql()}
   end)`;

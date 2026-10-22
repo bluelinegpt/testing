@@ -7,6 +7,7 @@ import {
 import { Decimal } from "decimal.js";
 import { describe, expect, it } from "vitest";
 
+import { calculateOrderFinancials } from "./order-financial-model.js";
 import { OperationsService } from "./operations.service.js";
 
 type FinancialResult = Readonly<
@@ -194,5 +195,40 @@ describe("prospective Order financial model", () => {
     expect(result.traderPaidServiceFee.toFixed(2)).toBe("10.00");
     expect(result.traderNetPayable.toFixed(2)).toBe("240.00");
     expect(result.traderReceivableDue.toFixed(2)).toBe("0.00");
+  });
+});
+
+describe("COD shortfall charged to the Trader (per Company switch)", () => {
+  const noVat = { enabled: false, priceMode: null, rate: new Decimal(0) };
+  const payByCustomer = (codAmount: number, traderPaysCodShortfall: boolean) =>
+    calculateOrderFinancials({
+      additionalFees: new Decimal(0),
+      codAmount: new Decimal(codAmount),
+      driverCost: new Decimal(0),
+      paymentCondition: "customer_pays_cod_and_fee",
+      prospective: true,
+      serviceFee: new Decimal(20),
+      traderPaysCodShortfall,
+      vatPolicy: noVat,
+    });
+
+  it("charges the Trader fee - COD when COD is above 0 but below the fee (ORD-000023: 1 vs 20)", () => {
+    const result = payByCustomer(1, true);
+    expect(result.customerAmountDue.toFixed(2)).toBe("1.00");
+    expect(result.traderNetPayable.toFixed(2)).toBe("0.00");
+    expect(result.traderReceivableDue.toFixed(2)).toBe("19.00");
+  });
+
+  it("charges nothing when the switch is off (every other Company)", () => {
+    expect(payByCustomer(1, false).traderReceivableDue.toFixed(2)).toBe("0.00");
+  });
+
+  it("leaves COD 0 to the customer, and a COD that covers the fee to the Trader's payout", () => {
+    const codZero = payByCustomer(0, true);
+    expect(codZero.customerAmountDue.toFixed(2)).toBe("20.00");
+    expect(codZero.traderReceivableDue.toFixed(2)).toBe("0.00");
+    const covered = payByCustomer(500, true);
+    expect(covered.traderNetPayable.toFixed(2)).toBe("480.00");
+    expect(covered.traderReceivableDue.toFixed(2)).toBe("0.00");
   });
 });

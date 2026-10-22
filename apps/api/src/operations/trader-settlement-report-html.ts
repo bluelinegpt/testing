@@ -338,6 +338,19 @@ export function buildTraderSettlementStatementHtml(
   const feeLabel = showAdditionalFees
     ? `${labels.serviceFee} + ${labels.additionalFees}`
     : labels.serviceFee;
+  // COD-shortfall Companies (Aiman, 22 Oct 2026): a fee deduction row prints
+  // its Order's COD, the fee that row covers (COD + amount deducted) and a
+  // negative Amount Paid Now, so every row reads COD - fee = paid and the
+  // columns add up to the totals: ORD-000023 COD 1.00, fee 20.00, -19.00.
+  const deductionMoney = showFullColumns && header.deductionRowsShowOrderMoney === true;
+  const deductionCod = (line: (typeof data.receivableOffsets)[number]) =>
+    deductionMoney ? new Decimal(line.orderCodAmount ?? 0) : new Decimal(0);
+  const deductionFee = (line: (typeof data.receivableOffsets)[number]) =>
+    deductionCod(line).plus(line.amountApplied).toFixed(2);
+  const totalDeductionCod = data.receivableOffsets.reduce(
+    (sum, line) => sum.plus(deductionCod(line)),
+    new Decimal(0),
+  );
 
   // Columns are built from one list so a header and every row's cell can never
   // disagree in count. Per Aiman (13 Oct 2026):
@@ -425,8 +438,15 @@ export function buildTraderSettlementStatementHtml(
       ? [
           {
             cell: (row: Row) =>
-              `<td class="num">${row.kind === "order" ? tableMoney(row.order.codAmount) : ZERO_CELL}</td>`,
-            has: (row: Row) => row.kind === "order" && nonZero(row.order.codAmount),
+              `<td class="num">${
+                row.kind === "order"
+                  ? tableMoney(row.order.codAmount)
+                  : deductionCod(row.line).gt(0)
+                    ? tableMoney(deductionCod(row.line).toFixed(2))
+                    : ZERO_CELL
+              }</td>`,
+            has: (row: Row) =>
+              row.kind === "order" ? nonZero(row.order.codAmount) : deductionCod(row.line).gt(0),
             label: labels.cod,
             numeric: true,
           },
@@ -435,7 +455,9 @@ export function buildTraderSettlementStatementHtml(
             cell: (row: Row) =>
               row.kind === "order"
                 ? `<td class="num">${tableMoney(orderFee(row.order))}</td>`
-                : `<td class="num negative">${tableMoney(row.line.amountApplied, true)}</td>`,
+                : deductionMoney
+                  ? `<td class="num">${tableMoney(deductionFee(row.line))}</td>`
+                  : `<td class="num negative">${tableMoney(row.line.amountApplied, true)}</td>`,
             has: (row: Row) => (row.kind === "order" ? nonZero(orderFee(row.order)) : nonZero(row.line.amountApplied)),
             label: feeLabel,
             numeric: true,
@@ -456,7 +478,7 @@ export function buildTraderSettlementStatementHtml(
       cell: (row) =>
         row.kind === "order"
           ? `<td class="num">${tableMoney(row.order.amountPaidNow)}</td>`
-          : showFullColumns
+          : showFullColumns && !deductionMoney
             ? `<td class="num">${ZERO_CELL}</td>`
             : `<td class="num negative">${tableMoney(row.line.amountApplied, true)}</td>`,
       has: () => true,
@@ -618,9 +640,13 @@ export function buildTraderSettlementStatementHtml(
   const noticeSection =
     notices.length === 0 ? "" : `<div class="notices">${notices.join("")}</div>`;
 
+  // A deduction row's fee is COD + amount deducted, so its COD joins both
+  // totals (0 unless the Company prints deduction rows with their Order money).
   const totalFees = new Decimal(data.summary.totalServiceFees)
     .plus(data.summary.traderFeeDeductions)
-    .plus(totalAdditionalFees);
+    .plus(totalAdditionalFees)
+    .plus(totalDeductionCod);
+  const totalCod = new Decimal(data.summary.totalCod).plus(totalDeductionCod).toFixed(2);
   const totalPaidBefore = data.orders.reduce((sum, order) => sum.plus(paidBefore(order)), new Decimal(0));
   const totalRemainingAfter = data.orders.reduce((sum, order) => sum.plus(remainingAfter(order)), new Decimal(0));
   const summaryLine = (label: string, value: string) =>
@@ -631,8 +657,8 @@ export function buildTraderSettlementStatementHtml(
     `<h2 class="section-title">${escapeHtml(labels.numberOfOrders)}: ${totalDetailRows}</h2>` +
     // A summary line that is 0.00 is left off, like an empty column; Amount
     // Paid Now always prints.
-    (showFullColumns && nonZero(data.summary.totalCod)
-      ? summaryLine(labels.cod, money(data.summary.totalCod))
+    (showFullColumns && nonZero(totalCod)
+      ? summaryLine(labels.cod, money(totalCod))
       : "") +
     (showFullColumns && totalFees.gt(0) ? summaryLine(feeLabel, money(totalFees.toFixed(2))) : "") +
     ((data.creditApplications ?? []).length === 0

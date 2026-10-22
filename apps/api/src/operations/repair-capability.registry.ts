@@ -1104,7 +1104,9 @@ async function previewReplaceUnusedReceivable(context: RepairPlanContext): Promi
       blockers.push(...recognisedCancelBlocker(dependencies, target.receivableNumber));
     }
     if (!evaluation.amountProvable) manualReviewReasons.push(EXPECTED_AMOUNT_NOT_PROVABLE);
-    if (order.paymentCondition !== "customer_pays_cod_trader_pays_fee" || !due.greaterThan(0)) {
+    // `due` is the shared expected amount: 0 unless the Trader pays the fee or
+    // owes a COD shortfall (cod-shortfall.ts), so it alone decides.
+    if (!due.greaterThan(0)) {
       manualReviewReasons.push(
         issue("RECEIVABLE_NOT_REQUIRED", "The order rules require no Trader receivable; which record should remain needs review."),
       );
