@@ -15,7 +15,10 @@ import {
   Query,
   Req,
   Res,
+  UploadedFile,
+  UseInterceptors,
 } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { Throttle } from "@nestjs/throttler";
 import type { Request, Response } from "express";
@@ -162,6 +165,7 @@ import {
 import { OrderDeliveryReopenService } from "./order-delivery-reopen.service.js";
 import { OrderMaintenanceService, type TraderReceivableResetPreview } from "./order-maintenance.service.js";
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
+import { FastEntrySheetService, type FastEntrySheetResult } from "./fast-entry-sheet.service.js";
 
 @ApiTags("operations")
 @ApiBearerAuth()
@@ -193,6 +197,8 @@ export class OperationsController {
     private readonly companyProfile: CompanyProfileService,
     @Inject(OrderQuestionAskService)
     private readonly orderQuestionAsk: OrderQuestionAskService,
+    @Inject(FastEntrySheetService)
+    private readonly fastEntrySheet: FastEntrySheetService,
   ) {}
 
   // Either permission reaches the route; the SERVICE decides which one the
@@ -1248,6 +1254,30 @@ export class OperationsController {
     @Req() request: Request,
   ): Promise<OperationsOrder> {
     return this.operations.createOrder(input, this.correlationId(request), idempotencyKey);
+  }
+
+  // Fast Entry: read the operators' daily Excel sheet into draft rows. Nothing
+  // is created here; the rows are validated and saved from the dialog.
+  @ApiOperation({ summary: "Read a daily orders Excel sheet into Fast Entry draft rows" })
+  @RequireAnyPermission("orders.create", "users_roles.manage")
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @UseInterceptors(FileInterceptor("file", { limits: { fileSize: 5 * 1024 * 1024, files: 1 } }))
+  @Post("orders/fast-entry/sheet")
+  public loadFastEntrySheet(
+    @UploadedFile() file: { readonly buffer: Buffer; readonly originalname: string } | undefined,
+  ): Promise<FastEntrySheetResult> {
+    return this.fastEntrySheet.load(file);
+  }
+
+  @ApiOperation({ summary: "Download the Fast Entry Excel template (Arabic or English headers)" })
+  @RequireAnyPermission("orders.create", "users_roles.manage")
+  @Get("orders/fast-entry/template")
+  public fastEntryTemplate(@Query("language") language: string | undefined, @Res() response: Response): void {
+    const file = this.fastEntrySheet.template(language === "en" ? "en" : "ar");
+    response.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    response.setHeader("Content-Disposition", `attachment; filename="${file.filename}"`);
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.send(file.bytes);
   }
 
   @ApiOperation({ summary: "Import delivery orders from Excel-compatible CSV text" })

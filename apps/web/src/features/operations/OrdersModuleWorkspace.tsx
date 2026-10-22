@@ -59,6 +59,7 @@ import { PageHeader } from "../../components/PageHeader.js";
 import { FilterCombobox } from "../../components/FilterCombobox.js";
 import { SearchCombobox } from "../../components/SearchCombobox.js";
 import { AreaSelector } from "../configuration/AreaSelector.js";
+import { PricingDialog, TraderForm } from "../configuration/TraderConfigurationWorkspace.js";
 import {
   type OrderView,
   type OrderViewsMenu,
@@ -2956,6 +2957,7 @@ export function OrdersModuleWorkspace({
       {fastEntryOpen ? (
         <FastOrderEntryDialog
           api={api}
+          drivers={drivers}
           emirates={emirates}
           onClose={() => setFastEntryOpen(false)}
           onCreated={(notice) => setCreatedNotice(notice)}
@@ -3040,7 +3042,45 @@ export function OrdersModuleWorkspace({
   );
 }
 
-type FastEntryStatus = "draft" | "ready" | "created" | "error";
+type FastEntryStatus = "draft" | "ready" | "created" | "error" | "excluded";
+type FastEntryPaymentCondition = "customer_pays_cod_and_fee" | "customer_pays_cod_trader_pays_fee";
+
+/** A message the sheet reader returns in both languages. */
+interface FastEntrySheetMessage {
+  ar: string;
+  en: string;
+}
+
+/** One line of the operators' daily sheet, matched by the server (fast-entry-sheet.service.ts). */
+interface FastEntrySheetRowPayload {
+  area: CompanyArea | null;
+  areaNote: FastEntrySheetMessage | null;
+  pickup: boolean;
+  codAmount: string;
+  customerAddress: string;
+  customerName: string;
+  driverId: string | null;
+  driverName: string;
+  emirateId: string;
+  errors: FastEntrySheetMessage[];
+  excludedReason: FastEntrySheetMessage | null;
+  mobile: string;
+  notes: string;
+  packageCount: number;
+  paymentCondition: FastEntryPaymentCondition;
+  referenceNumber: string;
+  secondMobile: string;
+  sheetRow: number;
+  sheetServiceFee: string | null;
+  sheetTraderName: string;
+  trader: OperationsTraderOption | null;
+}
+
+interface FastEntrySheetPayload {
+  excludedLines: number;
+  rows: FastEntrySheetRowPayload[];
+  totalLines: number;
+}
 
 interface FastEntryRow {
   additionalFees: string;
@@ -3065,6 +3105,32 @@ interface FastEntryRow {
   traderOption: OperationsTraderOption | undefined;
   mobile: string;
   message?: string | undefined;
+  /** Who pays: sent on quote and create. Blank on the sheet = Pay by Customer. */
+  paymentCondition: FastEntryPaymentCondition;
+  secondMobile: string;
+  /** Set only when the sheet's Driver name is exactly one active Driver. */
+  driverId: string;
+  driverName: string;
+  /** Rows loaded from an Excel sheet: the line number there, and what it said. */
+  sheetRow?: number | undefined;
+  sheetAreaText: string;
+  sheetTraderName: string;
+  /**
+   * The delivery fee written on the sheet. While set, validation splits it:
+   * the Trader's configured fee, and the rest as Additional fees (a lower
+   * sheet fee is used as the fee itself). Cleared once the user edits a fee.
+   */
+  sheetServiceFee: string;
+  feeNote?: string | undefined;
+  /** Returned / cancelled line: shown in red and never created. */
+  excludedReason?: string | undefined;
+  /** The Area was matched in another Emirate than the sheet said (both languages). */
+  areaNote?: string | undefined;
+  /**
+   * "احضار" on the sheet: created as a Collect order (Aiman, 22 Oct 2026) --
+   * operational only, no COD, no fees, no Driver.
+   */
+  pickup?: boolean;
 }
 
 const fastEntryColumns = [
@@ -3130,11 +3196,81 @@ function createFastEntryRow(serialNumber = ""): FastEntryRow {
     traderId: "",
     traderOption: undefined,
     mobile: "",
+    paymentCondition: "customer_pays_cod_and_fee",
+    secondMobile: "",
+    driverId: "",
+    driverName: "",
+    sheetAreaText: "",
+    sheetTraderName: "",
+    sheetServiceFee: "",
   };
 }
 
+/** COD below the fees on a Pay by Customer row: the difference is never collected. */
+function fastEntryFeesAboveCod(row: FastEntryRow): { cod: number; fees: number } | undefined {
+  if (row.paymentCondition !== "customer_pays_cod_and_fee" || row.status === "created") return undefined;
+  const fee = row.serviceFee.trim() || row.resolvedServiceFee.trim();
+  if (fee === "") return undefined;
+  const cod = parseFastEntryMoney(row.codAmount);
+  const serviceFee = parseFastEntryMoney(fee);
+  const additional = parseFastEntryMoney(row.additionalFees) ?? 0;
+  if (cod === undefined || serviceFee === undefined) return undefined;
+  const fees = serviceFee + additional;
+  return cod < fees ? { cod, fees } : undefined;
+}
+
+/** Errors show in English AND Arabic, whatever the screen language (Aiman, 22 Oct 2026). */
+function bothLanguages(message: FastEntrySheetMessage): string {
+  return `${message.en}\n${message.ar}`;
+}
+
+function fastEntryRowFromSheet(line: FastEntrySheetRowPayload): FastEntryRow {
+  const row = createFastEntryRow();
+  return {
+    ...row,
+    areaNote: line.areaNote == null ? undefined : bothLanguages(line.areaNote),
+    pickup: line.pickup === true,
+    additionalFees: "0.00",
+    areaId: line.area?.id ?? "",
+    areaOption: line.area ?? undefined,
+    codAmount: line.pickup === true ? "0.00" : line.codAmount,
+    customerAddress: line.customerAddress,
+    customerName: line.customerName,
+    driverId: line.driverId ?? "",
+    driverName: line.driverName,
+    emirateId: line.area?.emirateId ?? line.emirateId,
+    excludedReason:
+      line.excludedReason === null ? undefined : `${line.excludedReason.en} / ${line.excludedReason.ar}`,
+    message: line.errors.length === 0 ? undefined : line.errors.map(bothLanguages).join("\n"),
+    mobile: line.mobile,
+    notes: line.notes,
+    packageCount: String(line.packageCount),
+    paymentCondition: line.paymentCondition,
+    referenceNumber: line.referenceNumber,
+    secondMobile: line.secondMobile,
+    sheetAreaText: line.customerAddress,
+    sheetRow: line.sheetRow,
+    // A Collect order carries no money: no COD and no sheet fee to split.
+    sheetServiceFee: line.pickup === true ? "" : (line.sheetServiceFee ?? ""),
+    sheetTraderName: line.sheetTraderName,
+    status: line.excludedReason !== null ? "excluded" : line.errors.length === 0 ? "draft" : "error",
+    traderId: line.trader?.id ?? "",
+    traderOption: line.trader ?? undefined,
+  };
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function parseFastEntryMoney(value: string, required = false): number | undefined {
-  const parsed = parseMoneyInput(value, { allowZero: !required, required });
+  // COD 0 is valid, as in Create Order (e.g. a Pay by Trader row on the daily sheet).
+  const parsed = parseMoneyInput(value, { allowZero: true, required });
   return parsed.ok ? parsed.value : undefined;
 }
 
@@ -3204,6 +3340,7 @@ function tSafeOrderMessage(message: string, fallback: string): string {
 
 function FastOrderEntryDialog({
   api,
+  drivers = [],
   emirates,
   onClose,
   onCreated,
@@ -3211,6 +3348,8 @@ function FastOrderEntryDialog({
   textLanguage,
 }: {
   api: ApiClient;
+  /** Active Drivers, for the Driver column (assign now or later). */
+  drivers?: readonly OperationsDriver[];
   emirates: readonly Emirate[];
   onClose: () => void;
   /** Called once every filled row was created; the sheet then closes. */
@@ -3220,6 +3359,14 @@ function FastOrderEntryDialog({
 }) {
   const { i18n, t } = useTranslation();
   const locale = normalizeLocale(i18n.resolvedLanguage);
+  // Row errors in English and Arabic together, whatever the screen language.
+  const tEnglish = useMemo(() => i18n.getFixedT("en"), [i18n]);
+  const tArabic = useMemo(() => i18n.getFixedT("ar"), [i18n]);
+  const both = useCallback(
+    (key: string, options: Record<string, unknown> = {}) =>
+      `${String(tEnglish(key, options))}\n${String(tArabic(key, options))}`,
+    [tArabic, tEnglish],
+  );
   const emirateOptions = Array.isArray(emirates) ? emirates : [];
   const fastEntryTraderLabel = useCallback(
     (option: OperationsTraderOption) =>
@@ -3306,7 +3453,8 @@ function FastOrderEntryDialog({
                 row.status === "created" || change.status !== undefined
                   ? row.submissionKey
                   : createFastEntrySubmissionKey(),
-              status: row.status === "created" ? "created" : "draft",
+              status:
+                row.status === "created" || row.status === "excluded" ? row.status : "draft",
             }
           : row,
       ),
@@ -3350,7 +3498,8 @@ function FastOrderEntryDialog({
       const serialCounts = new Map<string, number>();
       const referenceCounts = new Map<string, number>();
       for (const row of targetRows) {
-        if (!rowHasFastEntryContent(row) || row.status === "created") continue;
+        if (!rowHasFastEntryContent(row) || row.status === "created" || row.status === "excluded")
+          continue;
         const serial = row.serialNumber.trim();
         if (serial !== "") serialCounts.set(serial, (serialCounts.get(serial) ?? 0) + 1);
         const reference = row.referenceNumber.trim();
@@ -3360,13 +3509,14 @@ function FastOrderEntryDialog({
 
       return Promise.all(
         targetRows.map(async (row): Promise<FastEntryRow> => {
-          if (!rowHasFastEntryContent(row) || row.status === "created") return row;
+          if (!rowHasFastEntryContent(row) || row.status === "created" || row.status === "excluded")
+            return row;
           const errors: string[] = [];
           const serial = row.serialNumber.trim();
           const reference = row.referenceNumber.trim();
           const cod = parseFastEntryMoney(row.codAmount, true);
-          const additionalFees = parseFastEntryMoney(row.additionalFees);
-          const serviceFee =
+          let additionalFees = parseFastEntryMoney(row.additionalFees);
+          let serviceFee =
             row.serviceFee.trim() === "" ? undefined : parseFastEntryMoney(row.serviceFee);
           const packages = parseNumericInput(row.packageCount, {
             allowZero: false,
@@ -3376,25 +3526,25 @@ function FastOrderEntryDialog({
 
           // A blank Serial is valid: the server assigns it when the row is created.
           if (serial !== "" && (serialCounts.get(serial) ?? 0) > 1)
-            errors.push(t("operations.fastEntryDuplicateSerial"));
+            errors.push(both("operations.fastEntryDuplicateSerial"));
           if (reference !== "" && (referenceCounts.get(reference) ?? 0) > 1)
-            errors.push(t("operations.fastEntryDuplicateReference"));
-          if (row.traderId === "") errors.push(t("operations.errors.traderRequired"));
+            errors.push(both("operations.fastEntryDuplicateReference"));
+          if (row.traderId === "") errors.push(both("operations.errors.traderRequired"));
           if (row.customerName.trim() === "")
-            errors.push(t("operations.errors.customerNameRequired"));
-          if (row.mobile.trim() === "") errors.push(t("operations.errors.mobileRequired"));
+            errors.push(both("operations.errors.customerNameRequired"));
+          if (row.mobile.trim() === "") errors.push(both("operations.errors.mobileRequired"));
           if (row.mobile.trim() !== "" && !isFastEntryMobileValid(row.mobile))
-            errors.push(t("operations.fastEntryMobileInvalid"));
-          if (row.emirateId === "") errors.push(t("areas.selectEmirate"));
-          if (row.areaId === "") errors.push(t("operations.errors.areaRequired"));
+            errors.push(both("operations.fastEntryMobileInvalid"));
+          if (row.emirateId === "") errors.push(both("areas.selectEmirate"));
+          if (row.areaId === "") errors.push(both("operations.errors.areaRequired"));
           // Address is optional here too, matching the Create Order dialog.
-          if (cod === undefined) errors.push(t("operations.errors.codInvalid"));
-          if (additionalFees === undefined) errors.push(t("operations.errors.additionalInvalid"));
+          if (cod === undefined) errors.push(both("operations.errors.codInvalid"));
+          if (additionalFees === undefined) errors.push(both("operations.errors.additionalInvalid"));
           if (serviceFee === undefined && row.serviceFee.trim() !== "")
-            errors.push(t("operations.errors.overrideFeeInvalid"));
+            errors.push(both("operations.errors.overrideFeeInvalid"));
           if (row.serviceFee.trim() !== "" && row.overrideReason.trim() === "")
-            errors.push(t("operations.errors.overrideReasonRequired"));
-          if (!packages.ok) errors.push(t("operations.errors.packagesInvalid"));
+            errors.push(both("operations.errors.overrideReasonRequired"));
+          if (!packages.ok) errors.push(both("operations.errors.packagesInvalid"));
 
           let customerOption: CustomerOption | undefined;
           if (errors.length === 0) {
@@ -3414,12 +3564,12 @@ function FastOrderEntryDialog({
                   normalizedAddress(customerOption.address) ===
                   normalizedAddress(row.customerAddress);
                 if (!sameArea || !sameAddress) {
-                  errors.push(t("operations.fastEntryExistingCustomerAddressMismatch"));
+                  errors.push(both("operations.fastEntryExistingCustomerAddressMismatch"));
                   customerOption = undefined;
                 }
               }
             } catch {
-              errors.push(t("operations.fastEntryValidationFailed"));
+              errors.push(both("operations.fastEntryValidationFailed"));
             }
           }
 
@@ -3433,25 +3583,76 @@ function FastOrderEntryDialog({
                 serialNumberAvailable: boolean;
               }>(`operations/orders/identifier-availability?${query.toString()}`);
               if (serial !== "" && !availability.serialNumberAvailable)
-                errors.push(t("operations.serialNumberExists"));
+                errors.push(both("operations.serialNumberExists"));
               if (!availability.referenceNumberAvailable)
-                errors.push(t("operations.referenceNumberExists"));
+                errors.push(both("operations.referenceNumberExists"));
             } catch {
-              errors.push(t("operations.fastEntryValidationFailed"));
+              errors.push(both("operations.fastEntryValidationFailed"));
             }
           }
 
           if (
             errors.length === 0 &&
+            row.pickup !== true &&
             row.traderId !== "" &&
             row.areaId !== "" &&
             cod !== undefined
           ) {
             try {
+              // Sheet fee split: the Trader's configured fee, and anything above
+              // it as Additional fees. A sheet fee below the configured one is
+              // used as the fee itself, with the reason filled in.
+              const sheetFee =
+                row.sheetServiceFee === "" ? undefined : parseFastEntryMoney(row.sheetServiceFee);
+              if (sheetFee !== undefined) {
+                const configured = await api.post<OperationsOrderQuote>("operations/orders/quote", {
+                  additionalFees: 0,
+                  areaId: row.areaId,
+                  codAmount: cod,
+                  paymentCondition: row.paymentCondition,
+                  traderId: row.traderId,
+                });
+                const configuredFee = Number(configured.serviceFee);
+                const money = (value: number) =>
+                  formatCurrency(value.toFixed(2), "AED", locale);
+                if (sheetFee >= configuredFee) {
+                  const extra = Math.round((sheetFee - configuredFee) * 100) / 100;
+                  additionalFees = extra;
+                  serviceFee = undefined;
+                  row = {
+                    ...row,
+                    additionalFees: extra.toFixed(2),
+                    feeNote:
+                      extra === 0
+                        ? undefined
+                        : t("operations.fastEntrySheetFeeSplit", {
+                            additional: money(extra),
+                            service: money(configuredFee),
+                            sheet: money(sheetFee),
+                          }),
+                    overrideReason: "",
+                    serviceFee: "",
+                  };
+                } else {
+                  additionalFees = 0;
+                  serviceFee = sheetFee;
+                  row = {
+                    ...row,
+                    additionalFees: "0.00",
+                    feeNote: t("operations.fastEntrySheetFeeLower", {
+                      service: money(configuredFee),
+                      sheet: money(sheetFee),
+                    }),
+                    overrideReason: t("operations.fastEntrySheetFeeReason"),
+                    serviceFee: sheetFee.toFixed(2),
+                  };
+                }
+              }
               const quote = await api.post<OperationsOrderQuote>("operations/orders/quote", {
                 additionalFees: additionalFees ?? 0,
                 areaId: row.areaId,
                 codAmount: cod,
+                paymentCondition: row.paymentCondition,
                 serviceFee,
                 serviceFeeOverrideReason:
                   row.serviceFee.trim() === "" ? undefined : row.overrideReason.trim(),
@@ -3462,21 +3663,129 @@ function FastOrderEntryDialog({
                 resolvedServiceFee: quote.serviceFee,
               };
             } catch (requestError) {
-              errors.push(resolveApiMessage(requestError, t("operations.quoteFailed")));
+              errors.push(resolveApiMessage(requestError, both("operations.quoteFailed")));
             }
           }
 
           return {
             ...row,
             customerOption,
-            message: errors.length === 0 ? t("operations.fastEntryReady") : errors.join(" "),
+            message: errors.length === 0 ? t("operations.fastEntryReady") : errors.join("\n"),
             status: errors.length === 0 ? "ready" : "error",
           };
         }),
       );
     },
-    [api, t],
+    [api, both, locale, t],
   );
+
+  const [sheetBusy, setSheetBusy] = useState(false);
+  const [addTraderFor, setAddTraderFor] = useState<string>();
+  const [addedTrader, setAddedTrader] = useState<{ code: string; id: string; name: string }>();
+  const sheetInputRef = useRef<HTMLInputElement>(null);
+
+  const loadSheet = async (file: File) => {
+    setSheetBusy(true);
+    setMessage(undefined);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const result = await api.postMultipart<FastEntrySheetPayload>(
+        "operations/orders/fast-entry/sheet",
+        form,
+      );
+      const loaded = result.rows.map((line) => fastEntryRowFromSheet(line));
+      setRows((current) => [
+        ...current.filter((row) => row.status === "created" || rowHasFastEntryContent(row)),
+        ...loaded,
+      ]);
+      setMessage(
+        t("operations.fastEntrySheetLoaded", {
+          errors: loaded.filter((row) => row.status === "error").length,
+          excluded: result.excludedLines,
+          file: file.name,
+          loaded: loaded.length - result.excludedLines,
+        }),
+      );
+    } catch (requestError) {
+      setMessage(resolveApiMessage(requestError, t("operations.fastEntrySheetReadFailed")));
+    } finally {
+      setSheetBusy(false);
+      if (sheetInputRef.current !== null) sheetInputRef.current.value = "";
+    }
+  };
+
+  const downloadTemplate = async (language: "ar" | "en") => {
+    try {
+      const blob = await api.getBinary(`operations/orders/fast-entry/template?language=${language}`);
+      downloadBlob(blob, language === "ar" ? "Fast-Entry-Template-AR.xlsx" : "Fast-Entry-Template-EN.xlsx");
+    } catch (requestError) {
+      setMessage(resolveApiMessage(requestError, t("operations.fastEntrySheetReadFailed")));
+    }
+  };
+
+  /**
+   * A choice made on one sheet row (Trader, Area) is applied to every other
+   * row whose sheet said the same and that has nothing chosen yet.
+   */
+  const applyToSameSheetText = (
+    row: FastEntryRow,
+    key: "sheetTraderName" | "sheetAreaText",
+    isOpen: (candidate: FastEntryRow) => boolean,
+    change: Partial<FastEntryRow>,
+  ) => {
+    updateRow(row.id, change);
+    const text = row[key].trim();
+    if (text === "") return;
+    setRows((current) =>
+      current.map((candidate) =>
+        candidate.id !== row.id &&
+        candidate[key].trim() === text &&
+        isOpen(candidate) &&
+        candidate.status !== "created" &&
+        candidate.status !== "excluded"
+          ? {
+              ...candidate,
+              ...change,
+              message: undefined,
+              resolvedServiceFee: "",
+              status: "draft",
+              submissionKey: createFastEntrySubmissionKey(),
+            }
+          : candidate,
+      ),
+    );
+  };
+
+  const applyAddedTrader = async (created: { code: string; id: string; name: string }) => {
+    const sheetName = addTraderFor;
+    setAddTraderFor(undefined);
+    setAddedTrader(undefined);
+    if (sheetName === undefined || created.id === "") return;
+    const page = await api.get<SearchPage<OperationsTraderOption>>(
+      `operations/traders/search?search=${encodeURIComponent(created.code)}&limit=10&offset=0`,
+    );
+    const option = page.items.find((item) => item.id === created.id) ?? page.items[0];
+    if (option === undefined) return;
+    setRows((current) =>
+      current.map((candidate) =>
+        candidate.sheetTraderName.trim() === sheetName &&
+        candidate.traderId === "" &&
+        candidate.status !== "created" &&
+        candidate.status !== "excluded"
+          ? {
+              ...candidate,
+              message: undefined,
+              resolvedServiceFee: "",
+              status: "draft",
+              submissionKey: createFastEntrySubmissionKey(),
+              traderId: option.id,
+              traderOption: option,
+            }
+          : candidate,
+      ),
+    );
+  };
 
   const createOrders = async () => {
     setBusy(true);
@@ -3489,12 +3798,14 @@ function FastOrderEntryDialog({
       const filledRows = rows.filter(
         (row) => row.status === "created" || rowHasFastEntryContent(row),
       );
-      const hasRowsToCreate = filledRows.some((row) => row.status !== "created");
+      const hasRowsToCreate = filledRows.some(
+        (row) => row.status !== "created" && row.status !== "excluded",
+      );
       const sourceRows = hasRowsToCreate ? filledRows : rows;
       if (sourceRows.length !== rows.length) setRows(sourceRows);
       const validated = await validateRows(sourceRows);
       const activeValidatedRows = validated.filter(
-        (row) => rowHasFastEntryContent(row) && row.status !== "created",
+        (row) => rowHasFastEntryContent(row) && row.status !== "created" && row.status !== "excluded",
       );
       const rowsWithErrors = activeValidatedRows.filter((row) => row.status === "error");
       if (activeValidatedRows.length === 0) {
@@ -3504,7 +3815,7 @@ function FastOrderEntryDialog({
       }
       if (rowsWithErrors.length > 0) {
         setRows(validated);
-        setMessage(t("operations.fastEntryFixRowsBeforeCreate", { count: rowsWithErrors.length }));
+        setMessage(both("operations.fastEntryFixRowsBeforeCreate", { count: rowsWithErrors.length }));
         return;
       }
       const nextRows = [...validated];
@@ -3544,25 +3855,27 @@ function FastOrderEntryDialog({
           const createdOrder = await api.post<OperationsOrder>(
             "operations/orders",
             {
-              additionalFees,
+              additionalFees: row.pickup === true ? 0 : additionalFees,
               areaId: row.areaId,
-              codAmount: cod,
+              codAmount: row.pickup === true ? 0 : cod,
+              ...(row.pickup === true ? { orderType: "collect_order" } : {}),
               customerAddressId: customerPayload.customerAddressId,
               customerAddress: row.customerAddress.trim(),
               customerId: customerPayload.customerId,
               customerMobileNumber: row.mobile.trim(),
               customerName: row.customerName.trim(),
-              customerSecondMobileNumber: undefined,
-              driverId: undefined,
+              customerSecondMobileNumber: row.secondMobile.trim() || undefined,
+              driverId: row.driverId === "" || row.pickup === true ? undefined : row.driverId,
               inlineCustomer: customerPayload.inlineCustomer,
               notes: row.notes.trim() || undefined,
               packageCount: packages.ok ? packages.value : 1,
+              paymentCondition: row.pickup === true ? undefined : row.paymentCondition,
               referenceNumber: row.referenceNumber.trim() || undefined,
               // Blank is sent as omitted: the server assigns the next Serial now.
               serialNumber: row.serialNumber.trim() === "" ? undefined : row.serialNumber.trim(),
-              serviceFee,
+              serviceFee: row.pickup === true ? undefined : serviceFee,
               serviceFeeOverrideReason:
-                row.serviceFee.trim() === "" ? undefined : row.overrideReason.trim(),
+                row.pickup === true || row.serviceFee.trim() === "" ? undefined : row.overrideReason.trim(),
               traderId: row.traderId,
             },
             {
@@ -3620,7 +3933,10 @@ function FastOrderEntryDialog({
 
   const readyRows = rows.filter((row) => row.status === "ready").length;
   const createdRows = rows.filter((row) => row.status === "created").length;
-  const activeRows = rows.filter((row) => rowHasFastEntryContent(row) && row.status !== "created");
+  const activeRows = rows.filter(
+    (row) => rowHasFastEntryContent(row) && row.status !== "created" && row.status !== "excluded",
+  );
+  const excludedRows = rows.filter((row) => row.status === "excluded").length;
 
   return (
     <Modal
@@ -3664,9 +3980,36 @@ function FastOrderEntryDialog({
             {t("operations.fastEntrySummary", {
               created: createdRows,
               ready: readyRows,
-              total: rows.length,
+              total: rows.length - excludedRows,
             })}
           </span>
+        </div>
+        <div className="fast-entry-toolbar fast-entry-sheet-toolbar">
+          <input
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            hidden
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file !== undefined) void loadSheet(file);
+            }}
+            ref={sheetInputRef}
+            type="file"
+          />
+          <button
+            className="button"
+            disabled={busy || sheetBusy}
+            onClick={() => sheetInputRef.current?.click()}
+            type="button"
+          >
+            {sheetBusy ? t("operations.fastEntryLoadingSheet") : t("operations.fastEntryLoadSheet")}
+          </button>
+          <span className="form-hint">{t("operations.fastEntryTemplate")}</span>
+          <button className="link-button" onClick={() => void downloadTemplate("ar")} type="button">
+            العربية
+          </button>
+          <button className="link-button" onClick={() => void downloadTemplate("en")} type="button">
+            English
+          </button>
         </div>
         <details className="fast-entry-paste">
           <summary>{t("operations.fastEntryPasteTitle")}</summary>
@@ -3698,22 +4041,84 @@ function FastOrderEntryDialog({
                 <th>{t("operations.areaField")}</th>
                 <th>{t("operations.customerAddress")}</th>
                 <th>{t("operations.codAmount")}</th>
+                <th>{t("operations.paymentCondition")}</th>
                 <th>{t("operations.serviceFee")}</th>
                 <th>{t("operations.additionalFees")}</th>
                 <th>{t("operations.packages")}</th>
                 <th>{t("operations.notes")}</th>
+                <th>{t("operations.driver")}</th>
                 <th>{t("common.actions")}</th>
               </tr>
             </thead>
             <tbody ref={fastEntryBodyRef}>
-              {rows.map((row, index) => (
+              {rows.map((row, index) => row.status === "excluded" ? (
+                <tr className="fast-entry-row-excluded" data-row-id={row.id} key={row.id}>
+                  <td>
+                    {index + 1}
+                    {row.sheetRow === undefined ? null : (
+                      <small className="fast-entry-sheet-row">
+                        {t("operations.fastEntrySheetRow", { row: row.sheetRow })}
+                      </small>
+                    )}
+                  </td>
+                  <td colSpan={15}>
+                    <strong>{t("operations.fastEntryExcluded", { reason: row.excludedReason })}</strong>
+                    <span className="fast-entry-excluded-detail">
+                      {[
+                        row.referenceNumber,
+                        row.sheetTraderName,
+                        row.customerName,
+                        row.mobile,
+                        row.sheetAreaText,
+                        row.codAmount === "" ? "" : formatCurrency(row.codAmount, "AED", locale),
+                        row.notes,
+                      ]
+                        .filter((part) => part.trim() !== "")
+                        .join(" · ")}
+                    </span>
+                  </td>
+                  <td>
+                    <button
+                      disabled={busy}
+                      onClick={() =>
+                        setRows((current) => current.filter((candidate) => candidate.id !== row.id))
+                      }
+                      type="button"
+                    >
+                      {t("common.remove")}
+                    </button>
+                  </td>
+                </tr>
+              ) : (
                 <tr
                   className={`fast-entry-row-${row.status}`}
                   data-row-id={row.id}
                   key={row.id}
                   onKeyDown={(event) => fastEntryKeyDown(event, index)}
                 >
-                  <td>{index + 1}</td>
+                  <td>
+                    {index + 1}
+                    {row.sheetRow === undefined ? null : (
+                      <small className="fast-entry-sheet-row">
+                        {t("operations.fastEntrySheetRow", { row: row.sheetRow })}
+                      </small>
+                    )}
+                    {row.pickup === true || row.sheetRow !== undefined ? (
+                      <label className="fast-entry-pickup">
+                        <input
+                          checked={row.pickup === true}
+                          onChange={(event) =>
+                            updateRow(row.id, {
+                              ...(event.target.checked ? { codAmount: "0.00", sheetServiceFee: "" } : {}),
+                              pickup: event.target.checked,
+                            })
+                          }
+                          type="checkbox"
+                        />
+                        {t("operations.fastEntryPickup")}
+                      </label>
+                    ) : null}
+                  </td>
                   <td>
                     <input
                       aria-label={t("operations.serialNumber")}
@@ -3730,7 +4135,12 @@ function FastOrderEntryDialog({
                       }
                     />
                   </td>
-                  <td data-fe="trader">
+                  <td
+                    className={
+                      row.traderId === "" && row.sheetTraderName.trim() !== "" ? "fast-entry-cell-missing" : undefined
+                    }
+                    data-fe="trader"
+                  >
                     <SearchCombobox<OperationsTraderOption>
                       api={api}
                       emptyText={t("operations.noTradersFound")}
@@ -3738,16 +4148,31 @@ function FastOrderEntryDialog({
                       getSelectedLabel={fastEntryTraderLabel}
                       label={t("operations.trader")}
                       onChange={(trader) =>
-                        updateRow(row.id, {
-                          traderId: trader?.id ?? "",
-                          traderOption: trader,
-                        })
+                        applyToSameSheetText(
+                          row,
+                          "sheetTraderName",
+                          (candidate) => candidate.traderId === "",
+                          { traderId: trader?.id ?? "", traderOption: trader },
+                        )
                       }
                       path="operations/traders/search"
                       placeholder={t("operations.searchTrader")}
                       selectOnTab
                       value={row.traderOption}
                     />
+                    {row.traderId === "" && row.sheetTraderName.trim() !== "" ? (
+                      <div className="fast-entry-sheet-hint">
+                        <small>{row.sheetTraderName}</small>
+                        <button
+                          className="link-button"
+                          disabled={busy}
+                          onClick={() => setAddTraderFor(row.sheetTraderName.trim())}
+                          type="button"
+                        >
+                          {t("operations.fastEntryAddTrader")}
+                        </button>
+                      </div>
+                    ) : null}
                   </td>
                   <td data-fe="customerName">
                     <input
@@ -3760,6 +4185,14 @@ function FastOrderEntryDialog({
                       value={row.mobile}
                       onChange={(event) => updateRow(row.id, { mobile: event.target.value })}
                     />
+                    {row.secondMobile === "" ? null : (
+                      <input
+                        aria-label={t("operations.secondMobile")}
+                        className="fast-entry-override-reason"
+                        value={row.secondMobile}
+                        onChange={(event) => updateRow(row.id, { secondMobile: event.target.value })}
+                      />
+                    )}
                   </td>
                   <td data-fe="emirate">
                     <select
@@ -3777,7 +4210,16 @@ function FastOrderEntryDialog({
                       ))}
                     </select>
                   </td>
-                  <td data-fe="area">
+                  <td
+                    className={
+                      row.areaId === "" && row.sheetAreaText.trim() !== ""
+                        ? "fast-entry-cell-missing"
+                        : row.areaNote === undefined
+                          ? undefined
+                          : "fast-entry-cell-check"
+                    }
+                    data-fe="area"
+                  >
                     <SearchCombobox<CompanyArea>
                       api={api}
                       emptyText={t("areas.noneFound")}
@@ -3788,11 +4230,17 @@ function FastOrderEntryDialog({
                       key={`${row.id}-${row.emirateId}`}
                       selectOnTab
                       onChange={(area) =>
-                        updateRow(row.id, {
-                          areaId: area?.id ?? "",
-                          areaOption: area,
-                          emirateId: area?.emirateId ?? row.emirateId,
-                        })
+                        applyToSameSheetText(
+                          row,
+                          "sheetAreaText",
+                          (candidate) => candidate.areaId === "",
+                          {
+                            areaId: area?.id ?? "",
+                            areaNote: undefined,
+                            areaOption: area,
+                            emirateId: area?.emirateId ?? row.emirateId,
+                          },
+                        )
                       }
                       path={
                         row.emirateId === ""
@@ -3802,6 +4250,14 @@ function FastOrderEntryDialog({
                       placeholder={t("operations.selectArea")}
                       value={row.areaOption}
                     />
+                    {row.areaId === "" && row.sheetAreaText.trim() !== "" ? (
+                      <div className="fast-entry-sheet-hint">
+                        <small>{row.sheetAreaText}</small>
+                      </div>
+                    ) : null}
+                    {row.areaId !== "" && row.areaNote !== undefined ? (
+                      <span className="fast-entry-row-note">{row.areaNote}</span>
+                    ) : null}
                   </td>
                   <td>
                     <input
@@ -3821,13 +4277,37 @@ function FastOrderEntryDialog({
                     />
                   </td>
                   <td>
+                    <select
+                      aria-label={t("operations.paymentCondition")}
+                      value={row.paymentCondition}
+                      onChange={(event) =>
+                        updateRow(row.id, {
+                          paymentCondition: event.target.value as FastEntryPaymentCondition,
+                        })
+                      }
+                    >
+                      <option value="customer_pays_cod_and_fee">
+                        {t("operations.paymentConditions.customer_pays_cod_and_fee")}
+                      </option>
+                      <option value="customer_pays_cod_trader_pays_fee">
+                        {t("operations.paymentConditions.customer_pays_cod_trader_pays_fee")}
+                      </option>
+                    </select>
+                  </td>
+                  <td>
                     <input
                       min="0"
                       placeholder={t("operations.fastEntryAutoFee")}
                       step="0.01"
                       type="number"
                       value={row.serviceFee || row.resolvedServiceFee}
-                      onChange={(event) => updateRow(row.id, { serviceFee: event.target.value })}
+                      onChange={(event) =>
+                        updateRow(row.id, {
+                          feeNote: undefined,
+                          serviceFee: event.target.value,
+                          sheetServiceFee: "",
+                        })
+                      }
                       title={
                         row.serviceFee.trim() === ""
                           ? t("operations.fastEntryAutoFeeHint")
@@ -3852,7 +4332,11 @@ function FastOrderEntryDialog({
                       type="number"
                       value={row.additionalFees}
                       onChange={(event) =>
-                        updateRow(row.id, { additionalFees: event.target.value })
+                        updateRow(row.id, {
+                          additionalFees: event.target.value,
+                          feeNote: undefined,
+                          sheetServiceFee: "",
+                        })
                       }
                     />
                   </td>
@@ -3871,10 +4355,47 @@ function FastOrderEntryDialog({
                       onChange={(event) => updateRow(row.id, { notes: event.target.value })}
                     />
                   </td>
+                  <td
+                    className={
+                      row.driverId === "" && row.driverName.trim() !== ""
+                        ? "fast-entry-driver fast-entry-cell-missing"
+                        : "fast-entry-driver"
+                    }
+                  >
+                    <select
+                      aria-label={t("operations.driver")}
+                      onChange={(event) => updateRow(row.id, { driverId: event.target.value })}
+                      value={row.driverId}
+                    >
+                      <option value="">{t("operations.fastEntryDriverLaterOption")}</option>
+                      {drivers.map((driver) => (
+                        <option key={driver.id} value={driver.id}>
+                          {driver.name}
+                        </option>
+                      ))}
+                    </select>
+                    {row.driverId === "" && row.driverName.trim() !== "" ? (
+                      <small className="fast-entry-sheet-hint">{row.driverName}</small>
+                    ) : null}
+                  </td>
                   <td>
                     {row.message === undefined ? null : (
                       <span className="fast-entry-row-message">{row.message}</span>
                     )}
+                    {row.feeNote === undefined ? null : (
+                      <span className="fast-entry-row-note">{row.feeNote}</span>
+                    )}
+                    {(() => {
+                      const short = fastEntryFeesAboveCod(row);
+                      return short === undefined ? null : (
+                        <span className="fast-entry-row-warning" role="note">
+                          {both("operations.fastEntryCodBelowFees", {
+                            cod: short.cod.toFixed(2),
+                            fees: short.fees.toFixed(2),
+                          })}
+                        </span>
+                      );
+                    })()}
                     <button
                       disabled={busy}
                       onClick={() =>
@@ -3894,10 +4415,11 @@ function FastOrderEntryDialog({
             </tbody>
             <tfoot>
               <tr>
-                <td colSpan={15}>
+                <td colSpan={17}>
                   {t("operations.fastEntryTotalCod", {
                     amount: formatCurrency(
                       rows
+                        .filter((row) => row.status !== "excluded")
                         .reduce((sum, row) => sum + (parseFastEntryMoney(row.codAmount) ?? 0), 0)
                         .toFixed(2),
                       "AED",
@@ -3910,6 +4432,33 @@ function FastOrderEntryDialog({
           </table>
         </div>
       </div>
+      {addTraderFor !== undefined && addedTrader === undefined ? (
+        <TraderForm
+          api={api}
+          initialName={addTraderFor}
+          onClose={() => setAddTraderFor(undefined)}
+          onSaved={(created) => {
+            if (created === undefined) return;
+            setAddedTrader({
+              code: String(created.code ?? ""),
+              id: String(created.id ?? ""),
+              name: String(created.name ?? created.nameEn ?? ""),
+            });
+          }}
+          primaryLabel={t("operations.nextSetPricing")}
+          title={t("operations.traderInformation")}
+        />
+      ) : null}
+      {addTraderFor !== undefined && addedTrader !== undefined ? (
+        <PricingDialog
+          api={api}
+          onClose={() => void applyAddedTrader(addedTrader)}
+          onSaved={() => void applyAddedTrader(addedTrader)}
+          primaryLabel={t("operations.savePricingAndUseTrader")}
+          title={t("operations.pricingSetup")}
+          trader={addedTrader}
+        />
+      ) : null}
     </Modal>
   );
 }

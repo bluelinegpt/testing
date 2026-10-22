@@ -2143,6 +2143,209 @@ describe("Fast Entry keeps only filled rows on Create", () => {
   });
 });
 
+describe("Fast Entry loads the daily Excel sheet", () => {
+  const area = {
+    code: "AR-1",
+    emirateCode: "SHJ",
+    emirateId: "emirate-shj",
+    emirateNameAr: "الشارقة",
+    emirateNameEn: "Sharjah",
+    id: "area-1",
+    isActive: true,
+    nameAr: "التعاون",
+    nameEn: "Al Taawun",
+    notes: null,
+    updatedAt: "2026-10-01",
+  };
+  const trader = { code: "TRD-1", id: "trader-1", mobileNumber: "0501111111", nameAr: null, nameEn: "Plaza" };
+  const line = (overrides: Record<string, unknown>) => ({
+    area,
+    codAmount: "0.00",
+    customerAddress: "ش التعاون",
+    customerName: "عميل",
+    driverId: null,
+    driverName: "",
+    emirateId: "emirate-shj",
+    errors: [],
+    excludedReason: null,
+    mobile: "0502222222",
+    notes: "",
+    packageCount: 1,
+    paymentCondition: "customer_pays_cod_and_fee",
+    referenceNumber: "17330",
+    secondMobile: "",
+    sheetRow: 3,
+    sheetServiceFee: "25.00",
+    sheetTraderName: "Plaza",
+    trader,
+    ...overrides,
+  });
+  const sheetApi = () => ({
+    get: vi.fn((path: string) => {
+      if (path.startsWith("operations/orders?")) {
+        return Promise.resolve({ filteredCount: 1, items: [order], page: 1, pageSize: 25, totalCount: 1 });
+      }
+      if (path.startsWith("configuration/customers/search")) return Promise.resolve({ items: [] });
+      if (path === "operations/drivers") {
+        return Promise.resolve([
+          { activeOrders: 0, code: "DRV-1", deliveredOrders: 0, id: "driver-1", mobileNumber: "", name: "مجدي", pendingCashOrders: 0, status: "active", type: "employee" },
+        ]);
+      }
+      if (path.startsWith("operations/orders/identifier-availability")) {
+        return Promise.resolve({ referenceNumberAvailable: true, serialNumberAvailable: true });
+      }
+      if (path.startsWith("configuration/areas")) {
+        return Promise.resolve({ items: [], page: 1, pageSize: 100, total: 0 });
+      }
+      return Promise.resolve([]);
+    }),
+    getBinary: vi.fn(),
+    post: vi.fn((...args: [path: string, body?: unknown, headers?: unknown]) =>
+      Promise.resolve(args[0] === "operations/orders/quote" ? { serviceFee: "16.00" } : { serialNumber: "501" }),
+    ),
+    postMultipart: vi.fn().mockResolvedValue({
+      excludedLines: 1,
+      rows: [
+        line({
+          codAmount: "0.00",
+          driverId: "driver-1",
+          driverName: "مجدي",
+          paymentCondition: "customer_pays_cod_trader_pays_fee",
+          secondMobile: "0503333333",
+        }),
+        line({
+          codAmount: "150.00",
+          excludedReason: { ar: "رجعت", en: "Returned" },
+          referenceNumber: "17331",
+          sheetRow: 4,
+        }),
+      ],
+      totalLines: 2,
+    }),
+  });
+
+  it("shows returned lines in red without creating them, and splits the sheet fee", async () => {
+    const api = sheetApi();
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Fast entry" }));
+    const dialog = await screen.findByRole("dialog", { name: /Fast order entry/ });
+    const input = dialog.querySelector<HTMLInputElement>('input[type="file"]')!;
+    fireEvent.change(input, { target: { files: [new File(["x"], "18-10-2026.xlsx")] } });
+
+    expect(await within(dialog).findByText(/Not loaded — Returned \/ رجعت/)).toBeInTheDocument();
+    expect(dialog.querySelector(".fast-entry-row-excluded")).not.toBeNull();
+    expect((within(dialog).getByLabelText("Driver") as HTMLSelectElement).value).toBe("driver-1");
+    expect((within(dialog).getByLabelText("Who pays?") as HTMLSelectElement).value).toBe(
+      "customer_pays_cod_trader_pays_fee",
+    );
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create orders" }));
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith("operations/orders", expect.anything(), expect.anything()),
+    );
+    const creates = api.post.mock.calls.filter(([path]) => path === "operations/orders");
+    expect(creates).toHaveLength(1);
+    expect(creates[0]![1]).toMatchObject({
+      additionalFees: 9,
+      codAmount: 0,
+      customerSecondMobileNumber: "0503333333",
+      driverId: "driver-1",
+      paymentCondition: "customer_pays_cod_trader_pays_fee",
+      referenceNumber: "17330",
+      serviceFee: undefined,
+      traderId: "trader-1",
+    });
+  });
+
+  it("marks what could not be matched in red and shows each error in English and Arabic", async () => {
+    const api = sheetApi();
+    api.postMultipart.mockResolvedValue({
+      excludedLines: 0,
+      rows: [
+        line({
+          area: null,
+          driverName: "خارج",
+          errors: [
+            { ar: "التاجر «New Shop» غير موجود — أضفه أو اختره", en: 'Trader "New Shop" not found — add or choose the Trader' },
+          ],
+          sheetTraderName: "New Shop",
+          trader: null,
+        }),
+      ],
+      totalLines: 1,
+    });
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Fast entry" }));
+    const dialog = await screen.findByRole("dialog", { name: /Fast order entry/ });
+    const input = dialog.querySelector<HTMLInputElement>('input[type="file"]')!;
+    fireEvent.change(input, { target: { files: [new File(["x"], "sheet.xlsx")] } });
+    const message = await within(dialog).findByText(/Trader "New Shop" not found/);
+    expect(message.textContent).toContain("التاجر «New Shop» غير موجود");
+    expect(dialog.querySelectorAll("td.fast-entry-cell-missing")).toHaveLength(3); // Trader, Area, Driver
+    expect(within(dialog).getByRole("button", { name: /Add Trader/ })).toBeInTheDocument();
+  });
+
+  it("creates a pickup line (احضار) as a Collect order with no COD, fee or Driver", async () => {
+    const api = sheetApi();
+    api.postMultipart.mockResolvedValue({
+      excludedLines: 0,
+      rows: [line({ codAmount: "0.00", driverId: "driver-1", notes: "احضار", paymentCondition: "customer_pays_cod_trader_pays_fee", pickup: true })],
+      totalLines: 1,
+    });
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Fast entry" }));
+    const dialog = await screen.findByRole("dialog", { name: /Fast order entry/ });
+    fireEvent.change(dialog.querySelector('input[type="file"]')!, { target: { files: [new File(["x"], "sheet.xlsx")] } });
+    expect(await within(dialog).findByLabelText(/Collect order/)).toBeChecked();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create orders" }));
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith("operations/orders", expect.anything(), expect.anything()),
+    );
+    const created = api.post.mock.calls.find(([path]) => path === "operations/orders")![1];
+    expect(created).toMatchObject({ additionalFees: 0, codAmount: 0, orderType: "collect_order" });
+    expect(created).toMatchObject({ driverId: undefined, paymentCondition: undefined, serviceFee: undefined });
+    expect(api.post.mock.calls.some(([path]) => path === "operations/orders/quote")).toBe(false);
+  });
+
+  it("warns when a Pay by Customer row's COD is below the fees", async () => {
+    const api = sheetApi();
+    api.postMultipart.mockResolvedValue({ excludedLines: 0, rows: [line({ codAmount: "10.00" })], totalLines: 1 });
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Fast entry" }));
+    const dialog = await screen.findByRole("dialog", { name: /Fast order entry/ });
+    const input = dialog.querySelector<HTMLInputElement>('input[type="file"]')!;
+    fireEvent.change(input, { target: { files: [new File(["x"], "sheet.xlsx")] } });
+    await within(dialog).findByText("Sheet row 3");
+    // The operator types the fee: 16, nothing additional, against COD 10.
+    fireEvent.change(dialog.querySelector('td input[placeholder="Auto"]')!, { target: { value: "16" } });
+    expect(await within(dialog).findByText(/Warning: COD .* is less than the fees/)).toBeInTheDocument();
+  });
+});
+
 describe("Cancellation type (internal, fixed list)", () => {
   const listApi = (items: readonly unknown[]) => ({
     get: vi.fn((path: string) => {

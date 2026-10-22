@@ -48,6 +48,7 @@ import { TraderReturnedItemsService } from "./trader-returned-items.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
 import { WhatsAppOutboxWriter } from "../whatsapp/whatsapp-outbox-writer.service.js";
 import { OperationsService } from "./operations.service.js";
+import { FastEntrySheetService } from "./fast-entry-sheet.service.js";
 import { OrdersWorkflowService } from "./orders-workflow.service.js";
 import { OrderDeliveryReopenService } from "./order-delivery-reopen.service.js";
 import { PublicTrackingService } from "./public-tracking.service.js";
@@ -106,6 +107,7 @@ import { CompanyOrderHealthService } from "./company-order-health.service.js";
     OperationsHistoryWriter,
     WhatsAppOutboxWriter,
     OperationsService,
+    FastEntrySheetService,
     OrdersWorkflowService,
     // Orders question box. The AI is behind a class token so tests swap in a fake.
     OrderQuestionAskService,

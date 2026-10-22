@@ -631,6 +631,7 @@ export function TraderDetailWorkspace({
 export function TraderForm({
   api,
   detail,
+  initialName,
   onClose,
   onSaved,
   primaryLabel,
@@ -638,6 +639,8 @@ export function TraderForm({
 }: {
   api: ApiClient;
   detail?: Detail;
+  /** Pre-fills the Name of a new Trader (e.g. the name on a Fast Entry sheet). */
+  initialName?: string;
   onClose: () => void;
   onSaved: (created?: Record<string, unknown>) => void;
   primaryLabel?: string;
@@ -767,7 +770,7 @@ export function TraderForm({
         <div className="form-grid">
           <label className="field required-field">
             <span>{t("common.name")}</span>
-            <input autoFocus defaultValue={detail?.name} name="name" required />
+            <input autoFocus defaultValue={detail?.name ?? initialName} name="name" required />
           </label>
           <div className="field-group">
             <label className="field">
