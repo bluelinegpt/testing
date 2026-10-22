@@ -354,7 +354,7 @@ export interface OpenTraderCredit {
   readonly sourceReferenceNumber: string | null;
 }
 
-interface TraderSettlementSummaryTotals {
+export interface TraderSettlementSummaryTotals {
   readonly amountPaidNow: string;
   readonly grossOrderPayable: string;
   readonly netPayment: string;
@@ -483,6 +483,45 @@ export interface TraderSettlementDraftListRow extends TraderSettlementDraft {
  * `audit_events` exactly as they already exist — no duplicate settlement,
  * payment, allocation or bank-account model.
  */
+/**
+ * Merges the zero-payable "Pay by Customer" Orders into an invoice's lines
+ * (Aiman, 22 Oct 2026): same Reference order as the settled lines, and their
+ * COD, fees and count added to the summary. Amount paid never changes -- each
+ * merged line pays 0.00.
+ */
+export function mergeZeroDueLines(
+  settled: { readonly lines: readonly TraderSettlementDetailOrder[]; readonly summary: TraderSettlementSummaryTotals },
+  zeroLines: readonly TraderSettlementDetailOrder[],
+): { readonly lines: readonly TraderSettlementDetailOrder[]; readonly summary: TraderSettlementSummaryTotals } {
+  if (zeroLines.length === 0) return settled;
+  const referenceKey = (line: TraderSettlementDetailOrder) => {
+    const digits = (line.referenceNumber ?? "").replace(/[^0-9]/g, "");
+    return digits === "" ? Number.POSITIVE_INFINITY : Number(digits);
+  };
+  const lines = [...settled.lines, ...zeroLines].sort(
+    (a, b) =>
+      referenceKey(a) - referenceKey(b) ||
+      (a.referenceNumber ?? "").localeCompare(b.referenceNumber ?? "") ||
+      a.serialNumber.localeCompare(b.serialNumber),
+  );
+  const sum = (pick: (line: TraderSettlementDetailOrder) => string) =>
+    zeroLines.reduce((total, line) => total.plus(pick(line)), new Decimal(0));
+  return {
+    lines,
+    summary: {
+      ...settled.summary,
+      orderCount: settled.summary.orderCount + zeroLines.length,
+      totalAdditionalFees: new Decimal(settled.summary.totalAdditionalFees)
+        .plus(sum((line) => line.additionalFees))
+        .toFixed(2),
+      totalCod: new Decimal(settled.summary.totalCod).plus(sum((line) => line.codAmount)).toFixed(2),
+      totalServiceFees: new Decimal(settled.summary.totalServiceFees)
+        .plus(sum((line) => line.serviceFee))
+        .toFixed(2),
+    },
+  };
+}
+
 @Injectable()
 export class TraderSettlementService {
   public constructor(
@@ -2650,7 +2689,8 @@ export class TraderSettlementService {
     this.assertAnyPermission(["settlements.create", "reports.export"]);
     const { companyId } = this.tenants.current();
     const header = await this.settlementHeader(companyId, settlementId);
-    const orders = await this.settlementOrders(companyId, settlementId);
+    const settled = await this.settlementOrders(companyId, settlementId);
+    const orders = await this.withZeroDueOrders(companyId, settlementId, settled);
     const receivableOffsets = await this.settlementReceivableOffsets(companyId, settlementId);
     const creditApplications = await this.settlementCreditApplications(companyId, settlementId);
     const branding = await this.companyProfile.branding();
@@ -2712,6 +2752,113 @@ export class TraderSettlementService {
         creditApplications,
       ),
     };
+  }
+
+  /**
+   * The Trader Invoice also lists the Trader's delivered "Pay by Customer"
+   * Orders that pay him nothing -- COD at or below the fee, e.g. ref 4980:
+   * COD 15, fee 16, paid 0 (Aiman, 22 Oct 2026). They never enter a
+   * Settlement (nothing to pay), so without this the Trader never saw them.
+   * Display only: Amount Paid Now is 0.00 and no money moves.
+   *
+   * Each such Order prints once: on the first effective Settlement of that
+   * Trader created after it was delivered -- delivered after the previous
+   * effective Settlement and no later than this one. A reversal entry lists
+   * none.
+   */
+  private async withZeroDueOrders(
+    companyId: string,
+    settlementId: string,
+    settled: { readonly lines: readonly TraderSettlementDetailOrder[]; readonly summary: TraderSettlementSummaryTotals },
+  ): Promise<{ readonly lines: readonly TraderSettlementDetailOrder[]; readonly summary: TraderSettlementSummaryTotals }> {
+    const rows = (
+      await sql<{
+        additionalFees: string;
+        areaName: string;
+        areaNameAr: string | null;
+        codAmount: string;
+        customerMobileNumber: string;
+        customerName: string;
+        deliveryDate: string | null;
+        emirateName: string | null;
+        emirateNameAr: string | null;
+        orderNumber: string;
+        orderSettlementStatus: string;
+        orderType: "collect_order" | "delivery" | "gcc_international";
+        referenceNumber: string | null;
+        serialNumber: string;
+        serviceFee: string;
+        totalDeductions: string;
+        vatAmount: string;
+      }>`
+        with cur as (
+          select s.id, s.company_id, s.trader_id, s.created_at
+            from trader_settlements s
+           where s.company_id = ${companyId}::uuid and s.id = ${settlementId}::uuid
+             and s.reversal_of_id is null
+        ), prev as (
+          select max(p.created_at) as created_at
+            from trader_settlements p, cur
+           where p.company_id = cur.company_id and p.trader_id = cur.trader_id
+             and p.status = 'confirmed' and p.reversal_of_id is null
+             and p.created_at < cur.created_at
+             and not exists (select 1 from trader_settlements rv
+                  where rv.company_id = p.company_id and rv.reversal_of_id = p.id)
+        )
+        select o.order_number as "orderNumber", o.order_type as "orderType",
+               coalesce(o.serial_number, o.order_number) as "serialNumber",
+               o.reference_number as "referenceNumber", o.delivered_at::text as "deliveryDate",
+               o.customer_name as "customerName", o.customer_mobile_number as "customerMobileNumber",
+               e.name_en as "emirateName", e.name_ar as "emirateNameAr",
+               coalesce(o.customer_area_name_snapshot, a.name_en, '') as "areaName", a.name_ar as "areaNameAr",
+               o.cod_amount::text as "codAmount", o.service_fee::text as "serviceFee",
+               coalesce(o.additional_fees, 0)::text as "additionalFees",
+               coalesce(o.vat_amount, 0)::text as "vatAmount",
+               coalesce(o.total_deductions, 0)::text as "totalDeductions",
+               o.trader_settlement_status as "orderSettlementStatus"
+          from cur
+          cross join prev
+          join orders o on o.company_id = cur.company_id and o.trader_id = cur.trader_id
+          left join areas a on a.id = o.area_id and a.company_id = o.company_id
+          left join emirates e on e.id = a.emirate_id
+         where o.payment_condition = 'customer_pays_cod_and_fee'
+           and o.order_type <> 'collect_order'
+           and o.delivery_status in ('delivered', 'closed')
+           and o.trader_net_payable = 0
+           and o.delivered_at is not null
+           and o.delivered_at <= cur.created_at
+           and (prev.created_at is null or o.delivered_at > prev.created_at)
+           and not exists (select 1 from trader_settlement_orders l
+                where l.company_id = o.company_id and l.order_id = o.id)
+      `.execute(this.database)
+    ).rows;
+    if (rows.length === 0) return settled;
+    const zeroLines: TraderSettlementDetailOrder[] = rows.map((row) => ({
+      additionalFees: new Decimal(row.additionalFees).toFixed(2),
+      amountPaidNow: "0.00",
+      areaName: row.areaName,
+      areaNameAr: row.areaNameAr,
+      codAmount: new Decimal(row.codAmount).toFixed(2),
+      customerMobileNumber: row.customerMobileNumber,
+      customerName: row.customerName,
+      deliveryDate: row.deliveryDate,
+      emirateName: row.emirateName,
+      emirateNameAr: row.emirateNameAr,
+      orderNumber: row.orderNumber,
+      orderSettlementStatus: row.orderSettlementStatus,
+      orderType: row.orderType,
+      originalTraderPayable: "0.00",
+      paidBeforeThisPayment: "0.00",
+      previouslyPaid: "0.00",
+      referenceNumber: row.referenceNumber,
+      remainingAfterThisPayment: "0.00",
+      remainingOutstanding: "0.00",
+      serialNumber: row.serialNumber,
+      serviceFee: new Decimal(row.serviceFee).toFixed(2),
+      totalDeductions: new Decimal(row.totalDeductions).toFixed(2),
+      vatAmount: new Decimal(row.vatAmount).toFixed(2),
+    }));
+    return mergeZeroDueLines(settled, zeroLines);
   }
 
   /**
