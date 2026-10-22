@@ -1020,7 +1020,12 @@ function errorText(reason: unknown, fallback: string): string {
 
 /** Whether this Company uses the one-screen settlement flow (per Company switch). */
 export function useOneScreenSettlement(api: ApiClient): boolean {
-  const [enabled, setEnabled] = useState(false);
+  return useOneScreenSettlementSetting(api) === true;
+}
+
+/** The same switch, `undefined` until it has loaded (so a deep link can wait for it). */
+export function useOneScreenSettlementSetting(api: ApiClient): boolean | undefined {
+  const [enabled, setEnabled] = useState<boolean>();
   useEffect(() => {
     let active = true;
     // Promise.resolve: a test double may answer with nothing at all.

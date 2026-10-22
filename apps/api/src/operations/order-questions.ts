@@ -84,9 +84,15 @@ const predicates: Readonly<Record<OrderQuestionKey, RawBuilder<boolean>>> = {
      and o.assigned_driver_id is not null
      and o.order_type <> 'gcc_international')
   `,
+  /* Not asked in one-screen settlement Companies (CMP-000001, 22 Oct 2026):
+     there posting the Settlement is the last step, no receipt is confirmed. */
   confirm_trader_receipt: sql<boolean>`
     (o.delivery_status in ('delivered', 'closed')
-     and o.trader_settlement_status = 'money_sent_to_trader')
+     and o.trader_settlement_status = 'money_sent_to_trader'
+     and not coalesce((
+       select (to_jsonb(question_company) ->> 'settlement_one_screen_enabled')::boolean
+         from companies question_company
+        where question_company.id = o.company_id), false))
   `,
   no_driver: sql<boolean>`
     (o.delivery_status in ('new', 'in_branch')

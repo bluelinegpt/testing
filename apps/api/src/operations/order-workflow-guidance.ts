@@ -152,6 +152,12 @@ export interface OrderWorkflowInput {
   readonly traderReceivableOutstanding?: string | null;
   readonly traderReceivableStatus?: string | null;
   readonly traderSettlementStatus: string;
+  /**
+   * One-screen settlement Companies (CMP-000001, Aiman 22 Oct 2026) have no
+   * "Money Received by Trader" step: posting the Settlement finishes the
+   * Trader leg, so "money sent" is treated as complete here.
+   */
+  readonly traderReceiptNotRequired?: boolean;
 }
 
 /** Delivery states that end the Order without a delivery outcome. */
@@ -185,8 +191,13 @@ export function deriveOrderWorkflowGuidance(input: OrderWorkflowInput): OrderWor
     traderReceivableId = null,
     traderReceivableOutstanding = null,
     traderReceivableStatus = null,
-    traderSettlementStatus: storedTraderSettlementStatus,
+    traderSettlementStatus: rawTraderSettlementStatus,
+    traderReceiptNotRequired = false,
   } = input;
+  const storedTraderSettlementStatus =
+    traderReceiptNotRequired && rawTraderSettlementStatus === "money_sent_to_trader"
+      ? "money_received_by_trader"
+      : rawTraderSettlementStatus;
   const explicitFreeNoValue =
     isFreeOrder === true &&
     Number(customerAmountDue ?? Number.NaN) === 0 &&

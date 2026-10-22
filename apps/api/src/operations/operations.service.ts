@@ -1652,6 +1652,14 @@ export class OperationsService {
        returns -- no extra query, no join, no per-row lookup. See
        `order-workflow-guidance.ts`; the four persisted statuses stay
        authoritative and nothing here is written back. */
+    // One-screen settlement Companies have no "Money Received" step (one row).
+    const traderReceiptNotRequired =
+      (
+        await sql<{ enabled: boolean | null }>`
+          select (to_jsonb(c) ->> 'settlement_one_screen_enabled')::boolean as enabled
+            from companies c where c.id = ${companyId}::uuid
+        `.execute(this.database)
+      ).rows[0]?.enabled === true;
     const items = result.rows.map((row) => ({
       ...row,
       ...(deliveryBusinessDates === undefined
@@ -1682,6 +1690,7 @@ export class OperationsService {
         traderReceivableOutstanding: row.traderReceivableOutstanding ?? null,
         traderReceivableStatus: row.traderReceivableStatus ?? null,
         traderSettlementStatus: row.traderSettlementStatus,
+        traderReceiptNotRequired,
       }),
     }));
     return {

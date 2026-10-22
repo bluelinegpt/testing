@@ -156,6 +156,18 @@ describe("the money chain after delivery", () => {
     expect(guidance.isFinanciallyComplete).toBe(false);
   });
 
+  it("never asks a one-screen settlement Company to confirm receipt: posting was the last step", () => {
+    const guidance = derive({
+      confirmableSettlementCount: 1,
+      confirmableSettlementId: "settlement-1",
+      driverReconciliationStatus: "reconciled",
+      traderReceiptNotRequired: true,
+      traderSettlementStatus: "money_sent_to_trader",
+    });
+    expect(guidance.workflowState).not.toBe("awaiting_trader_receipt_confirmation");
+    expect(guidance.nextActionCode).not.toBe("confirm_trader_received");
+  });
+
   it("skips Driver collection entirely when there was no cash to collect", () => {
     // A prepaid or zero-COD Order: `not_applicable` is not "done", it is
     // "never applied", and the chain must move straight to settlement.

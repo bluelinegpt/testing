@@ -37,7 +37,7 @@ import { useIdempotencyKey } from "./useIdempotencyKey.js";
 import {
   OneScreenSettlementDialog,
   UnpostSettlementDialog,
-  useOneScreenSettlement,
+  useOneScreenSettlementSetting,
 } from "./OneScreenSettlementDialog.js";
 
 // ---- Server response shapes (mirror trader-settlement.service.ts). ----
@@ -578,12 +578,26 @@ export function TraderSettlementsWorkspace({
     list.setFilters(patch);
   };
 
+  // One-screen settlement (per Company switch): Draft -> Preview -> Post,
+  // no Money Received step. `undefined` while the switch is loading.
+  const oneScreenSetting = useOneScreenSettlementSetting(api);
+  const oneScreen = oneScreenSetting === true;
+
   useEffect(() => {
     const link = deepLink.link;
     if (link === null || link.dialog !== "confirm_receipt") return;
     // Already resolved (dialog opened or notice shown): a list refresh must
     // not replay the instruction.
     if (resolvedReceiptLink.current === link) return;
+    // Wait for the Company's settlement switch before deciding anything.
+    if (oneScreenSetting === undefined) return;
+    // One-screen Companies have no Money Received step (CMP-000001, 22 Oct
+    // 2026): posting the Settlement was the last step. Never open the dialog.
+    if (oneScreenSetting) {
+      resolvedReceiptLink.current = link;
+      setReceiptNotice(t("traderSettlements.oneScreen.receiptNotRequired"));
+      return;
+    }
 
     /* Ambiguous: the backend found more than one confirmable settlement and
        deliberately emitted no id. Guessing one would confirm receipt of a
@@ -623,7 +637,7 @@ export function TraderSettlementsWorkspace({
     setReceiptNotice(undefined);
     // Opens the EXISTING dialog. Nothing is written by opening it.
     setReceiptTarget(target);
-  }, [canManage, deepLink, listPage, t]);
+  }, [canManage, deepLink, listPage, oneScreenSetting, t]);
 
   useEffect(() => {
     const link = deepLink.link;
@@ -650,9 +664,6 @@ export function TraderSettlementsWorkspace({
   const pdf = useReconciliationPdfActions(api);
   const [pdfError, setPdfError] = useState<string>();
   const [pdfBusyId, setPdfBusyId] = useState<string>();
-  // One-screen settlement (per Company switch): Draft -> Preview -> Post,
-  // Un-post & adjust, and no Money Received step.
-  const oneScreen = useOneScreenSettlement(api);
   const [unpostTarget, setUnpostTarget] = useState<{ id: string; number: string }>();
   const openUnpostedDraft = (result: { draftId: string; notice: string }) => {
     setUnpostTarget(undefined);
@@ -1120,7 +1131,8 @@ export function TraderSettlementsWorkspace({
                         </button>
                       </>
                     )}
-                    {oneScreen || row.status === "reversed" || row.moneyReceivedConfirmed ? null : (
+                    {/* Hidden until the switch has loaded, so it never flashes for one-screen Companies. */}
+                    {oneScreenSetting !== false || row.status === "reversed" || row.moneyReceivedConfirmed ? null : (
                       <button onClick={() => setReceiptTarget(row)} type="button">
                         {t("traderSettlements.actionConfirmMoneyReceived")}
                       </button>
@@ -1285,7 +1297,7 @@ export function TraderSettlementsWorkspace({
         />
       )}
 
-      {receiptTarget === undefined ? null : (
+      {receiptTarget === undefined || oneScreen ? null : (
         <MoneyReceivedDialog
           api={api}
           onClose={() => {
@@ -4510,7 +4522,8 @@ export function SettlementDetailDialog({
   settlementId: string;
 }) {
   const { t } = useTranslation();
-  const oneScreen = useOneScreenSettlement(api);
+  const oneScreenSetting = useOneScreenSettlementSetting(api);
+  const oneScreen = oneScreenSetting === true;
   const [unpostOpen, setUnpostOpen] = useState(false);
   const [detail, setDetail] = useState<TraderSettlementDetail>();
   const [error, setError] = useState<string>();
@@ -4886,7 +4899,7 @@ export function SettlementDetailDialog({
                 </button>
               </>
             )}
-            {oneScreen || detail.status === "reversed" || moneyReceivedConfirmed ? null : (
+            {oneScreenSetting !== false || detail.status === "reversed" || moneyReceivedConfirmed ? null : (
               <button onClick={() => setReceiptOpen(true)} type="button">
                 {t("traderSettlements.actionConfirmMoneyReceived")}
               </button>

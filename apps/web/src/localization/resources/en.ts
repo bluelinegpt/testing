@@ -4558,6 +4558,7 @@ export const englishTranslations = {
       totalPay: "To pay Trader (+)",
       totalZero: "Printed at 0.00",
       traderOwes: "The fees are more than the orders: the Trader owes {{amount}}. Untick some fees, or use Collect from Trader.",
+      receiptNotRequired: "Not required for this company: posting the settlement is the last step, no Money Received confirmation is needed.",
       type: "Type",
       unpost: "Un-post & adjust",
       unpostDone: "{{number}} un-posted (reversal {{reversal}}). Its lines are now a draft: adjust and post again.",
