@@ -924,7 +924,7 @@ export class CompanyOrderHealthService {
                  as ever_enabled
       ),
       scoped as (
-        select o.id, o.order_number, o.order_date, o.delivery_status, o.payment_condition,
+        select o.id, o.company_id, o.order_number, o.order_date, o.delivery_status, o.payment_condition,
                o.cod_amount, o.service_fee, o.additional_fees, o.is_free_order,
                o.trader_net_payable, o.delivered_at, o.updated_at,
                o.financial_model_version, o.vat_enabled_snapshot, o.vat_price_mode_snapshot,
