@@ -18,7 +18,7 @@ import {
 
 import { CompanyProfileService } from "../company-profile/company-profile.service.js";
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
-import { traderMayOweFeeSql } from "./cod-shortfall.js";
+import { receivableCollectableNowSql } from "./cod-shortfall.js";
 import { effectiveSettlement } from "./effective-settlement-offsets.js";
 import {
   correlatedReceivableInputs,
@@ -68,6 +68,13 @@ const eligibleReceivableStatuses = ["outstanding", "partially_collected"] as con
  */
 const receivableCollectableNow = sql<boolean>`(
   r.source_type <> 'service_charge'
+  -- A Service Charge added by hand belongs to no Order: collectable at once
+  -- (RCV-000007, 22 Oct 2026).
+  or not exists (
+    select 1 from orders charge_order
+     where charge_order.company_id = r.company_id
+       and charge_order.order_number = r.source_reference
+  )
   or exists (
     select 1 from orders collectable_order
      where collectable_order.company_id = r.company_id
@@ -950,17 +957,7 @@ export class TraderReceivableService {
         and (${query.businessDateTo ?? null}::date is null
              or r.business_date <= ${query.businessDateTo ?? null}::date)
         and (${query.outstandingOnly === true} = false or r.outstanding_amount > 0)
-        and (
-          r.source_type <> 'service_charge'
-          or ${query.includeUndelivered === true}
-          or exists (
-            select 1 from orders delivered_order
-             where delivered_order.company_id = r.company_id
-               and delivered_order.order_number = r.source_reference
-               and delivered_order.delivered_at is not null
-               and ${traderMayOweFeeSql("delivered_order")}
-          )
-        )
+        and (${query.includeUndelivered === true} or ${receivableCollectableNowSql("r")})
         -- Emirate / Area / Driver of the Receivable's own Order, so the
         -- Settlement wizard can narrow fee deductions by the same filters it
         -- narrows Orders by. ord is LEFT joined, so a Receivable with no Order

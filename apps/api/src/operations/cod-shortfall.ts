@@ -38,6 +38,32 @@ export function codShortfallEnabledSql(alias: string): RawBuilder<boolean> {
 }
 
 /**
+ * The Trader receivable aliased `alias` can be collected or deducted now.
+ *
+ * A service charge that belongs to an Order waits until that Order is
+ * delivered (and its fee is the Trader's). A service charge added by hand
+ * (Add Charge to Trader) belongs to no Order -- no source reference, or one
+ * that is not an Order Number -- and is collectable at once. Before this, the
+ * delivered-Order test hid every manual Service Charge from settlements
+ * (RCV-000007, CMP-000001, 22 Oct 2026). Any other source type is always
+ * collectable.
+ */
+export function receivableCollectableNowSql(alias: string): RawBuilder<boolean> {
+  const column = (name: string) => sql.ref(`${alias}.${name}`);
+  return sql<boolean>`(${column("source_type")} <> 'service_charge'
+    or not exists (
+      select 1 from orders fee_order
+       where fee_order.company_id = ${column("company_id")}
+         and fee_order.order_number = ${column("source_reference")})
+    or exists (
+      select 1 from orders delivered_order
+       where delivered_order.company_id = ${column("company_id")}
+         and delivered_order.order_number = ${column("source_reference")}
+         and delivered_order.delivered_at is not null
+         and ${traderMayOweFeeSql("delivered_order")}))`;
+}
+
+/**
  * The Order aliased `alias` is one whose fee the Trader may owe: "Pay by
  * Trader", or "Pay by Customer" with a COD above 0 under the switch (whether a
  * shortfall remains is the amount's business: greatest(fees - COD, 0)).

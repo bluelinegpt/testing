@@ -22,7 +22,12 @@ import {
 import { CompanyProfileService } from "../company-profile/company-profile.service.js";
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
 import { TraderReceivableService } from "./trader-receivable.service.js";
-import { codShortfallEnabledSql, traderMayOweFeeSql, traderPaysCodShortfall } from "./cod-shortfall.js";
+import {
+  codShortfallEnabledSql,
+  receivableCollectableNowSql,
+  traderMayOweFeeSql,
+  traderPaysCodShortfall,
+} from "./cod-shortfall.js";
 import { restoredDeliveryStatus, reversalInvalidatesClose } from "./order-close-eligibility.js";
 import { expectedReceivableStatus } from "./trader-receivable-reconciliation.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
@@ -1350,14 +1355,7 @@ export class TraderSettlementService {
                         Orders, but a page left open while an Order is reopened
                         would still post a fee that is no longer earned, so the
                         same test is repeated here where the money moves. */
-                     (source_type <> 'service_charge'
-                        or exists (
-                          select 1 from orders earned_order
-                           where earned_order.company_id = trader_receivables.company_id
-                             and earned_order.order_number = trader_receivables.source_reference
-                             and earned_order.delivered_at is not null
-                             and ${traderMayOweFeeSql("earned_order")}
-                        )) as "deliveryEarned"
+                     ${receivableCollectableNowSql("trader_receivables")} as "deliveryEarned"
                 from trader_receivables
                where company_id=${companyId}::uuid
                  and id in (${sql.join(receivableIds.map((id) => sql`${id}::uuid`))})
@@ -3323,12 +3321,7 @@ export class TraderSettlementService {
          where r.company_id = ${companyId}::uuid
            and r.status in ('outstanding', 'partially_collected')
            and r.outstanding_amount > 0
-           and (r.source_type <> 'service_charge' or exists (
-                select 1 from orders delivered_order
-                 where delivered_order.company_id = r.company_id
-                   and delivered_order.order_number = r.source_reference
-                   and delivered_order.delivered_at is not null
-                   and ${traderMayOweFeeSql("delivered_order")}))
+           and ${receivableCollectableNowSql("r")}
          group by r.trader_id
       ), credit as (
         select c.trader_id, sum(c.remaining_amount) as amount, count(*)::int as n
