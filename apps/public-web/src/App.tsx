@@ -121,6 +121,23 @@ export function isDynamicContentRoute(pathname: string): boolean {
   return /^\/[^/]+$/.test(path) && !Object.hasOwn(routeMetadata.en, path);
 }
 
+export function publicLanguageDestination(pathname: string, next: Locale, alternate?: string): string {
+  if (alternate) {
+    try {
+      const url = new URL(alternate);
+      if (url.origin === "https://tawseelhub.com" && localeFromPublicPath(url.pathname) === next) return url.pathname;
+    } catch {
+      // Invalid metadata must not break the language switch.
+    }
+  }
+  const path = stripPublicLocale(pathname).replace(/\/+$/, "") || "/";
+  // Only published translations have alternate links. Never invent a guide URL.
+  const fallback = path.startsWith("/blog/") ? "/blog"
+    : /^\/resources\/[^/]+/.test(path) ? "/resources"
+      : isDynamicContentRoute(path) ? "/delivery-companies" : path;
+  return localizePublicPath(fallback, next);
+}
+
 const CmsContext = createContext<{
   cms: WebsiteCmsBundle | null;
   locale: Locale;
@@ -258,16 +275,7 @@ function AppLayout() {
     const alternate = document.head.querySelector<HTMLLinkElement>(
       `link[rel="alternate"][hreflang="${next}"]`,
     )?.href;
-    const safeFallback = path.startsWith("/blog/")
-      ? "/blog"
-      : /^\/resources\/[^/]+/.test(path)
-        ? "/resources"
-        : path;
-    navigate(
-      alternate
-        ? `${new URL(alternate).pathname}${location.search}`
-        : localizePublicPath(safeFallback, next),
-    );
+    navigate(`${publicLanguageDestination(location.pathname, next, alternate)}${location.search}`);
   };
   useEffect(() => setLocaleState(localeFromPublicPath(location.pathname)), [location.pathname]);
   useEffect(() => {

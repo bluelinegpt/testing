@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isDynamicContentRoute, routeDefinitions } from "./App";
+import { isDynamicContentRoute, publicLanguageDestination, routeDefinitions } from "./App";
 import { routeMetadata } from "./public-localization";
 
 describe("public website route foundation", () => {
@@ -56,5 +56,31 @@ describe("public website route foundation", () => {
     const rendered = JSON.stringify(routeMetadata.ar);
     expect(rendered).toContain("Tawseelhub");
     expect(rendered).not.toContain("توصيل هب");
+  });
+});
+
+
+describe("language switch destinations", () => {
+  it("does not invent Arabic translations for the eight software pages", () => {
+    for (const slug of ["delivery-management-software-uae", "courier-management-software-uae",
+      "delivery-driver-management-software", "cod-management-system-uae",
+      "delivery-company-software-dubai", "last-mile-delivery-software-uae",
+      "courier-company-management-system", "logistics-software-uae"]) {
+      expect(publicLanguageDestination(`/${slug}`, "ar")).toBe("/ar/delivery-companies");
+    }
+    expect(publicLanguageDestination("/guides/software", "ar")).toBe("/ar/delivery-companies");
+  });
+  it("uses published translated slugs and keeps static and collection destinations", () => {
+    expect(publicLanguageDestination("/software", "ar", "https://tawseelhub.com/ar/translated-software")).toBe("/ar/translated-software");
+    expect(publicLanguageDestination("/ar/translated-software", "en", "https://tawseelhub.com/software")).toBe("/software");
+    expect(publicLanguageDestination("/ar/pricing", "en")).toBe("/pricing");
+    expect(publicLanguageDestination("/delivery-companies", "ar")).toBe("/ar/delivery-companies");
+    expect(publicLanguageDestination("/blog/article", "ar")).toBe("/ar/blog");
+    expect(publicLanguageDestination("/resources/article", "ar")).toBe("/ar/resources");
+  });
+  it("ignores malformed, external and wrong-language alternates", () => {
+    for (const alternate of ["invalid", "https://example.com/ar/software", "https://tawseelhub.com/software"]) {
+      expect(publicLanguageDestination("/software", "ar", alternate)).toBe("/ar/delivery-companies");
+    }
   });
 });
