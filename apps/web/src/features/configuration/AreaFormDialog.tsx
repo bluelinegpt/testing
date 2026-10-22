@@ -88,12 +88,18 @@ export function AreaFormDialog({
     setSaving(true);
     setError(undefined);
     try {
-      const payload = {
-        emirateId,
-        nameAr: nameAr.trim(),
-        nameEn: trimmed,
-        notes: notes.trim(),
-      };
+      // An empty Arabic name or note is LEFT OUT when adding an Area: the server
+      // refuses an empty string there ("notes must be longer than or equal to
+      // 1 characters") and stores nothing for a missing one anyway. Editing
+      // still sends "" so a value can be cleared.
+      const payload = editing
+        ? { emirateId, nameAr: nameAr.trim(), nameEn: trimmed, notes: notes.trim() }
+        : {
+            emirateId,
+            nameEn: trimmed,
+            ...(nameAr.trim() === "" ? {} : { nameAr: nameAr.trim() }),
+            ...(notes.trim() === "" ? {} : { notes: notes.trim() }),
+          };
       const saved = editing
         ? await api.patch<CompanyArea>(`configuration/areas/${area.id}`, payload)
         : await api.post<CompanyArea>("configuration/areas", payload);

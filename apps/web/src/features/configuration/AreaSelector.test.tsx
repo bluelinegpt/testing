@@ -232,11 +232,10 @@ describe("AreaSelector", () => {
 
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(created));
     // The Emirate was prefilled from the selector, not re-chosen by the user.
+    // Empty optional fields are left out: the server refuses "" for them.
     expect(api.post).toHaveBeenCalledWith("configuration/areas", {
       emirateId: dubaiId,
-      nameAr: "",
       nameEn: "Al Barsha",
-      notes: "",
     });
     // The parent's own field is untouched.
     expect(screen.getByLabelText("Address")).toHaveValue("Villa 12");

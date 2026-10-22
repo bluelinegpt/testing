@@ -83,11 +83,10 @@ describe("AreaFormDialog", () => {
 
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith(savedArea));
     // The Area Code is generated server-side and must never be sent.
+    // Empty optional fields are left out: the server refuses "" for them.
     expect(api.post).toHaveBeenCalledWith("configuration/areas", {
       emirateId: dubaiId,
-      nameAr: "",
       nameEn: "Jumeirah",
-      notes: "",
     });
     expect(screen.queryByLabelText("Area Code")).not.toBeInTheDocument();
   });
