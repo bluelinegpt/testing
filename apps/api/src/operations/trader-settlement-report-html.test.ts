@@ -517,6 +517,17 @@ describe("buildTraderSettlementStatementHtml", () => {
     expect(summary).toContain('<bdi dir="ltr">111.00</bdi>');
     expect(summary).toContain('<bdi dir="ltr">30.00</bdi>');
     expect(summary).toContain('<bdi dir="ltr">81.00</bdi>');
+    // The Trader owes: the net prints as the amount collected from him.
+    const owes = buildTraderSettlementStatementHtml(
+      { ...shortfall, summary: { ...shortfall.summary, netPayment: "-20.00" } },
+      "en",
+    );
+    expect(owes).toContain("Amount Collected from Trader");
+    expect(owes).not.toContain(">Amount Paid Now</span>");
+    expect(buildTraderSettlementStatementHtml(
+      { ...shortfall, summary: { ...shortfall.summary, netPayment: "-20.00" } },
+      "ar",
+    )).toContain("المبلغ المحصّل من التاجر");
     // Without the switch the row keeps the existing layout.
     const plain = buildTraderSettlementStatementHtml({ ...shortfall, header: sample.header }, "en");
     expect(plain).toContain('<bdi dir="ltr">110.00</bdi>');

@@ -1432,6 +1432,22 @@ export class TraderReceivableService {
     reason: string,
     correlationId: string,
   ): Promise<ReverseTraderCollectionResult> {
+    return this.transactions.execute((transaction) =>
+      this.reverseCollectionInTransaction(transaction, collectionId, reason, correlationId),
+    );
+  }
+
+  /**
+   * `reverseCollection` inside a caller-owned transaction -- the one-screen
+   * settlement's Un-post reverses its Collection and Settlement together.
+   * Unchanged otherwise: same permission, checks and writes.
+   */
+  public async reverseCollectionInTransaction(
+    transaction: Transaction<DatabaseSchema>,
+    collectionId: string,
+    reason: string,
+    correlationId: string,
+  ): Promise<ReverseTraderCollectionResult> {
     this.assertAnyPermission("trader_receivables.reverse");
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
@@ -1443,7 +1459,7 @@ export class TraderReceivableService {
         HttpStatus.BAD_REQUEST,
       );
     }
-    return this.transactions.execute(async (transaction) => {
+    {
       const collection = (
         await sql<{ collectionNumber: string; status: string; traderId: string }>`
           select collection_number as "collectionNumber", status, trader_id as "traderId"
@@ -1586,7 +1602,7 @@ export class TraderReceivableService {
         restoredAmount: this.money(restoredAmount).toFixed(2),
         traderId: collection.traderId,
       };
-    });
+    }
   }
 
   /**

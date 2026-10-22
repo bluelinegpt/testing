@@ -1441,9 +1441,15 @@ export class CreateTraderSettlementDto {
   @IsUUID()
   public readonly traderId!: string;
 
+  /**
+   * The net: payment to the Trader, or -- in a one-screen DRAFT only -- a
+   * negative amount the Trader owes (fees above the orders, Aiman 22 Oct
+   * 2026). A Settlement itself still pays only a positive amount: the service
+   * refuses anything else (`settlement_amount_not_positive`).
+   */
   @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })
   @Max(9999999999999.99)
-  @Min(0.01)
+  @Min(-9999999999999.99)
   public readonly amount!: number;
 
   @IsArray()

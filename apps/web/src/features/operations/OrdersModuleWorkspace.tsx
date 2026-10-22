@@ -89,6 +89,7 @@ import { DriverCollectionDetailDialog } from "./DriverCollectionsWorkspace.js";
 import { openOrderWaybill, OrderBarcode } from "./OperationsWorkspace.js";
 import { type PdfAction, useReconciliationPdfActions } from "./reconciliation-pdf.js";
 import { SettlementDetailDialog } from "./TraderSettlementsWorkspace.js";
+import { useOneScreenSettlement } from "./OneScreenSettlementDialog.js";
 import {
   hasOrdersListState,
   ordersListStateStorageKey,
@@ -1312,6 +1313,7 @@ export function OrdersModuleWorkspace({
   const canUpdateStatus = isAdministrator || permissions.includes("orders.update_delivery_status");
   const canReconcile = isAdministrator || permissions.includes("reconciliations.create");
   const canSettle = isAdministrator || permissions.includes("settlements.create");
+  const oneScreenSettlement = useOneScreenSettlement(api);
   const canAsk = permissions.some((permission) => orderAskPermissions.includes(permission));
   /* The question box and favourites live on the AI tab only. */
   const aiTab = filters.quickView === "ai" && ordersAiEnabled && canAsk;
@@ -1561,7 +1563,11 @@ export function OrdersModuleWorkspace({
     if (filters.question === "trader_owes_fees") {
       return {
         label: t("operations.questions.groupAction.collectFees"),
-        path: `/trader-receivables?collectTraderId=${traderId}&returnTo=${back}`,
+        // One-screen settlement Companies (CMP-000001, 22 Oct 2026) collect
+        // fees on the Trader Settlement, not on Collect Money from Trader.
+        path: oneScreenSettlement
+          ? `/trader-settlements?openDialog=new_settlement&traderId=${traderId}&returnTo=${back}`
+          : `/trader-receivables?collectTraderId=${traderId}&returnTo=${back}`,
       };
     }
     return null;
@@ -2781,10 +2787,13 @@ export function OrdersModuleWorkspace({
                       <button
                         onClick={() =>
                           onNavigate(
-                            selectedTraderReceivableId !== undefined &&
-                              selectedTraderReceivableId !== null
-                              ? `/trader-receivables?collectReceivableId=${encodeURIComponent(selectedTraderReceivableId)}&returnTo=%2Forders`
-                              : `/trader-receivables?collectTraderId=${encodeURIComponent(String(traderReceivableTraderId))}&returnTo=%2Forders`,
+                            // One-screen settlement Companies collect fees on the Trader Settlement.
+                            oneScreenSettlement
+                              ? `/trader-settlements?openDialog=new_settlement&traderId=${encodeURIComponent(String(traderReceivableTraderId))}&returnTo=%2Forders`
+                              : selectedTraderReceivableId !== undefined &&
+                                  selectedTraderReceivableId !== null
+                                ? `/trader-receivables?collectReceivableId=${encodeURIComponent(selectedTraderReceivableId)}&returnTo=%2Forders`
+                                : `/trader-receivables?collectTraderId=${encodeURIComponent(String(traderReceivableTraderId))}&returnTo=%2Forders`,
                           )
                         }
                         type="button"

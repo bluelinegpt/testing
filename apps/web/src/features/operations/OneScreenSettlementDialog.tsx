@@ -175,7 +175,11 @@ export function OneScreenSettlementDialog({
   initialTraderId?: string | undefined;
   onClose: () => void;
   onDraftSaved: (traderName: string) => void;
-  onPosted: (settlementId: string) => void;
+  /**
+   * After Post. `settlementId` is null when only a collection from the Trader
+   * was recorded (fees, no orders); `notice` then says what was collected.
+   */
+  onPosted: (result: { readonly notice?: string; readonly settlementId: string | null }) => void;
   reportLanguage: "ar" | "en";
 }) {
   const { t } = useTranslation();
@@ -486,8 +490,23 @@ export function OneScreenSettlementDialog({
       ? cashAccountId !== ""
       : bankAccountId !== "" && traderBankAccountId !== "" && bankReference.trim() !== "";
   const hasPayLine = ticked.some((line) => line.kind === "pay");
+  const hasFeeLine = ticked.some((line) => line.kind === "fee");
+  // The Trader owes (fees above orders + credits): Post collects it from him
+  // (Aiman, 22 Oct 2026). Orders ticked alongside are paid in the same post,
+  // so their payment details are still needed; without any, only the
+  // Company side of the money is.
+  const traderOwes = totals.net < 0 && hasFeeLine;
+  const owesPaymentReady =
+    paymentMethod === "cash"
+      ? !hasPayLine || cashAccountId !== ""
+      : bankAccountId !== "" && bankReference.trim() !== "" && (!hasPayLine || traderBankAccountId !== "");
   const canPost =
-    traderId !== "" && hasPayLine && totals.net > 0 && amountErrors.length === 0 && paymentReady && !busy;
+    traderId !== "" &&
+    amountErrors.length === 0 &&
+    !busy &&
+    (traderOwes ? owesPaymentReady : hasPayLine && totals.net > 0 && paymentReady);
+  const canPreview =
+    traderId !== "" && !busy && amountErrors.length === 0 && (hasPayLine || hasFeeLine) && totals.net !== 0;
 
   const payload = () => ({
     allocations: ticked
@@ -563,12 +582,12 @@ export function OneScreenSettlementDialog({
 
   const post = async () => {
     if (!canPost) return;
+    const traderName = trader?.name ?? draft?.traderName ?? "";
     if (
       !window.confirm(
-        t("traderSettlements.oneScreen.postConfirm", {
-          amount: money(totals.net),
-          trader: trader?.name ?? draft?.traderName ?? "",
-        }),
+        traderOwes
+          ? t("traderSettlements.oneScreen.collectConfirm", { amount: money(-totals.net), trader: traderName })
+          : t("traderSettlements.oneScreen.postConfirm", { amount: money(totals.net), trader: traderName }),
       )
     ) {
       return;
@@ -577,10 +596,23 @@ export function OneScreenSettlementDialog({
     setError(undefined);
     try {
       const saved = await persist();
-      const result = await api.post<{ settlementId: string }>(
-        `operations/settlements/drafts/${saved.id}/confirm`,
-      );
-      onPosted(result.settlementId);
+      const result = await api.post<{
+        amountCollected?: string;
+        collectionNumber?: string;
+        settlementId: string | null;
+      }>(`operations/settlements/drafts/${saved.id}/confirm`);
+      onPosted({
+        ...(result.collectionNumber === undefined
+          ? {}
+          : {
+              notice: t("traderSettlements.oneScreen.collectedNotice", {
+                amount: money(result.amountCollected ?? -totals.net),
+                number: result.collectionNumber,
+                trader: traderName,
+              }),
+            }),
+        settlementId: result.settlementId,
+      });
     } catch (reason) {
       setError(errorText(reason, t("traderSettlements.settlementFailed")));
     } finally {
@@ -897,14 +929,22 @@ export function OneScreenSettlementDialog({
           )}
         </div>
         <div className="one-total one-total--net">
-          <span>{t("traderSettlements.oneScreen.net")}</span>
-          <strong>{money(totals.net)}</strong>
+          <span>
+            {totals.net < 0 ? t("traderSettlements.oneScreen.traderPaysUs") : t("traderSettlements.oneScreen.net")}
+          </span>
+          <strong>{money(Math.abs(totals.net))}</strong>
           <small>{t("traderSettlements.oneScreen.linesTicked", { count: ticked.length })}</small>
         </div>
       </div>
       {totals.net < 0 ? (
-        <div className="alert alert-warning" role="alert">
-          {t("traderSettlements.oneScreen.traderOwes", { amount: money(-totals.net) })}
+        <div className="alert alert-info" role="note">
+          {hasPayLine
+            ? t("traderSettlements.oneScreen.traderOwesWithOrders", {
+                amount: money(-totals.net),
+                fees: money(totals.fee),
+                orders: money(totals.pay + totals.credit),
+              })
+            : t("traderSettlements.oneScreen.traderOwes", { amount: money(-totals.net) })}
         </div>
       ) : null}
       {amountErrors.length === 0 ? null : (
@@ -955,17 +995,20 @@ export function OneScreenSettlementDialog({
                 ))}
               </select>
             </label>
-            <label className="field">
-              <span>{t("traderSettlements.beneficiaryBankAccount")}</span>
-              <select onChange={(event) => setTraderBankAccountId(event.target.value)} value={traderBankAccountId}>
-                <option value="">{t("traderSettlements.oneScreen.choose")}</option>
-                {traderBanks.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.bankName} — {account.accountName}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {/* Only when money goes TO the Trader: a pure collection from him has no beneficiary. */}
+            {traderOwes && !hasPayLine ? null : (
+              <label className="field">
+                <span>{t("traderSettlements.beneficiaryBankAccount")}</span>
+                <select onChange={(event) => setTraderBankAccountId(event.target.value)} value={traderBankAccountId}>
+                  <option value="">{t("traderSettlements.oneScreen.choose")}</option>
+                  {traderBanks.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.bankName} — {account.accountName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <label className="field">
               <span>{t("traderSettlements.bankReference")}</span>
               <input onChange={(event) => setBankReference(event.target.value)} value={bankReference} />
@@ -984,7 +1027,7 @@ export function OneScreenSettlementDialog({
         </button>
         <button
           className="button button-secondary"
-          disabled={busy || !hasPayLine || totals.net <= 0 || amountErrors.length > 0}
+          disabled={!canPreview}
           onClick={() => void previewInvoice()}
           type="button"
         >
@@ -999,7 +1042,9 @@ export function OneScreenSettlementDialog({
           {t("traderSettlements.saveDraft")}
         </button>
         <button className="button button-primary" disabled={!canPost} onClick={() => void post()} type="button">
-          {t("traderSettlements.oneScreen.post", { amount: money(totals.net) })}
+          {traderOwes
+            ? t("traderSettlements.oneScreen.collect", { amount: money(-totals.net) })
+            : t("traderSettlements.oneScreen.post", { amount: money(totals.net) })}
         </button>
       </div>
       </>
@@ -1048,12 +1093,15 @@ export function UnpostSettlementDialog({
   api,
   onClose,
   onUnposted,
+  path,
   settlementId,
   settlementNumber,
 }: {
   api: ApiClient;
   onClose: () => void;
   onUnposted: (result: { draftId: string; notice: string }) => void;
+  /** Endpoint to call; defaults to the settlement's. A posted collection draft passes its own. */
+  path?: string;
   settlementId: string;
   settlementNumber: string;
 }) {
@@ -1070,7 +1118,7 @@ export function UnpostSettlementDialog({
     setError(undefined);
     try {
       const result = await api.post<{ draftId: string; reversalSettlementNumber: string; settlementNumber: string }>(
-        `operations/settlements/payments/${settlementId}/unpost`,
+        path ?? `operations/settlements/payments/${settlementId}/unpost`,
         { reason: reason.trim() },
       );
       onUnposted({

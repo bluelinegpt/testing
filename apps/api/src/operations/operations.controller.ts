@@ -105,6 +105,7 @@ import {
 import {
   TraderSettlementService,
   type CreateTraderSettlementResult,
+  type TraderOwesDraftResult,
   type Page as TraderSettlementPage,
   type TraderAllocationProposal,
   type TraderEligibleOrderRow,
@@ -1609,8 +1610,23 @@ export class OperationsController {
   public confirmTraderSettlementDraft(
     @Param("draftId", new ParseUUIDPipe()) draftId: string,
     @Req() request: Request,
-  ): Promise<CreateTraderSettlementResult> {
+  ): Promise<CreateTraderSettlementResult | TraderOwesDraftResult> {
     return this.traderSettlementService.confirmDraft(draftId, this.correlationId(request));
+  }
+
+  @RequireAnyPermission("settlements.reverse", "users_roles.manage")
+  @ApiOperation({ summary: "Un-post a posted collection from the Trader (one-screen settlement) and reopen it as a draft" })
+  @Post("settlements/drafts/:draftId/unpost")
+  public unpostTraderSettlementDraft(
+    @Param("draftId", new ParseUUIDPipe()) draftId: string,
+    @Body() input: ReverseTraderSettlementDto,
+    @Req() request: Request,
+  ): Promise<{
+    readonly draftId: string;
+    readonly reversalSettlementNumber: string;
+    readonly settlementNumber: string;
+  }> {
+    return this.traderSettlementService.unpostDraft(draftId, input.reason, this.correlationId(request));
   }
 
   @RequireAnyPermission("settlements.create", "reports.export", "users_roles.manage")

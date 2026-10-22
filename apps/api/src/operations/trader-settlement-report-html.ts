@@ -16,6 +16,8 @@ export type ReportLanguage = "en" | "ar";
 interface Labels {
   readonly additionalFees: string;
   readonly amountPaidNow: string;
+  /** The net when the Trader owes (fees above the orders): money received from him. */
+  readonly amountCollectedFromTrader: string;
   readonly traderCreditsPaidBack: string;
   readonly area: string;
   readonly beneficiaryBank: string;
@@ -89,6 +91,7 @@ const LABELS: Record<ReportLanguage, Labels> = {
   ar: {
     additionalFees: "رسوم إضافية",
     amountPaidNow: "المبلغ المدفوع الآن",
+    amountCollectedFromTrader: "المبلغ المحصّل من التاجر",
     traderCreditsPaidBack: "أرصدة دائنة للتاجر مدفوعة",
     area: "المنطقة",
     beneficiaryBank: "حساب التاجر المستفيد",
@@ -160,6 +163,7 @@ const LABELS: Record<ReportLanguage, Labels> = {
   en: {
     additionalFees: "Additional Fees",
     amountPaidNow: "Amount Paid Now",
+    amountCollectedFromTrader: "Amount Collected from Trader",
     traderCreditsPaidBack: "Trader Credits paid back",
     area: "Area",
     beneficiaryBank: "Trader Beneficiary Bank",
@@ -672,7 +676,10 @@ export function buildTraderSettlementStatementHtml(
     (showFullColumns && totalPaidBefore.gt(0)
       ? summaryLine(labels.previouslyPaid, money(totalPaidBefore.toFixed(2)))
       : "") +
-    summaryLine(labels.amountPaidNow, money(data.summary.netPayment)) +
+    // The Trader owes (one-screen, 22 Oct 2026): the net is what he paid us.
+    (new Decimal(data.summary.netPayment).lessThan(0)
+      ? summaryLine(labels.amountCollectedFromTrader, money(new Decimal(data.summary.netPayment).negated().toFixed(2)))
+      : summaryLine(labels.amountPaidNow, money(data.summary.netPayment))) +
     (showFullColumns && totalRemainingAfter.gt(0)
       ? summaryLine(labels.remainingOutstanding, money(totalRemainingAfter.toFixed(2)))
       : "") +

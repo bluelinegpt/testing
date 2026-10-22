@@ -7,7 +7,7 @@ import { OneScreenSettlementDialog } from "./OneScreenSettlementDialog.js";
 
 const page = <T,>(items: readonly T[]) => ({ items, page: 1, pageSize: 200, total: items.length });
 
-function setup() {
+function setup(options: { readonly feesOnly?: boolean } = {}) {
   const posts: { body: unknown; path: string }[] = [];
   const api = {
     get: vi.fn((path: string) => {
@@ -22,6 +22,7 @@ function setup() {
       if (path === "configuration/bank-accounts") return Promise.resolve([]);
       if (path.startsWith("configuration/traders/")) return Promise.resolve([]);
       if (path.startsWith("operations/settlements/payments/eligible-orders")) {
+        if (options.feesOnly === true) return Promise.resolve(page([]));
         return Promise.resolve(
           page([
             { additionalFees: "0.00", areaName: "Deira", codAmount: "300.00", customerMobileNumber: "0501", customerName: "Customer A", deliveryDate: "2026-10-21", emirateName: "Dubai", id: "order-1", orderNumber: "ORD-001", outstandingBalance: "279.00", referenceNumber: "5183", totalDeductions: "21.00" },
@@ -43,6 +44,7 @@ function setup() {
         ]);
       }
       if (path.startsWith("operations/settlements/payments/zero-due-orders")) {
+        if (options.feesOnly === true) return Promise.resolve([]);
         return Promise.resolve([
           { additionalFees: "0.00", areaName: "Al Aahad", codAmount: "15.00", customerMobileNumber: "0503", customerName: "Customer C", deliveryDate: "2026-10-21", emirateName: "Dubai", id: "zero-1", orderNumber: "ORD-001377", printedOnSettlementNumber: "SET-000155", referenceNumber: "04980", serviceFee: "16.00" },
         ]);
@@ -56,7 +58,13 @@ function setup() {
       if (path === "operations/settlements/drafts") {
         return Promise.resolve({ id: "draft-1", payload: body, status: "draft", traderId: "trader-1", traderName: "ARMAN ABYA" });
       }
-      if (path.endsWith("/confirm")) return Promise.resolve({ settlementId: "settlement-9" });
+      if (path.endsWith("/confirm")) {
+        return Promise.resolve(
+          options.feesOnly === true
+            ? { amountCollected: "25.00", collectionNumber: "TCL-000009", settlementId: null }
+            : { settlementId: "settlement-9" },
+        );
+      }
       return Promise.resolve({});
     }),
     postBinary: vi.fn(),
@@ -120,7 +128,7 @@ describe("One-screen Trader Settlement", () => {
     fireEvent.click(dialog.getByRole("checkbox", { name: "Include 04980" }));
     vi.spyOn(window, "confirm").mockReturnValue(true);
     fireEvent.click(dialog.getByRole("button", { name: /Post payment/ }));
-    await waitFor(() => expect(onPosted).toHaveBeenCalledWith("settlement-9"));
+    await waitFor(() => expect(onPosted).toHaveBeenCalledWith({ settlementId: "settlement-9" }));
     const draft = posts.find((call) => call.path === "operations/settlements/drafts")!.body as Record<string, unknown>;
     expect(draft).toMatchObject({
       allocations: [
@@ -156,5 +164,30 @@ describe("One-screen Trader Settlement", () => {
       { amount: 100, orderId: "order-1" },
       { amount: 84, orderId: "order-2" },
     ]);
+  });
+
+  it("collects from the Trader when there are only fees: Collect button, negative draft, collection posted", async () => {
+    const { onPosted, posts } = setup({ feesOnly: true });
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.click(await dialog.findByRole("button", { name: "ARMAN ABYA (TRD-1)" }));
+    await waitFor(() => expect(dialog.getByRole("checkbox", { name: "Include 5000" })).toBeChecked());
+    expect(dialog.getByRole("status").textContent).toContain("Trader pays us");
+    const collect = dialog.getByRole("button", { name: "Collect 25.00 from Trader" });
+    expect(collect).toBeEnabled();
+    expect(dialog.getByRole("button", { name: /Preview invoice/ })).toBeEnabled();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    fireEvent.click(collect);
+    await waitFor(() =>
+      expect(onPosted).toHaveBeenCalledWith({
+        notice: expect.stringContaining("TCL-000009"),
+        settlementId: null,
+      }),
+    );
+    const draft = posts.find((call) => call.path === "operations/settlements/drafts")!.body as Record<string, unknown>;
+    expect(draft).toMatchObject({
+      allocations: [],
+      amount: -25,
+      receivableOffsets: [{ amount: 25, receivableId: "rcv-1" }],
+    });
   });
 });

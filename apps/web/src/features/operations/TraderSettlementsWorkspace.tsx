@@ -200,6 +200,10 @@ interface TraderSettlementDraftRow {
   readonly payload: TraderSettlementDraftPayload;
   readonly status: "draft" | "confirmed";
   readonly confirmedSettlementId: string | null;
+  /** Posted as a collection from the Trader (he owed): its number, and whether it was un-posted. */
+  readonly confirmedCollectionId?: string | null;
+  readonly confirmedCollectionNumber?: string | null;
+  readonly confirmedCollectionReversed?: boolean | null;
   readonly amount: string;
   readonly orderCount: number;
   readonly createdAt: string;
@@ -664,7 +668,7 @@ export function TraderSettlementsWorkspace({
   const pdf = useReconciliationPdfActions(api);
   const [pdfError, setPdfError] = useState<string>();
   const [pdfBusyId, setPdfBusyId] = useState<string>();
-  const [unpostTarget, setUnpostTarget] = useState<{ id: string; number: string }>();
+  const [unpostTarget, setUnpostTarget] = useState<{ id: string; number: string; path?: string }>();
   const openUnpostedDraft = (result: { draftId: string; notice: string }) => {
     setUnpostTarget(undefined);
     setReceiptNotice(result.notice);
@@ -682,9 +686,16 @@ export function TraderSettlementsWorkspace({
     if (failure !== undefined) setDraftError(message(failure, t("traderSettlements.pdfGenerationFailed")));
   };
   const postDraft = async (draft: TraderSettlementDraftRow) => {
+    // A negative draft: the Trader owes, and posting collects it from him.
+    const owes = safeMoneyValue(draft.amount) < 0;
     if (
       !window.confirm(
-        t("traderSettlements.oneScreen.postConfirm", { amount: money(draft.amount), trader: draft.traderName }),
+        owes
+          ? t("traderSettlements.oneScreen.collectConfirm", {
+              amount: money(-safeMoneyValue(draft.amount)),
+              trader: draft.traderName,
+            })
+          : t("traderSettlements.oneScreen.postConfirm", { amount: money(draft.amount), trader: draft.traderName }),
       )
     ) {
       return;
@@ -692,11 +703,23 @@ export function TraderSettlementsWorkspace({
     setDraftBusyId(draft.id);
     setDraftError(undefined);
     try {
-      const result = await api.post<{ settlementId: string }>(
-        `operations/settlements/drafts/${draft.id}/confirm`,
-      );
+      const result = await api.post<{
+        amountCollected?: string;
+        collectionNumber?: string;
+        settlementId: string | null;
+      }>(`operations/settlements/drafts/${draft.id}/confirm`);
+      if (result.collectionNumber !== undefined) {
+        setReceiptNotice(
+          t("traderSettlements.oneScreen.collectedNotice", {
+            amount: money(result.amountCollected ?? -safeMoneyValue(draft.amount)),
+            number: result.collectionNumber,
+            trader: draft.traderName,
+          }),
+        );
+      }
       refresh();
-      openDetail(result.settlementId);
+      if (result.settlementId !== null) openDetail(result.settlementId);
+      else setShowConfirmedDrafts(true);
     } catch (error) {
       setDraftError(message(error, t("traderSettlements.oneScreen.postDraftFailed")));
     } finally {
@@ -944,7 +967,11 @@ export function TraderSettlementsWorkspace({
                   <tr key={draft.id}>
                     <td className="settlement-drafts__trader">{draft.traderName}</td>
                     <td className="settlement-drafts__numeric settlement-drafts__amount">
-                      {money(draft.amount)}
+                      {safeMoneyValue(draft.amount) < 0
+                        ? t("traderSettlements.oneScreen.traderOwesShort", {
+                            amount: money(-safeMoneyValue(draft.amount)),
+                          })
+                        : money(draft.amount)}
                     </td>
                     <td className="settlement-drafts__numeric settlement-drafts__muted">
                       {draft.orderCount}
@@ -955,23 +982,55 @@ export function TraderSettlementsWorkspace({
                       >
                         {draft.status === "draft"
                           ? t("traderSettlements.statusDraft")
-                          : t("traderSettlements.statusConfirmed")}
+                          : draft.confirmedCollectionNumber
+                            ? draft.confirmedCollectionReversed
+                              ? t("traderSettlements.oneScreen.collectionUnposted", {
+                                  number: draft.confirmedCollectionNumber,
+                                })
+                              : t("traderSettlements.oneScreen.collectionPosted", {
+                                  number: draft.confirmedCollectionNumber,
+                                })
+                            : t("traderSettlements.statusConfirmed")}
                       </span>
                     </td>
                     <td className="settlement-drafts__muted">{draft.updatedAt.slice(0, 10)}</td>
                     <td>
                       <div className="settlement-drafts__actions">
-                        <button
-                          onClick={() => {
-                            setDraftToEdit(draft.id);
-                            setNewSettlementOpen(true);
-                          }}
-                          type="button"
-                        >
-                          {draft.status === "draft"
-                            ? t("traderSettlements.editDraft")
-                            : t("traderSettlements.viewDraft")}
-                        </button>
+                        {draft.confirmedCollectionNumber ? (
+                          /* Posted as a collection from the Trader: its invoice,
+                             and Un-post & adjust while it stands. */
+                          <>
+                            <button onClick={() => void previewDraft(draft)} type="button">
+                              {t("traderSettlements.oneScreen.invoice")}
+                            </button>
+                            {oneScreen && !draft.confirmedCollectionReversed ? (
+                              <button
+                                onClick={() =>
+                                  setUnpostTarget({
+                                    id: draft.id,
+                                    number: draft.confirmedCollectionNumber ?? "",
+                                    path: `operations/settlements/drafts/${draft.id}/unpost`,
+                                  })
+                                }
+                                type="button"
+                              >
+                                {t("traderSettlements.oneScreen.unpost")}
+                              </button>
+                            ) : null}
+                          </>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              setDraftToEdit(draft.id);
+                              setNewSettlementOpen(true);
+                            }}
+                            type="button"
+                          >
+                            {draft.status === "draft"
+                              ? t("traderSettlements.editDraft")
+                              : t("traderSettlements.viewDraft")}
+                          </button>
+                        )}
                         {oneScreen && draft.status === "draft" ? (
                           <>
                             <button onClick={() => void previewDraft(draft)} type="button">
@@ -1197,17 +1256,23 @@ export function TraderSettlementsWorkspace({
             setReceiptNotice(t("traderSettlements.draftSavedAndClosed", { trader: traderName }));
             refresh();
           }}
-          onPosted={(settlementId) => {
+          onPosted={(result) => {
             setNewSettlementOpen(false);
             setDraftToEdit(undefined);
+            if (result.notice !== undefined) setReceiptNotice(result.notice);
             refresh();
-            openDetail(settlementId);
+            // A collection only (fees, no orders) has no settlement to open:
+            // the notice says what was collected and its invoice is under
+            // Saved drafts (posted).
+            if (result.settlementId !== null) openDetail(result.settlementId);
+            else setShowConfirmedDrafts(true);
           }}
           reportLanguage={reportLanguage}
         />
       )}
 
-      {!newSettlementOpen || oneScreen ? null : (
+      {/* Neither dialog until the Company's switch has loaded. */}
+      {!newSettlementOpen || oneScreenSetting !== false ? null : (
         <NewSettlementDialog
           api={api}
           draftId={draftToEdit}
@@ -1292,6 +1357,7 @@ export function TraderSettlementsWorkspace({
           api={api}
           onClose={() => setUnpostTarget(undefined)}
           onUnposted={openUnpostedDraft}
+          {...(unpostTarget.path === undefined ? {} : { path: unpostTarget.path })}
           settlementId={unpostTarget.id}
           settlementNumber={unpostTarget.number}
         />

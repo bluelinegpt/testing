@@ -21,6 +21,7 @@ import {
 
 import { CompanyProfileService } from "../company-profile/company-profile.service.js";
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
+import { TraderReceivableService } from "./trader-receivable.service.js";
 import { codShortfallEnabledSql, traderMayOweFeeSql, traderPaysCodShortfall } from "./cod-shortfall.js";
 import { restoredDeliveryStatus, reversalInvalidatesClose } from "./order-close-eligibility.js";
 import { expectedReceivableStatus } from "./trader-receivable-reconciliation.js";
@@ -30,6 +31,7 @@ import { normalizeReferenceTerm } from "./order-search.js";
 import { isSearchList, orderNumberCandidates, splitSearchList } from "./search-list.js";
 import type {
   ConfirmTraderSettlementReceiptDto,
+  CreateTraderCollectionDto,
   CreateTraderSettlementDto,
   ProposeTraderAllocationDto,
   TraderSettlementAllocationLineDto,
@@ -59,6 +61,13 @@ const defaultPageSize = 25;
 const draftProjection = sql`
   d.id, d.trader_id as "traderId", t.name_en as "traderName", d.payload, d.status,
   d.confirmed_settlement_id as "confirmedSettlementId",
+  (to_jsonb(d) ->> 'confirmed_collection_id') as "confirmedCollectionId",
+  (select tc.collection_number from trader_collections tc
+    where tc.company_id = d.company_id
+      and tc.id = (to_jsonb(d) ->> 'confirmed_collection_id')::uuid) as "confirmedCollectionNumber",
+  (select tc.status = 'reversed' from trader_collections tc
+    where tc.company_id = d.company_id
+      and tc.id = (to_jsonb(d) ->> 'confirmed_collection_id')::uuid) as "confirmedCollectionReversed",
   round(coalesce((d.payload->>'amount')::numeric, 0), 2)::text as "amount",
   case when jsonb_typeof(d.payload->'allocations') = 'array'
        then jsonb_array_length(d.payload->'allocations')
@@ -263,6 +272,42 @@ export interface TraderAllocationProposal {
   readonly totalAllocated: string;
   readonly traderId: string;
   readonly unallocatedAmount: string;
+}
+
+/**
+ * A one-screen draft in which the Trader owed, posted as a Collection of the
+ * fees plus (when orders were ticked) a Settlement paying them.
+ */
+export interface TraderOwesDraftResult {
+  /** What the Trader handed over: fees - orders - credits. */
+  readonly amountCollected: string;
+  readonly collectionId: string;
+  readonly collectionNumber: string;
+  readonly draftId: string;
+  readonly settlementId: string | null;
+  readonly settlementNumber: string | null;
+}
+
+/** A draft as the un-post paths read it, with the Collection it was posted as. */
+interface PostedDraftRow {
+  readonly collectionId: string | null;
+  readonly confirmedSettlementId: string | null;
+  readonly id: string;
+  readonly payload: CreateTraderSettlementDto;
+  readonly status: string;
+  readonly traderId: string;
+}
+
+/** Net of a settlement request: orders - fee deductions + credits. */
+export function draftNet(input: CreateTraderSettlementDto): Decimal {
+  const total = (lines: readonly { readonly amount: number }[] | undefined) =>
+    (lines ?? [])
+      .filter((line) => line.amount > 0)
+      .reduce((sum, line) => sum.plus(line.amount), new Decimal(0));
+  return total(input.allocations)
+    .minus(total(input.receivableOffsets))
+    .plus(total(input.creditApplications))
+    .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
 }
 
 export interface CreateTraderSettlementResult {
@@ -511,6 +556,10 @@ export interface TraderSettlementDraft {
   readonly updatedAt: string;
   readonly status: TraderSettlementDraftStatus;
   readonly confirmedSettlementId: string | null;
+  /** Set when the Trader owed: the Collection the post recorded (and whether it was un-posted). */
+  readonly confirmedCollectionId?: string | null;
+  readonly confirmedCollectionNumber?: string | null;
+  readonly confirmedCollectionReversed?: boolean | null;
   readonly amount: string;
   readonly orderCount: number;
 }
@@ -586,6 +635,13 @@ export class TraderSettlementService {
     @Inject(DriverCollectionPdfService) private readonly pdf: DriverCollectionPdfService,
     @Inject(BalanceEnforcementCoordinator)
     private readonly balanceEnforcement: BalanceEnforcementCoordinator,
+    /**
+     * One-screen "the Trader owes" posts (and un-posts) a Trader Collection.
+     * Optional only so older harnesses that construct this service by hand
+     * keep working; Nest always injects it.
+     */
+    @Inject(TraderReceivableService)
+    private readonly traderReceivables?: TraderReceivableService,
   ) {}
 
   /** Stage 1 only: persist intent without touching any financial table. */
@@ -689,8 +745,8 @@ export class TraderSettlementService {
     const { companyId } = this.tenants.current();
     return this.transactions.execute(async (transaction) => {
       const existing = (
-        await sql<{ confirmedSettlementId: string | null; id: string }>`
-          select id, confirmed_settlement_id as "confirmedSettlementId"
+        await sql<{ confirmedSettlementId: string | null; id: string; status: string }>`
+          select id, confirmed_settlement_id as "confirmedSettlementId", status
             from trader_settlement_drafts
            where id=${draftId}::uuid and company_id=${companyId}::uuid
            for update
@@ -703,7 +759,9 @@ export class TraderSettlementService {
           HttpStatus.NOT_FOUND,
         );
       }
-      if (existing.confirmedSettlementId !== null) {
+      // A draft posted as a Collection (the Trader owed) has no Settlement
+      // but is just as posted: `status` is the test.
+      if (existing.confirmedSettlementId !== null || existing.status !== "draft") {
         throw new ApplicationException(
           "trader_settlement_draft_not_deletable",
           "A confirmed settlement draft cannot be deleted. Reverse the settlement instead.",
@@ -713,7 +771,7 @@ export class TraderSettlementService {
       await sql`
         delete from trader_settlement_drafts
          where id=${draftId}::uuid and company_id=${companyId}::uuid
-           and confirmed_settlement_id is null
+           and confirmed_settlement_id is null and status = 'draft'
       `.execute(transaction);
       return { id: draftId };
     });
@@ -1178,7 +1236,16 @@ export class TraderSettlementService {
         );
       }
 
-      // 1. Validate the allocation shape before touching any row.
+      // 1. Validate the allocation shape before touching any row. A
+      //    Settlement pays the Trader: a negative net (the Trader owes) is
+      //    only valid in a one-screen draft, which posts it as a Collection.
+      if (!(input.amount > 0)) {
+        throw new ApplicationException(
+          "settlement_amount_not_positive",
+          "A settlement must pay the Trader a positive amount",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
       const allocated = input.allocations.filter((line) => line.amount > 0);
       if (allocated.length === 0) {
         throw new ApplicationException(
@@ -1834,12 +1901,12 @@ export class TraderSettlementService {
   public async confirmDraft(
     draftId: string,
     correlationId: string,
-  ): Promise<CreateTraderSettlementResult> {
+  ): Promise<CreateTraderSettlementResult | TraderOwesDraftResult> {
     this.assertAnyPermission("settlements.create");
     const { companyId } = this.tenants.current();
     return this.transactions.execute(async (transaction) => {
-      const row = (await sql<{ payload: CreateTraderSettlementDto; settlementId: string | null }>`
-        select payload, confirmed_settlement_id as "settlementId"
+      const row = (await sql<{ payload: CreateTraderSettlementDto; settlementId: string | null; status: string }>`
+        select payload, confirmed_settlement_id as "settlementId", status
           from trader_settlement_drafts
          where id=${draftId}::uuid and company_id=${companyId}::uuid
          for update
@@ -1847,8 +1914,13 @@ export class TraderSettlementService {
       if (row === undefined) {
         throw new ApplicationException("trader_settlement_draft_not_found", "Trader settlement draft not found", HttpStatus.NOT_FOUND);
       }
-      if (row.settlementId !== null) {
+      if (row.settlementId !== null || row.status !== "draft") {
         throw new ApplicationException("trader_settlement_draft_already_confirmed", "This Trader settlement draft was already confirmed", HttpStatus.CONFLICT);
+      }
+      // The Trader owes (fees above the orders): a one-screen Company posts it
+      // as a Collection from the Trader, plus a Settlement for any orders.
+      if (draftNet(row.payload).lessThan(0) && (await this.oneScreenEnabled(transaction, companyId))) {
+        return this.postTraderOwesDraft(transaction, companyId, draftId, row.payload, correlationId);
       }
       const result = await this.createPayment(
         row.payload,
@@ -1867,6 +1939,111 @@ export class TraderSettlementService {
       `.execute(transaction);
       return result;
     });
+  }
+
+  /**
+   * Post a one-screen draft in which the Trader OWES (Aiman, 22 Oct 2026):
+   * the ticked fees are more than the ticked orders (and credits).
+   *
+   * A Settlement can only pay the Trader (`trader_settlements` net >= 0), so
+   * the post is the two records the system already has, in ONE transaction:
+   *   1. a Trader Collection of every ticked fee, received from the Trader by
+   *      the chosen method -- the fees are then paid, exactly as Collect Money
+   *      from Trader would leave them;
+   *   2. when orders are ticked, a Settlement paying them (and any ticked
+   *      Trader Credits) in full, with no deductions -- the fees are no longer
+   *      outstanding.
+   * Collecting first means the cash is in before any of it is paid out. The
+   * Trader physically hands over the difference (fees - orders - credits);
+   * the books show both legs. The draft records both and is the invoice.
+   */
+  private async postTraderOwesDraft(
+    transaction: Transaction<DatabaseSchema>,
+    companyId: string,
+    draftId: string,
+    payload: CreateTraderSettlementDto,
+    correlationId: string,
+  ): Promise<TraderOwesDraftResult> {
+    if (this.traderReceivables === undefined) {
+      throw new Error("Trader collections are not available to the settlement service");
+    }
+    const positive = <T extends { readonly amount: number }>(lines: readonly T[] | undefined) =>
+      (lines ?? []).filter((line) => line.amount > 0);
+    const allocations = positive(payload.allocations);
+    const offsets = positive(payload.receivableOffsets);
+    const credits = positive(payload.creditApplications);
+    const total = (lines: readonly { readonly amount: number }[]) =>
+      this.money(lines.reduce((sum, line) => sum.plus(line.amount), new Decimal(0)));
+    const feeTotal = total(offsets);
+    const settlementAmount = this.money(total(allocations).plus(total(credits)));
+    if (offsets.length === 0 || !feeTotal.greaterThan(settlementAmount)) {
+      throw new ApplicationException(
+        "settlement_trader_owes_invalid",
+        "Nothing is owed by the Trader in this draft",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (allocations.length === 0 && credits.length > 0) {
+      throw new ApplicationException(
+        "settlement_credit_needs_order",
+        "A Trader Credit can only be paid back together with an order. Untick the credit, or tick an order to pay.",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const method = payload.paymentMethod === "bank_transfer" ? "bank_transfer" : "cash";
+    const reference = payload.bankReference?.trim() ?? "";
+    if (method === "bank_transfer" && (payload.bankAccountId === undefined || reference === "")) {
+      throw new ApplicationException(
+        "settlement_bank_details_required",
+        "Choose the Company bank account and enter the bank reference",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    // 1. Collect every ticked fee from the Trader.
+    const collection = await this.traderReceivables.confirmCollectionInTransaction(
+      transaction,
+      {
+        allocations: offsets.map((line) => ({ amount: line.amount, receivableId: line.receivableId })),
+        amountReceived: feeTotal.toNumber(),
+        ...(method === "bank_transfer" ? { bankAccountId: payload.bankAccountId, paymentReference: reference } : {}),
+        ...(payload.notes?.trim() ? { notes: payload.notes.trim() } : {}),
+        ...(payload.paymentDate === undefined ? {} : { paymentDate: payload.paymentDate }),
+        paymentMethod: method,
+        traderId: payload.traderId,
+      } as CreateTraderCollectionDto,
+      correlationId,
+      `draft-collect-${draftId}`,
+    );
+
+    // 2. Pay the ticked orders (and credits) in full, without deductions.
+    const settlement =
+      allocations.length === 0
+        ? undefined
+        : await this.createPayment(
+            { ...payload, amount: settlementAmount.toNumber(), receivableOffsets: [] },
+            correlationId,
+            `draft-${draftId}`,
+            transaction,
+          );
+
+    // 3. The draft is the record of both: `status` moves with the links.
+    await sql`
+      update trader_settlement_drafts
+         set status = 'confirmed',
+             confirmed_settlement_id = ${settlement?.settlementId ?? null}::uuid,
+             confirmed_collection_id = ${collection.collectionId}::uuid,
+             confirmed_at = now(), updated_at = now()
+       where id = ${draftId}::uuid and company_id = ${companyId}::uuid and status = 'draft'
+    `.execute(transaction);
+    return {
+      amountCollected: this.money(feeTotal.minus(settlementAmount)).toFixed(2),
+      collectionId: collection.collectionId,
+      collectionNumber: collection.collectionNumber,
+      draftId,
+      settlementId: settlement?.settlementId ?? null,
+      settlementNumber: settlement?.settlementNumber ?? null,
+    };
   }
 
   /**
@@ -3277,6 +3454,20 @@ export class TraderSettlementService {
           HttpStatus.CONFLICT,
         );
       }
+      // Posted together with a Collection (the Trader owed): un-post both.
+      const linked = (
+        await sql<PostedDraftRow>`
+          select d.id, d.trader_id as "traderId", d.payload, d.status,
+                 d.confirmed_settlement_id as "confirmedSettlementId",
+                 (to_jsonb(d) ->> 'confirmed_collection_id') as "collectionId"
+            from trader_settlement_drafts d
+           where d.company_id = ${companyId}::uuid and d.confirmed_settlement_id = ${settlementId}::uuid
+           for update
+        `.execute(transaction)
+      ).rows[0];
+      if (linked?.collectionId) {
+        return this.unpostTraderOwesInTransaction(transaction, companyId, linked, trimmedReason, correlationId);
+      }
       const openDraft = (
         await sql<{ id: string }>`
           select id from trader_settlement_drafts
@@ -3336,6 +3527,180 @@ export class TraderSettlementService {
         settlementNumber: settlement.settlementNumber,
       };
     });
+  }
+
+  /**
+   * Un-post and adjust a posted "Trader owes" draft (its Collection, and its
+   * Settlement when orders were paid), reopening its lines as a new draft.
+   */
+  public async unpostDraft(
+    draftId: string,
+    reason: string,
+    correlationId: string,
+  ): Promise<{
+    readonly draftId: string;
+    readonly reversalSettlementNumber: string;
+    readonly settlementNumber: string;
+  }> {
+    this.assertAnyPermission("settlements.reverse");
+    this.assertAnyPermission("settlements.create");
+    const { companyId } = this.tenants.current();
+    const trimmedReason = reason.trim();
+    if (trimmedReason === "") {
+      throw new ApplicationException(
+        "settlement_reversal_reason_required",
+        "A reason is required to un-post a Trader settlement",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    return this.transactions.execute(async (transaction) => {
+      if (!(await this.oneScreenEnabled(transaction, companyId))) {
+        throw new ApplicationException(
+          "settlement_unpost_not_enabled",
+          "Un-post is not enabled for this Company",
+          HttpStatus.FORBIDDEN,
+        );
+      }
+      const draft = (
+        await sql<PostedDraftRow>`
+          select d.id, d.trader_id as "traderId", d.payload, d.status,
+                 d.confirmed_settlement_id as "confirmedSettlementId",
+                 (to_jsonb(d) ->> 'confirmed_collection_id') as "collectionId"
+            from trader_settlement_drafts d
+           where d.id = ${draftId}::uuid and d.company_id = ${companyId}::uuid
+           for update
+        `.execute(transaction)
+      ).rows[0];
+      if (draft === undefined) {
+        throw new ApplicationException("trader_settlement_draft_not_found", "Trader settlement draft not found", HttpStatus.NOT_FOUND);
+      }
+      if (draft.status !== "confirmed" || !draft.collectionId) {
+        throw new ApplicationException(
+          "settlement_unpost_invalid",
+          "Only a posted collection from the Trader can be un-posted here",
+          HttpStatus.CONFLICT,
+        );
+      }
+      return this.unpostTraderOwesInTransaction(transaction, companyId, draft, trimmedReason, correlationId);
+    });
+  }
+
+  /**
+   * Reverse a posted "Trader owes" draft: its Collection (the fees are owed
+   * again), then its Settlement if orders were paid (with any Money Received),
+   * and reopen the same lines as a new draft. One transaction: all or nothing.
+   */
+  private async unpostTraderOwesInTransaction(
+    transaction: Transaction<DatabaseSchema>,
+    companyId: string,
+    draft: PostedDraftRow,
+    reason: string,
+    correlationId: string,
+  ): Promise<{
+    readonly draftId: string;
+    readonly reversalSettlementNumber: string;
+    readonly settlementNumber: string;
+  }> {
+    if (this.traderReceivables === undefined || !draft.collectionId) {
+      throw new Error("Trader collections are not available to the settlement service");
+    }
+    const identity = this.identities.current();
+    const collection = (
+      await sql<{ collectionNumber: string; status: string }>`
+        select collection_number as "collectionNumber", status
+          from trader_collections
+         where id = ${draft.collectionId}::uuid and company_id = ${companyId}::uuid
+      `.execute(transaction)
+    ).rows[0];
+    if (collection === undefined || collection.status === "reversed") {
+      throw new ApplicationException(
+        "settlement_unpost_invalid",
+        "This collection from the Trader was already un-posted",
+        HttpStatus.CONFLICT,
+      );
+    }
+    const openDraft = (
+      await sql<{ id: string }>`
+        select id from trader_settlement_drafts
+         where company_id = ${companyId}::uuid and trader_id = ${draft.traderId}::uuid
+           and status = 'draft'
+      `.execute(transaction)
+    ).rows[0];
+    if (openDraft !== undefined) {
+      throw new ApplicationException(
+        "trader_settlement_draft_already_open",
+        "This Trader already has a draft. Post or delete it before un-posting another settlement.",
+        HttpStatus.CONFLICT,
+        [openDraft.id],
+      );
+    }
+
+    await this.traderReceivables.reverseCollectionInTransaction(
+      transaction,
+      draft.collectionId,
+      reason,
+      correlationId,
+    );
+    const numbers = [collection.collectionNumber];
+    let reversalNumber = "—";
+    if (draft.confirmedSettlementId !== null) {
+      const settlement = (
+        await sql<{ reversed: boolean; settlementNumber: string }>`
+          select s.settlement_number as "settlementNumber",
+                 exists (select 1 from trader_settlements rv
+                          where rv.company_id = s.company_id and rv.reversal_of_id = s.id) as reversed
+            from trader_settlements s
+           where s.id = ${draft.confirmedSettlementId}::uuid and s.company_id = ${companyId}::uuid
+           for update
+        `.execute(transaction)
+      ).rows[0];
+      if (settlement !== undefined && !settlement.reversed) {
+        numbers.push(settlement.settlementNumber);
+        const receiptActive =
+          (
+            await sql<{ active: boolean }>`
+              select ${activeMoneyReceived(sql`${companyId}::uuid`, sql`${draft.confirmedSettlementId}`)} as active
+            `.execute(transaction)
+          ).rows[0]?.active === true;
+        if (receiptActive) {
+          await this.reverseMoneyReceivedInTransaction(transaction, draft.confirmedSettlementId, reason, correlationId);
+        }
+        const reversal = await this.reverseInTransaction(transaction, draft.confirmedSettlementId, reason, correlationId);
+        reversalNumber = reversal.reversalSettlementNumber;
+      }
+    }
+    const reopened = (
+      await sql<{ id: string }>`
+        insert into trader_settlement_drafts(
+          company_id, trader_id, payload, created_by_account_id, updated_by_account_id
+        ) values (
+          ${companyId}::uuid, ${draft.traderId}::uuid, ${JSON.stringify(draft.payload)}::jsonb,
+          ${identity.identityId}::uuid, ${identity.identityId}::uuid
+        )
+        returning id
+      `.execute(transaction)
+    ).rows[0];
+    if (reopened === undefined) throw new Error("Un-post draft was not saved");
+    await this.history.audit(transaction, {
+      action: "trader_settlement.unposted",
+      actorId: identity.identityId,
+      after: {
+        collectionNumber: collection.collectionNumber,
+        draftId: reopened.id,
+        postedDraftId: draft.id,
+        reason,
+        reversalSettlementNumber: reversalNumber,
+      },
+      companyId,
+      correlationId,
+      subjectId: draft.collectionId,
+      subjectType: "trader_collection",
+    });
+    return {
+      draftId: reopened.id,
+      reversalSettlementNumber: reversalNumber,
+      settlementNumber: numbers.join(" / "),
+    };
   }
 
   /** The Create Settlement request a posted Settlement was made from. */
@@ -3429,7 +3794,46 @@ export class TraderSettlementService {
     language: ReportLanguage,
   ): Promise<{ bytes: Buffer; filename: string }> {
     const draft = await this.draft(draftId);
+    if (draft.status === "confirmed" && draft.confirmedCollectionId) {
+      return this.postedTraderOwesPdf(draft, language);
+    }
     return this.draftPreviewPdf(draft.payload, language);
+  }
+
+  /**
+   * The invoice of a posted "Trader owes" draft: every line as it was posted,
+   * ending with the amount collected from the Trader. Numbered with its
+   * Collection (and Settlement, when orders were paid). Not marked DRAFT.
+   */
+  private async postedTraderOwesPdf(
+    draft: TraderSettlementDraft,
+    language: ReportLanguage,
+  ): Promise<{ bytes: Buffer; filename: string }> {
+    this.assertAnyPermission(["settlements.create", "reports.export"]);
+    const { companyId } = this.tenants.current();
+    const posted = (
+      await sql<{ collectionNumber: string; confirmedBy: string | null; settlementNumber: string | null }>`
+        select tc.collection_number as "collectionNumber",
+               (select a.username from accounts a
+                 where a.id = tc.received_by_account_id and a.company_id = tc.company_id) as "confirmedBy",
+               (select s.settlement_number from trader_settlements s
+                 where s.id = ${draft.confirmedSettlementId}::uuid and s.company_id = tc.company_id) as "settlementNumber"
+          from trader_collections tc
+         where tc.id = ${draft.confirmedCollectionId}::uuid and tc.company_id = ${companyId}::uuid
+      `.execute(this.database)
+    ).rows[0];
+    if (posted === undefined) {
+      throw new ApplicationException("trader_collection_not_found", "Trader collection not found", HttpStatus.NOT_FOUND);
+    }
+    const number = [posted.collectionNumber, posted.settlementNumber].filter((value) => value !== null).join(" / ");
+    const data = await this.draftReportData(draft.payload, { confirmedBy: posted.confirmedBy ?? "", number });
+    const html = buildTraderSettlementStatementHtml(data, language);
+    const footerTemplate =
+      language === "ar"
+        ? `<div style="font-size:9px;width:100%;text-align:center;color:#666;direction:rtl;">الصفحة <span class="pageNumber"></span> من <span class="totalPages"></span></div>`
+        : `<div style="font-size:9px;width:100%;text-align:center;color:#666;">Page <span class="pageNumber"></span> of <span class="totalPages"></span></div>`;
+    const bytes = await this.pdf.renderPdf(html, footerTemplate);
+    return { bytes, filename: `Trader-Invoice-${posted.collectionNumber}.pdf` };
   }
 
   /** PDF of an unsaved settlement as it would print, marked DRAFT. */
@@ -3448,7 +3852,11 @@ export class TraderSettlementService {
     return { bytes, filename: "Trader-Settlement-DRAFT.pdf" };
   }
 
-  private async draftReportData(input: CreateTraderSettlementDto): Promise<TraderSettlementReportData> {
+  private async draftReportData(
+    input: CreateTraderSettlementDto,
+    /** A posted "Trader owes" draft: its number and poster; amounts as posted. */
+    posted?: { readonly confirmedBy: string; readonly number: string },
+  ): Promise<TraderSettlementReportData> {
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
     const trader = (
@@ -3519,10 +3927,21 @@ export class TraderSettlementService {
         orderSettlementStatus: row.orderSettlementStatus,
         orderType: row.orderType,
         originalTraderPayable: new Decimal(row.traderNetPayable).toFixed(2),
-        paidBeforeThisPayment: new Decimal(row.paidAmount).toFixed(2),
-        previouslyPaid: new Decimal(row.paidAmount).toFixed(2),
+        // A posted invoice: the Order's paid amount already includes this
+        // payment, so "before" is paid - this and "after" is what is left now.
+        paidBeforeThisPayment: (posted === undefined
+          ? new Decimal(row.paidAmount)
+          : Decimal.max(new Decimal(row.paidAmount).minus(amount), 0)
+        ).toFixed(2),
+        previouslyPaid: (posted === undefined
+          ? new Decimal(row.paidAmount)
+          : Decimal.max(new Decimal(row.paidAmount).minus(amount), 0)
+        ).toFixed(2),
         referenceNumber: row.referenceNumber,
-        remainingAfterThisPayment: Decimal.max(new Decimal(row.outstandingBalance).minus(amount), 0).toFixed(2),
+        remainingAfterThisPayment: (posted === undefined
+          ? Decimal.max(new Decimal(row.outstandingBalance).minus(amount), 0)
+          : new Decimal(row.outstandingBalance)
+        ).toFixed(2),
         remainingOutstanding: new Decimal(row.outstandingBalance).toFixed(2),
         serialNumber: row.serialNumber,
         serviceFee: new Decimal(row.serviceFee).toFixed(2),
@@ -3671,7 +4090,7 @@ export class TraderSettlementService {
           subtitleEn: branding.subtitleEn,
           telephone: branding.telephone,
         },
-        confirmedBy: "",
+        confirmedBy: posted?.confirmedBy ?? "",
         createdBy: preparer,
         generatedAt: `${generatedAt} (UAE)`,
         hideMoneyReceived: true,
@@ -3689,9 +4108,9 @@ export class TraderSettlementService {
         reversalReason: null,
         reversedBy: null,
         reversedBySettlementNumber: null,
-        settlementNumber: "—",
+        settlementNumber: posted?.number ?? "—",
         sourceBank,
-        status: "draft",
+        status: posted === undefined ? "draft" : "confirmed",
         traderMobile: trader.mobile,
         traderName: trader.name,
       },
