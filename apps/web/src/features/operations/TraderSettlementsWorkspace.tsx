@@ -875,7 +875,16 @@ export function TraderSettlementsWorkspace({
             </button>
             <button
               className="button button-secondary"
-              onClick={() => setCollectFromTraderOpen(true)}
+              onClick={() => {
+                // One-screen Companies collect from the Trader on the
+                // settlement itself (CMP-000001, 22 Oct 2026).
+                if (oneScreen) {
+                  setDraftToEdit(undefined);
+                  setNewSettlementOpen(true);
+                } else {
+                  setCollectFromTraderOpen(true);
+                }
+              }}
               type="button"
             >
               {t("traderSettlements.collectFromTrader", "Collect from Trader")}
