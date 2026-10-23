@@ -1849,12 +1849,12 @@ function HelpResultCard({ result }: { result: HelpArticleSummary }) {
         {result.categoryName ?? result.categorySlug ?? (locale === "ar" ? "دليل" : "Guide")}
       </span>
       <h3>
-        <Link to={path}>{result.title}</Link>
+        <RouterLink to={localizePublicPath(path, result.locale)}>{result.title}</RouterLink>
       </h3>
       <p>{result.summary}</p>
-      <Link className="text-link" to={path}>
+      <RouterLink className="text-link" to={localizePublicPath(path, result.locale)}>
         {locale === "ar" ? "اقرأ الدليل" : "Read guide"} <span>→</span>
-      </Link>
+      </RouterLink>
     </article>
   );
 }
@@ -1882,10 +1882,12 @@ function HelpArticlePage() {
         result.article.canonical_path ?? `/resources/${result.article.slug}`,
         {
           robots: publicRobotsDirective(
-            result.article.robots_index !== false,
+            result.article.locale === locale && result.article.robots_index !== false,
             result.article.robots_follow !== false,
           ),
           locale: result.article.locale === "ar" ? "ar" : "en",
+          alternates: result.article.alternates,
+          xDefault: result.article.xDefault,
         },
       );
     if (data) {
@@ -1920,7 +1922,7 @@ function HelpArticlePage() {
   const article = data.article;
   return (
     <>
-      <article className={`section help-article ${isAr ? "help-article--rtl" : ""}`}>
+      <article className={`section help-article ${article.locale === "ar" ? "help-article--rtl" : ""}`} lang={article.locale} dir={article.locale === "ar" ? "rtl" : "ltr"}>
         <Link className="text-link" to="/resources">
           ← {isAr ? "مركز المساعدة" : "Help Center"}
         </Link>
@@ -1938,9 +1940,9 @@ function HelpArticlePage() {
           <aside className="related-guides">
             <h2>{isAr ? "أدلة ذات صلة" : "Related guides"}</h2>
             {data.related.map((item: HelpArticleSummary) => (
-              <Link key={item.slug} to={`/resources/${item.slug}`}>
+              <RouterLink key={item.slug} to={localizePublicPath(`/resources/${item.slug}`, item.locale ?? article.locale)}>
                 {item.title}
-              </Link>
+              </RouterLink>
             ))}
           </aside>
         ) : null}

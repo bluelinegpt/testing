@@ -1,0 +1,153 @@
+{
+  "slug": "order-statuses",
+  "locale": "en",
+  "title": "Order statuses and next actions in Tawseelhub",
+  "summary": "Understand local delivery statuses, permitted operational steps, returns, and the checks that separate delivery from cash collection, Trader settlement and closure.",
+  "seoTitle": "Order statuses and delivery workflow | Tawseelhub Help Center",
+  "metaDescription": "Understand Tawseelhub order statuses, Driver assignment, delivery, Hold, returns and closure checks, with practical next actions and a COD workflow example.",
+  "body": [
+    {
+      "type": "paragraph",
+      "text": "Use delivery status to understand the physical progress of an order. Driver cash and Trader settlement are separate fields: Delivered does not mean that cash has been handed over or that a Trader has been paid. This guide describes the local delivery workflow; GCC/international orders have a separate carrier workflow."
+    },
+    {
+      "type": "h2",
+      "text": "Read the order before changing its status"
+    },
+    {
+      "type": "paragraph",
+      "text": "Open the order in Orders and review its current status, assigned Driver, delivery details, and recorded reason. Use filters to select the intended orders. A bulk action still validates each order; selecting a row does not make an otherwise invalid transition allowed. Actions depend on your permissions and the current order state."
+    },
+    {
+      "type": "h2",
+      "text": "New (new)"
+    },
+    {
+      "type": "paragraph",
+      "text": "The order has been created. Review the delivery information and assign a Driver when appropriate; it has not been marked delivered."
+    },
+    {
+      "type": "h2",
+      "text": "Item in Branch (in_branch)"
+    },
+    {
+      "type": "paragraph",
+      "text": "The order is recorded at the branch. Review dispatch readiness and the assigned Driver. Operations can receive a New order into the branch, or receive an order from Out for Delivery or Returned to Branch."
+    },
+    {
+      "type": "h2",
+      "text": "Assigned to Driver (assigned_to_driver)"
+    },
+    {
+      "type": "paragraph",
+      "text": "A Driver is responsible for the order. Check the assignment before dispatch. Assignment is not proof that delivery is complete."
+    },
+    {
+      "type": "h2",
+      "text": "Out for Delivery (out_for_delivery)"
+    },
+    {
+      "type": "paragraph",
+      "text": "The order is in the delivery workflow. A Driver must be assigned. Operations can move an eligible Assigned, Hold, In Branch, or Returned to Branch order here; check the order and permissions before acting."
+    },
+    {
+      "type": "h2",
+      "text": "Delivered (delivered)"
+    },
+    {
+      "type": "paragraph",
+      "text": "Delivery has been recorded. The operations transition accepts an Out for Delivery or Hold order with an assigned Driver. Review the separate cash and settlement fields rather than assuming the order is financially complete."
+    },
+    {
+      "type": "h2",
+      "text": "Hold (hold)"
+    },
+    {
+      "type": "paragraph",
+      "text": "The order needs a pause or follow-up. Operations can put a New, Assigned to Driver, or Out for Delivery order on Hold. Read the reason and resolve the issue before choosing an available next action; the dedicated Hold Reactivation workflow has its own checks."
+    },
+    {
+      "type": "h2",
+      "text": "Returned to Branch (returned_to_branch)"
+    },
+    {
+      "type": "paragraph",
+      "text": "An order from Out for Delivery has entered the return-to-branch workflow. Review the recorded reason and arrange the appropriate branch or next-delivery action. This is different from returning an item to the Trader."
+    },
+    {
+      "type": "h2",
+      "text": "Returned to Trader (returned_to_trader)"
+    },
+    {
+      "type": "paragraph",
+      "text": "The order is in the return-to-Trader state. Operations can enter this from In Branch, Returned to Branch, Hold, or Cancelled. Physical return confirmation is checked separately before closure; do not treat the label alone as proof that every return step is complete."
+    },
+    {
+      "type": "h2",
+      "text": "Cancelled (cancelled)"
+    },
+    {
+      "type": "paragraph",
+      "text": "The order has been cancelled. The operations workflow permits cancellation from New, In Branch, Assigned to Driver, Out for Delivery, or Hold. Review the cancellation reason and any physical return required; cancellation is not delivery confirmation."
+    },
+    {
+      "type": "h2",
+      "text": "Collect Order (collect_order)"
+    },
+    {
+      "type": "paragraph",
+      "text": "This is the collection-order workflow, rather than a normal delivery confirmation. Check the order type and its collection details before assigning work. It is one of the source states considered by the closure checks; do not relabel it Delivered merely to close it."
+    },
+    {
+      "type": "h2",
+      "text": "Closed (closed)"
+    },
+    {
+      "type": "paragraph",
+      "text": "The order has passed the closure checks. Eligible source states are Delivered, Returned to Trader, and Collect Order. Closure also checks Driver Cash completion or non-applicability, applicable Trader settlement requirements, and physical return completion when required. If closure is blocked, resolve the reported issue rather than changing financial records to bypass it."
+    },
+    {
+      "type": "h2",
+      "text": "Example: a local delivery with COD"
+    },
+    {
+      "type": "numbered_list",
+      "items": [
+        "Create the order and check the customer, delivery and payment information.",
+        "Assign the Driver and move the eligible order to Out for Delivery.",
+        "Record Delivered only after delivery is completed.",
+        "Review the separate Driver Collections and Trader settlement records as required for that order.",
+        "Close the order only when the system accepts its operational and financial checks."
+      ]
+    },
+    {
+      "type": "h2",
+      "text": "Common exceptions and safe follow-up"
+    },
+    {
+      "type": "paragraph",
+      "text": "If a customer cannot receive the delivery, record the actual outcome and reason using the available Hold or return actions. Do not record Delivered to remove an order from a working list. If the order changed since your screen loaded, refresh and review its current state. A Driver cannot use every office-only transition. GCC/international orders cannot be assigned to an internal Driver or moved into the internal Driver Out for Delivery/Delivered workflow."
+    },
+    {
+      "type": "paragraph",
+      "text": "When an action is refused, read the validation message. Check assignment, current status, cash status, settlement status and physical return as relevant. Contact support with the order reference and the exact message; never share passwords or access tokens."
+    }
+  ],
+  "relatedSlugs": [
+    "create-an-order",
+    "assign-an-order-to-driver",
+    "cod-collections",
+    "trader-statements",
+    "contact-support"
+  ],
+  "expectedSeedBody": [
+    {
+      "type": "paragraph",
+      "text": "Statuses help the operations team understand whether an order is new, assigned, out for delivery, delivered, returned, cancelled or needs attention."
+    },
+    {
+      "type": "paragraph",
+      "text": "Managers should use status filters before taking bulk operational action."
+    }
+  ]
+}

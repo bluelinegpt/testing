@@ -298,3 +298,39 @@ test("server-rendered data is handed to the browser safely", () => {
   const json = html.match(/id="tawseelhub-preload">(.*)<\/script>/)[1];
   assert.deepEqual(JSON.parse(json), [["help-article:x:en", { text: "</script><b>$& $'" }]]);
 });
+
+
+test("Arabic Help fallback is noindex with an English canonical and English article language", () => {
+  const article={locale:"en",slug:"create-an-order",title:"Create an order",summary:"English guidance",body:[{type:"paragraph",text:"Use the verified order workflow."}],canonical_path:"/resources/create-an-order",robots_index:true};
+  const html=injectHelpArticleMetadata('<html><head><title>Home</title><meta name="description" content="Home" /></head></html>',article,"/ar/resources/create-an-order");
+  assert.match(html,/noindex,follow/);
+  assert.match(html,/href="https:\/\/tawseelhub.com\/resources\/create-an-order"/);
+  assert.match(renderHelpArticleShell(article),/dir="ltr" lang="en"/);
+});
+test("real Arabic Help metadata preserves only published reciprocal language targets", () => {
+  const article={locale:"ar",title:"إنشاء طلب",summary:"دليل",canonical_path:"/ar/resources/create-an-order",robots_index:true,alternates:[{language:"en",url:"https://tawseelhub.com/resources/create-an-order"},{language:"ar",url:"https://tawseelhub.com/ar/resources/create-an-order"}],xDefault:"https://tawseelhub.com/resources/create-an-order"};
+  const html=injectHelpArticleMetadata('<html><head><title>Home</title><meta name="description" content="Home" /></head></html>',article,"/ar/resources/create-an-order");
+  assert.match(html,/index,follow/);
+  assert.match(html,/hreflang="ar"/);assert.match(html,/hreflang="en"/);
+});
+
+test("expanded order-status content has one H1, verified status guidance and related links without JavaScript", async () => {
+  const { readFile }=await import("node:fs/promises");
+  const content=JSON.parse(await readFile(new URL("../../database/migrations/content/order-statuses-en.json",import.meta.url),"utf8"));
+  const article={...content,seo_title:content.seoTitle,meta_description:content.metaDescription,canonical_path:"/resources/order-statuses",robots_index:true};
+  const html=renderHelpArticleShell(article,content.relatedSlugs.map(slug=>({slug,title:slug})));
+  assert.equal((html.match(/<h1>/g)??[]).length,1);
+  for(const status of ["new","in_branch","assigned_to_driver","out_for_delivery","delivered","hold","returned_to_branch","returned_to_trader","cancelled","collect_order","closed"]) assert.ok(html.includes(`(${status})`),status);
+  assert.match(html,/Delivered does not mean/);
+  assert.match(html,/href="\/resources\/contact-support"/);
+});
+
+test("prerender recognizes keyless service entries and uses the categories endpoint", async()=>{
+  const {isGuideSitemapEntry,blogLandingCollection,indexableSitemapRoutes}=await import("./scripts/prerender-route-policy.mjs");
+  assert.equal(isGuideSitemapEntry("/courier-management-software-uae",{"/pricing":{}}),true);
+  assert.equal(isGuideSitemapEntry("/pricing",{"/pricing":{}}),false);
+  assert.equal(isGuideSitemapEntry("/resources/order-statuses",{}),false);
+  assert.equal(blogLandingCollection("category"),"categories");
+  const routes=[{path:"/track",robots:"noindex,follow"},{path:"/resources/create-an-order"},{path:"/ar/resources/create-an-order",canonical:"https://tawseelhub.com/resources/create-an-order"}];
+  assert.deepEqual(indexableSitemapRoutes(routes,"https://tawseelhub.com").map(x=>x.path),["/resources/create-an-order"]);
+});

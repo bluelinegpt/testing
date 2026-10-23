@@ -459,6 +459,7 @@ export class WebsiteCmsService {
       from platform_help_articles
       where status = 'published'
         and robots_index = true
+        and (canonical_path is null or canonical_path = case when locale='ar' then '/ar' else '' end || '/resources/' || slug)
     `.execute(this.db)
     ).rows;
     const staticPages: LocalizedEntry[] = STATIC_PUBLIC_PAGES.flatMap(({ path, lastModified }) =>
@@ -694,7 +695,20 @@ export class WebsiteCmsService {
       order by sort_order
     `.execute(this.db)
     ).rows;
-    return { article, related };
+    const translations = (await sql<{locale: string; canonical_path: string | null; robots_index: boolean}>`
+      select locale, canonical_path, robots_index from platform_help_articles
+      where slug=${slug} and status='published'
+    `.execute(this.db)).rows;
+    const pathFor = (language: string) => `${language === "ar" ? "/ar" : ""}/resources/${slug}`;
+    const alternates = translations.filter((row) => row.robots_index && (!row.canonical_path || row.canonical_path === pathFor(row.locale)))
+      .map((row) => ({ language: row.locale, url: `https://tawseelhub.com${pathFor(row.locale)}` }));
+    return { article: { ...article,
+      canonical_path: article.canonical_path || pathFor(article.locale),
+      // English fallback may be read in the Arabic shell, but is not an Arabic index target.
+      robots_index: article.locale === safeLocale && article.robots_index,
+      alternates,
+      xDefault: alternates.find((row) => row.language === "en")?.url ?? null,
+    }, related: related.map((row) => ({ ...row, locale: article.locale })) };
   }
 
   public async saveHelpCategory(input: HelpCategoryDto, actor: string) {

@@ -779,10 +779,12 @@ export function injectHelpArticleMetadata(html, article, pathname) {
       seo_title: article.seo_title,
       meta_description: article.meta_description,
       canonical_url: canonical,
-      robots_index: article.robots_index !== false,
+      robots_index: article.robots_index !== false && (pathname.startsWith("/ar/") ? article.locale === "ar" : article.locale !== "ar"),
       robots_follow: article.robots_follow !== false,
       seo: {
         canonical,
+        alternates: article.alternates,
+        xDefault: article.xDefault,
         title: article.seo_title ?? article.title,
         description: article.meta_description ?? article.summary,
       },

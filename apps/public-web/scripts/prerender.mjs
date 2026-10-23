@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { blogLandingCollection, indexableSitemapRoutes, isGuideSitemapEntry } from "./prerender-route-policy.mjs";
 // Built by the SSR step this script's own npm `build` script runs first
 // (`vite build --ssr src/entry-server.tsx --outDir dist/.server`) -- plain
 // Vite SSR, not a second framework. Renders the exact same <App/> tree and
@@ -220,7 +221,7 @@ try {
     const entryPath=String(entry.path??"");
     const locale=entryPath==="/ar"||entryPath.startsWith("/ar/")?"ar":"en";
     const basePath=locale==="ar"?entryPath.slice(3)||"/":entryPath;
-    if(String(entry.key??"").startsWith("guide:")) {
+    if (isGuideSitemapEntry(basePath, routeMetadata.en)) {
       const slug=basePath.replace(/^\//,"");
       const guide=await fetchJson(`/public/guides/${encodeURIComponent(slug)}?language=${locale}`);
       const seo=guide.seo??{};
@@ -233,7 +234,7 @@ try {
     if (landingMatch) {
       const [,kind,slug]=landingMatch;
       const [landing,landingListing]=await Promise.all([
-        fetchJson(`/public/blog/${kind}s/${encodeURIComponent(slug)}?language=${locale}`),
+        fetchJson(`/public/blog/${blogLandingCollection(kind)}/${encodeURIComponent(slug)}?language=${locale}`),
         fetchJson(`/public/blog?language=${locale}&page=1&${kind}=${encodeURIComponent(slug)}`),
       ]);
       const seo=landing.seo??{};
@@ -281,38 +282,29 @@ try {
     });
   }
 
-  const helpHome = await fetchJson("/public/website/help");
-  routeMap.get("/resources").preload = [["help-home:en", helpHome]];
-  for (const summary of helpHome.articles ?? []) {
-    const path = `/resources/${summary.slug}`;
-    const detail = await fetchJson(
-      `/public/website/help/articles/${encodeURIComponent(summary.slug)}?locale=en`,
-    );
-    const article = detail.article ?? detail;
-    routeMap.set(path, {
-      path,
-      title:
-        article.seo_title ??
-        article.og_title ??
-        article.title ??
-        summary.title ??
-        "Tawseelhub Help Center",
-      description:
-        article.meta_description ??
-        article.og_description ??
-        article.summary ??
-        summary.summary ??
-        "Tawseelhub Help Center guide.",
-      canonical: normalizeCanonical(article.canonical_path, path),
-      type: "website",
-      image: normalizeImageUrl(article.og_image),
-      robots: `${article.robots_index === false ? "noindex" : "index"},${article.robots_follow === false ? "nofollow" : "follow"}`,
-      preload: [[`help-article:${summary.slug}:en`, detail]],
-    });
+  for (const locale of ["en", "ar"]) {
+    const prefix = locale === "ar" ? "/ar" : "";
+    const helpHome = await fetchJson(`/public/website/help?locale=${locale}`);
+    routeMap.get(`${prefix}/resources`).preload = [[`help-home:${locale}`, helpHome]];
+    for (const summary of helpHome.articles ?? []) {
+      const path = `${prefix}/resources/${summary.slug}`;
+      const detail = await fetchJson(`/public/website/help/articles/${encodeURIComponent(summary.slug)}?locale=${locale}`);
+      const article = detail.article ?? detail;
+      routeMap.set(path, {
+        path, title: article.seo_title ?? article.title,
+        description: article.meta_description ?? article.summary,
+        canonical: normalizeCanonical(article.canonical_path, path),
+        type: "website", image: normalizeImageUrl(article.og_image),
+        locale: locale === "ar" ? "ar_AE" : "en_AE",
+        alternates: article.alternates, xDefault: article.xDefault,
+        robots: `${article.locale !== locale || article.robots_index === false ? "noindex" : "index"},${article.robots_follow === false ? "nofollow" : "follow"}`,
+        preload: [[`help-article:${summary.slug}:${locale}`, detail]],
+      });
+    }
   }
-} catch {
+} catch (error) {
   console.warn(
-    "[prerender] Dynamic sitemap feeds unavailable; emitting static public routes only.",
+    "[prerender] Dynamic feeds incomplete; generated routes may be missing:", error.message,
   );
 }
 
@@ -368,7 +360,7 @@ if (bodyRenderFailures > 0) {
   );
 }
 
-const sitemapPaths = allRoutes
+const sitemapPaths = indexableSitemapRoutes(allRoutes, siteUrl)
   .map((route) => route.path)
   .filter((path) => path !== "/traders/register");
 const sitemap = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${sitemapPaths.map((path) => `  <url><loc>${siteUrl}${path}</loc></url>`).join("\n")}\n</urlset>\n`;

@@ -4,8 +4,7 @@ import { join } from "node:path";
 /**
  * Metadata spot-checks. These target specific routes and, for the Blog
  * article check, a real published article that only exists once the build
- * runs against the deployed test API (its `og:image` is hardcoded to that
- * host) -- so this section is skipped file-by-file when the referenced
+ * runs against a published CMS feed -- so this section is skipped file-by-file when the referenced
  * page wasn't generated (e.g. a local build against a dev database with no
  * published articles), rather than failing the whole script on an
  * environment mismatch that has nothing to do with prerender correctness.
@@ -33,7 +32,8 @@ const checks = [
       '<meta name="twitter:card" content="summary_large_image"',
       '"@type":"BlogPosting"',
       '"@type":"BreadcrumbList"',
-      '<meta property="og:image" content="https://bluelinegpt-api-test.onrender.com/api/v1/public/website/media/45551888-8c46-4026-802b-3dcba4038e6b"',
+      '<meta property="og:image" content="https://',
+      '/api/v1/public/website/media/45551888-8c46-4026-802b-3dcba4038e6b"',
     ],
   },
   {

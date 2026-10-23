@@ -47,6 +47,8 @@ export type HelpArticle = {
   robots_follow?: boolean;
   categorySlug?: string | null;
   categoryName?: string | null;
+  alternates?: Array<{ language: "en" | "ar"; url: string }>;
+  xDefault?: string | null;
 };
 
 /** Preload cache keys -- see preload-context.ts. One source of truth for
