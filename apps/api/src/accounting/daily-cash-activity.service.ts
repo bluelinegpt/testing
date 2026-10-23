@@ -208,6 +208,12 @@ const cashSourceDeclarations = [
     sourceType: "cash_bank_movement",
     table: "cash_bank_movements",
   },
+  {
+    column: "created_at",
+    historicalNulls: false,
+    sourceType: "order_correction",
+    table: "order_corrections",
+  },
 ] as const;
 
 @Injectable()
@@ -434,6 +440,19 @@ export class DailyCashActivityService {
        where r.company_id=${companyId}::uuid and r.status='confirmed' and r.confirmed_at is not null
 
       union all
+      -- OUT: an order correction (DCX) taking back the money a Driver
+      -- collection recorded for an Order that was never really collected
+      -- (Aiman, 23 Oct 2026). Its linked Movement is a mirror, excluded below.
+      select oc.company_id, 'order_correction', oc.id, oc.correction_number, 'out',
+             case when oc.collection_payment_method = 'visa' then 'bank' else 'cash' end,
+             oc.collection_amount, 'driver', oc.driver_id,
+             coalesce(d.name_en, d.code),
+             null::uuid, null::uuid, oc.created_at, 'order_correction'
+        from order_corrections oc
+        left join drivers d on d.id=oc.driver_id and d.company_id=oc.company_id
+       where oc.company_id=${companyId}::uuid and oc.collection_amount > 0
+
+      union all
       -- IN: Trader paying down a receivable. Cash or bank transfer.
       select c.company_id, 'trader_collection', c.id, c.collection_number, 'in',
              case when c.payment_method='cash' then 'cash' else 'bank' end,
@@ -518,6 +537,10 @@ export class DailyCashActivityService {
               and e.source_entity_type<>'cash_bank_movement'
          )
          and (m.source_cash_account_id is not null or m.source_bank_account_id is not null)
+         and not exists (
+           select 1 from order_corrections oc
+            where oc.company_id=m.company_id and oc.id::text=m.correlation_id
+         )
 
       union all
       -- IN: destination leg of the same Movement. 'opening_balance' movements
@@ -538,6 +561,10 @@ export class DailyCashActivityService {
          )
          and (m.destination_cash_account_id is not null
               or m.destination_bank_account_id is not null)
+         and not exists (
+           select 1 from order_corrections oc
+            where oc.company_id=m.company_id and oc.id::text=m.correlation_id
+         )
     `;
   }
 

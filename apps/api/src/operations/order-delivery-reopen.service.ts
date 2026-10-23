@@ -7,6 +7,7 @@ import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
 import { DriverCashReconciliationService } from "./driver-cash-reconciliation.service.js";
 import { OperationsService } from "./operations.service.js";
+import { collectionLineActiveSql } from "./order-correction-sql.js";
 
 @Injectable()
 export class OrderDeliveryReopenService {
@@ -50,6 +51,7 @@ export class OrderDeliveryReopenService {
                (select r.id from driver_reconciliation_orders ro
                  join driver_reconciliations r on r.id=ro.reconciliation_id and r.company_id=ro.company_id
                 where ro.company_id=o.company_id and ro.order_id=o.id and r.status='confirmed'
+                  and ${collectionLineActiveSql("ro")}
                   and r.reversal_of_id is null
                   and not exists(select 1 from driver_reconciliations rr where rr.company_id=r.company_id and rr.reversal_of_id=r.id)
                 order by r.confirmed_at desc limit 1) as "reconciliationId",
@@ -57,11 +59,13 @@ export class OrderDeliveryReopenService {
                  select count(*)::int
                    from driver_reconciliation_orders all_ro
                   where all_ro.company_id=o.company_id
+                    and ${collectionLineActiveSql("all_ro")}
                     and all_ro.reconciliation_id=(
                       select r.id from driver_reconciliation_orders ro
                       join driver_reconciliations r
                         on r.id=ro.reconciliation_id and r.company_id=ro.company_id
                       where ro.company_id=o.company_id and ro.order_id=o.id
+                        and ${collectionLineActiveSql("ro")}
                         and r.status='confirmed' and r.reversal_of_id is null
                         and not exists(
                           select 1 from driver_reconciliations rr

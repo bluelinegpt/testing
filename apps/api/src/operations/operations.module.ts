@@ -51,6 +51,7 @@ import { OperationsService } from "./operations.service.js";
 import { FastEntrySheetService } from "./fast-entry-sheet.service.js";
 import { OrdersWorkflowService } from "./orders-workflow.service.js";
 import { OrderDeliveryReopenService } from "./order-delivery-reopen.service.js";
+import { OrderCorrectionService } from "./order-correction.service.js";
 import { PublicTrackingService } from "./public-tracking.service.js";
 import { TraderReceivableController } from "./trader-receivable.controller.js";
 import { TraderReceivableService } from "./trader-receivable.service.js";
@@ -113,6 +114,7 @@ import { CompanyOrderHealthService } from "./company-order-health.service.js";
     OrderQuestionAskService,
     { provide: OrderQuestionModel, useClass: OpenRouterOrderQuestionModel },
     OrderDeliveryReopenService,
+    OrderCorrectionService,
     PublicTrackingService,
     EmployeeDeliveryEarningService,
     EmployeeCollectionEarningService,

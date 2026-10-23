@@ -72,6 +72,13 @@ interface Labels {
   readonly statusConfirmed: string;
   readonly statusDraft: string;
   readonly draftNotice: string;
+  readonly amendedNotice: string;
+  readonly originalNotice: string;
+  readonly originalWatermark: string;
+  readonly removedLine: string;
+  readonly recoveredAs: string;
+  readonly originalNet: string;
+  readonly amendedNet: string;
   readonly statusMoneyReceived: string;
   readonly statusMoneySent: string;
   readonly statusNotEligible: string;
@@ -146,6 +153,13 @@ const LABELS: Record<ReportLanguage, Labels> = {
     statusConfirmed: "مؤكدة",
     statusDraft: "مسودة — غير مرحّلة",
     draftNotice: "مسودة للمراجعة فقط — لم يتم ترحيلها ولم يُدفع أي مبلغ.",
+    amendedNotice: "فاتورة معدّلة — تم إلغاء الطلبات التالية من هذه الفاتورة بعد ترحيلها:",
+    originalNotice: "النسخة الأصلية كما تم ترحيلها أول مرة — تم تعديل هذه الفاتورة لاحقاً:",
+    originalWatermark: "نسخة أصلية — معدّلة",
+    removedLine: "{order} (المرجع {reference}) أُلغي بموجب {correction} بتاريخ {date}: {reason}. المبلغ {amount}",
+    recoveredAs: "يُسترد من التاجر بموجب {receivable}",
+    originalNet: "صافي الدفعة الأصلي",
+    amendedNet: "صافي الدفعة بعد التعديل",
     statusMoneyReceived: "استلم التاجر المبلغ",
     statusMoneySent: "تم إرسال المبلغ للتاجر",
     statusNotEligible: "غير مؤهل",
@@ -218,6 +232,13 @@ const LABELS: Record<ReportLanguage, Labels> = {
     statusConfirmed: "Confirmed",
     statusDraft: "Draft — not posted",
     draftNotice: "Draft for review only — not posted, no money has been paid.",
+    amendedNotice: "Amended invoice — these Orders were removed from it after it was posted:",
+    originalNotice: "ORIGINAL COPY, as first posted — this invoice was amended later:",
+    originalWatermark: "ORIGINAL — AMENDED",
+    removedLine: "{order} (ref {reference}) removed by {correction} on {date}: {reason}. Amount {amount}",
+    recoveredAs: "to be recovered from the Trader as {receivable}",
+    originalNet: "Original net payment",
+    amendedNet: "Net payment after amendment",
     statusMoneyReceived: "Money Received by Trader",
     statusMoneySent: "Money Sent to Trader",
     statusNotEligible: "Not Eligible",
@@ -560,8 +581,12 @@ export function buildTraderSettlementStatementHtml(
             )) +
         `</div>`;
 
+  const amendment = header.amendment ?? null;
   const reportHeader =
     (isDraft ? `<div class="draft-watermark">${escapeHtml(labels.statusDraft)}</div>` : "") +
+    (amendment?.version === "original"
+      ? `<div class="draft-watermark watermark-original">${escapeHtml(labels.originalWatermark)}</div>`
+      : "") +
     `<header class="report-header">` +
     `<div class="company-block${isFahdAlMalikiCompany ? " company-block-special" : ""}">` +
     (header.company.logoDataUri == null
@@ -646,6 +671,39 @@ export function buildTraderSettlementStatementHtml(
         (header.reversalReason === null
           ? ""
           : ` — ${escapeHtml(labels.reversalReason)}: ${escapeHtml(header.reversalReason)}`) +
+        `</div>`,
+    );
+  }
+  if (amendment !== null) {
+    const fill = (template: string, values: Readonly<Record<string, string>>) =>
+      Object.entries(values).reduce(
+        (text, [key, value]) => text.replaceAll(`{${key}}`, escapeHtml(value)),
+        escapeHtml(template),
+      );
+    notices.push(
+      `<div class="notice notice-amended"><strong>${escapeHtml(
+        amendment.version === "original" ? labels.originalNotice : labels.amendedNotice,
+      )}</strong><ul class="amendment-lines">` +
+        amendment.removedLines
+          .map(
+            (line) =>
+              `<li>${fill(labels.removedLine, {
+                amount: line.amount,
+                correction: line.correctionNumber,
+                date: dateTime(line.correctedAt),
+                order: line.serialNumber,
+                reason: line.reason,
+                reference: line.referenceNumber ?? "—",
+              })}${
+                line.recoveryReceivableNumber === null
+                  ? ""
+                  : ` — ${fill(labels.recoveredAs, { receivable: line.recoveryReceivableNumber })}`
+              }</li>`,
+          )
+          .join("") +
+        `</ul>` +
+        `<div>${escapeHtml(labels.originalNet)}: <strong>${escapeHtml(amendment.originalNetPayment)}</strong> · ` +
+        `${escapeHtml(labels.amendedNet)}: <strong>${escapeHtml(amendment.amendedNetPayment)}</strong></div>` +
         `</div>`,
     );
   }
@@ -748,6 +806,9 @@ export function buildTraderSettlementStatementHtml(
     .notice-positive { background: #eef8f0; border-color: #2e7d32; }
     .notice-negative { background: #fdeeee; border-color: #c62828; }
     .notice-draft { background: #fff7e0; border-color: #b45309; }
+    .notice-amended { background: #fff4e5; border-color: #c2410c; }
+    .amendment-lines { margin: 4px 0; padding-inline-start: 18px; }
+    .watermark-original { color: rgba(194, 65, 12, 0.12); font-size: 54px; }
     .draft-watermark { position: fixed; top: 40%; left: 0; right: 0; text-align: center;
       font-size: 64px; font-weight: 800; color: rgba(180, 83, 9, 0.12); transform: rotate(-24deg);
       pointer-events: none; z-index: 0; }

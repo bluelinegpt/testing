@@ -22,6 +22,7 @@ import {
 import { CompanyProfileService } from "../company-profile/company-profile.service.js";
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
 import { TraderReceivableService } from "./trader-receivable.service.js";
+import { settlementLineActiveSql, zeroDueLineActiveSql } from "./order-correction-sql.js";
 import {
   codShortfallEnabledSql,
   receivableCollectableNowSql,
@@ -132,6 +133,7 @@ const earlierEffectivePaidSql = (link: string, settlement: string) => {
           on prv_s.id = prv_l.settlement_id and prv_s.company_id = prv_l.company_id
        where prv_l.company_id = ${l}.company_id and prv_l.order_id = ${l}.order_id
          and prv_l.settlement_id <> ${l}.settlement_id
+         and ${settlementLineActiveSql("prv_l")}
          and prv_s.status = 'confirmed' and prv_s.reversal_of_id is null
          and prv_s.created_at < ${st}.created_at
          and not exists (
@@ -517,7 +519,36 @@ export interface TraderSettlementDetail {
   readonly summary: TraderSettlementSummaryTotals;
   readonly traderName: string;
   readonly traderId: string;
+  /** Present only when an order correction took Orders off this Settlement. */
+  readonly amendment?: TraderSettlementAmendment | null;
 }
+
+/**
+ * An Order taken off a posted Settlement by an order correction (DCX). The
+ * Settlement itself is never changed; it is shown "amended" (without these
+ * lines) by default and can still be printed exactly as it was ("original").
+ */
+export interface TraderSettlementRemovedLine {
+  readonly amount: string;
+  readonly correctedAt: string;
+  readonly correctionNumber: string;
+  readonly orderNumber: string;
+  readonly reason: string;
+  readonly recoveryReceivableNumber: string | null;
+  readonly referenceNumber: string | null;
+  readonly serialNumber: string;
+}
+
+export interface TraderSettlementAmendment {
+  /** What this copy shows: "amended" (lines removed) or "original" (as first posted). */
+  readonly version: "amended" | "original";
+  readonly removedLines: readonly TraderSettlementRemovedLine[];
+  /** Net payment of the Settlement as first posted, and after the removals. */
+  readonly originalNetPayment: string;
+  readonly amendedNetPayment: string;
+}
+
+export type TraderSettlementReportVersion = "amended" | "original";
 
 export interface TraderSettlementReportData {
   /** Company identity is used for company-scoped report presentation rules. */
@@ -564,6 +595,8 @@ export interface TraderSettlementReportData {
     /** Trader's mobile from his record (Aiman, 21 Oct 2026); null when none. */
     readonly traderMobile?: string | null;
     readonly traderName: string;
+    /** Present only when an order correction took Orders off this Settlement. */
+    readonly amendment?: TraderSettlementAmendment | null;
   };
   readonly orders: readonly TraderSettlementDetailOrder[];
   readonly receivableOffsets: readonly TraderSettlementReceivableOffset[];
@@ -623,21 +656,28 @@ export interface TraderSettlementDraftListRow extends TraderSettlementDraft {
  * COD, fees and count added to the summary. Amount paid never changes -- each
  * merged line pays 0.00.
  */
-export function mergeZeroDueLines(
-  settled: { readonly lines: readonly TraderSettlementDetailOrder[]; readonly summary: TraderSettlementSummaryTotals },
-  zeroLines: readonly TraderSettlementDetailOrder[],
-): { readonly lines: readonly TraderSettlementDetailOrder[]; readonly summary: TraderSettlementSummaryTotals } {
-  if (zeroLines.length === 0) return settled;
+/** The settlement screen and Trader Invoice order: Reference Number (numeric), then Serial. */
+export function sortSettlementLines(
+  lines: readonly TraderSettlementDetailOrder[],
+): TraderSettlementDetailOrder[] {
   const referenceKey = (line: TraderSettlementDetailOrder) => {
     const digits = (line.referenceNumber ?? "").replace(/[^0-9]/g, "");
     return digits === "" ? Number.POSITIVE_INFINITY : Number(digits);
   };
-  const lines = [...settled.lines, ...zeroLines].sort(
+  return [...lines].sort(
     (a, b) =>
       referenceKey(a) - referenceKey(b) ||
       (a.referenceNumber ?? "").localeCompare(b.referenceNumber ?? "") ||
       a.serialNumber.localeCompare(b.serialNumber),
   );
+}
+
+export function mergeZeroDueLines(
+  settled: { readonly lines: readonly TraderSettlementDetailOrder[]; readonly summary: TraderSettlementSummaryTotals },
+  zeroLines: readonly TraderSettlementDetailOrder[],
+): { readonly lines: readonly TraderSettlementDetailOrder[]; readonly summary: TraderSettlementSummaryTotals } {
+  if (zeroLines.length === 0) return settled;
+  const lines = sortSettlementLines([...settled.lines, ...zeroLines]);
   const sum = (pick: (line: TraderSettlementDetailOrder) => string) =>
     zeroLines.reduce((total, line) => total.plus(pick(line)), new Decimal(0));
   return {
@@ -1102,12 +1142,14 @@ export class TraderSettlementService {
         from trader_settlement_zero_due_orders zc
         join trader_settlements zs on zs.id = zc.settlement_id and zs.company_id = zc.company_id
        where zc.company_id = o.company_id and zc.order_id = o.id
+         and ${zeroDueLineActiveSql("zc")}
          and ${this.effectiveSettlement(sql`zs`)})
       or exists (
       select 1
         from trader_settlement_zero_due_orders zic
         join trader_zero_invoices zi on zi.id = zic.zero_invoice_id and zi.company_id = zic.company_id
        where zic.company_id = o.company_id and zic.order_id = o.id
+         and ${zeroDueLineActiveSql("zic")}
          and zi.reversed_at is null))`;
   }
 
@@ -1162,7 +1204,8 @@ export class TraderSettlementService {
       and o.trader_net_payable = 0
       and o.delivered_at is not null
       and not exists (select 1 from trader_settlement_orders l
-           where l.company_id = o.company_id and l.order_id = o.id)
+           where l.company_id = o.company_id and l.order_id = o.id
+             and ${settlementLineActiveSql("l")})
     )`;
   }
 
@@ -2326,6 +2369,7 @@ export class TraderSettlementService {
             from trader_settlement_orders link
             join orders o on o.id = link.order_id and o.company_id = link.company_id
            where link.settlement_id = ${settlementId}::uuid and link.company_id = ${companyId}::uuid
+             and ${settlementLineActiveSql("link")}
            order by o.id
            for update of o
         `.execute(transaction)
@@ -2503,6 +2547,13 @@ export class TraderSettlementService {
             where e.company_id=${companyId}::uuid and e.related_settlement_id=${settlementId}::uuid
               and e.event_type='trader_settlement.money_received'
          )
+         -- An Order taken off this Settlement by a correction (DCX) keeps its
+         -- old event but is no longer this Settlement's to flip back.
+         and not exists (
+           select 1 from order_correction_lines removed
+            where removed.company_id=o.company_id and removed.order_id=o.id
+              and removed.settlement_id=${settlementId}::uuid
+         )
        for update
     `.execute(transaction)).rows;
     if (links.length === 0) {
@@ -2628,6 +2679,66 @@ export class TraderSettlementService {
           HttpStatus.CONFLICT,
         );
       }
+      // An Order taken off this Settlement by a correction (DCX) is no longer
+      // paid by it: its payment became a recovery the Trader owes back. Undo
+      // the whole Settlement and that recovery has nothing left to recover, so
+      // it is cancelled here -- unless some of it was already recovered, which
+      // must be undone first.
+      const recoveries = (
+        await sql<{
+          amountCollected: string;
+          correctionNumber: string;
+          orderNumber: string;
+          receivableId: string;
+          receivableNumber: string;
+          status: string;
+        }>`
+          select r.id as "receivableId", r.receivable_number as "receivableNumber",
+                 r.status, r.amount_collected::text as "amountCollected",
+                 c.correction_number as "correctionNumber", o.order_number as "orderNumber"
+            from order_correction_lines line
+            join order_corrections c on c.id = line.correction_id and c.company_id = line.company_id
+            join orders o on o.id = line.order_id and o.company_id = line.company_id
+            join trader_receivables r
+              on r.id = line.trader_receivable_id and r.company_id = line.company_id
+           where line.company_id = ${companyId}::uuid
+             and line.settlement_id = ${settlementId}::uuid
+           order by r.receivable_number
+           for update of r
+        `.execute(transaction)
+      ).rows;
+      const touched = recoveries.find(
+        (row) =>
+          !["outstanding", "cancelled"].includes(row.status) ||
+          (row.status === "outstanding" && !new Decimal(row.amountCollected).isZero()),
+      );
+      if (touched !== undefined) {
+        throw new ApplicationException(
+          "settlement_reversal_blocked_by_correction_recovery",
+          `Cannot reverse: ${touched.orderNumber} was taken off this settlement by ${touched.correctionNumber}, and its recovery ${touched.receivableNumber} has already been collected. Reverse that collection first.`,
+          HttpStatus.CONFLICT,
+        );
+      }
+      for (const recovery of recoveries) {
+        if (recovery.status !== "outstanding") continue;
+        await sql`
+          update trader_receivables set status = 'cancelled', updated_at = now()
+           where id = ${recovery.receivableId}::uuid and company_id = ${companyId}::uuid
+        `.execute(transaction);
+        await this.history.audit(transaction, {
+          action: "trader_receivable.cancel",
+          actorId: identity.identityId,
+          after: {
+            correctionNumber: recovery.correctionNumber,
+            reason: `Settlement ${original.settlementNumber} reversed: nothing left to recover for ${recovery.orderNumber}`,
+            receivableNumber: recovery.receivableNumber,
+          },
+          companyId,
+          correlationId,
+          subjectId: recovery.receivableId,
+          subjectType: "trader_receivable",
+        });
+      }
       const moneyReceivedActive =
         (
           await sql<{ active: boolean }>`
@@ -2661,6 +2772,7 @@ export class TraderSettlementService {
             from trader_settlement_orders link
             join orders o on o.id = link.order_id and o.company_id = link.company_id
            where link.settlement_id = ${settlementId}::uuid and link.company_id = ${companyId}::uuid
+             and ${settlementLineActiveSql("link")}
            order by o.id
            for update of o
         `.execute(transaction)
@@ -2998,6 +3110,7 @@ export class TraderSettlementService {
             from trader_settlement_orders link
             join orders o on o.id = link.order_id and o.company_id = link.company_id
            where link.settlement_id = s.id and link.company_id = s.company_id
+             and ${settlementLineActiveSql("link")}
         ) lines on true
         left join lateral (
           select id, occurred_at from audit_events
@@ -3128,7 +3241,14 @@ export class TraderSettlementService {
       receivableOffsets,
       creditApplications,
     );
+    const amendment = await this.settlementAmendment(
+      companyId,
+      settlementId,
+      "amended",
+      summary.netPayment,
+    );
     return {
+      amendment,
       beneficiaryBank: header.beneficiaryBank,
       confirmedBy: header.confirmedBy,
       createdBy: header.createdBy,
@@ -3170,6 +3290,7 @@ export class TraderSettlementService {
           from trader_settlement_orders link
           join trader_settlements s on s.id = link.settlement_id and s.company_id = link.company_id
          where link.company_id = ${companyId}::uuid and link.order_id = ${orderId}::uuid
+           and ${settlementLineActiveSql("link")}
          order by s.created_at desc, s.id desc
          limit 1
       `.execute(this.database)
@@ -3183,12 +3304,15 @@ export class TraderSettlementService {
    * from live catalog state, so regeneration is stable. No PDF is generated
    * here.
    */
-  public async reportData(settlementId: string): Promise<TraderSettlementReportData> {
+  public async reportData(
+    settlementId: string,
+    version: TraderSettlementReportVersion = "amended",
+  ): Promise<TraderSettlementReportData> {
     this.assertAnyPermission(["settlements.create", "reports.export"]);
     const { companyId } = this.tenants.current();
     const header = await this.settlementHeader(companyId, settlementId);
-    const settled = await this.settlementOrders(companyId, settlementId);
-    const orders = await this.withZeroDueOrders(companyId, settlementId, settled);
+    const settled = await this.settlementOrders(companyId, settlementId, version);
+    const orders = await this.withZeroDueOrders(companyId, settlementId, settled, version);
     const receivableOffsets = await this.settlementReceivableOffsets(companyId, settlementId);
     const creditApplications = await this.settlementCreditApplications(companyId, settlementId);
     const branding = await this.companyProfile.branding();
@@ -3206,6 +3330,11 @@ export class TraderSettlementService {
       timeZone: "Asia/Dubai",
       year: "numeric",
     }).format(new Date());
+    const summary = this.settlementSummaryWithOffsets(
+      orders.summary,
+      receivableOffsets,
+      creditApplications,
+    );
     return {
       companyId,
       header: {
@@ -3243,15 +3372,17 @@ export class TraderSettlementService {
         // One-screen Companies have no Money Received step.
         hideMoneyReceived: await this.oneScreenEnabled(this.database, companyId),
         deductionRowsShowOrderMoney: await traderPaysCodShortfall(this.database, companyId),
+        amendment: await this.settlementAmendment(
+          companyId,
+          settlementId,
+          version,
+          summary.netPayment,
+        ),
       },
       orders: orders.lines,
       receivableOffsets,
       creditApplications,
-      summary: this.settlementSummaryWithOffsets(
-        orders.summary,
-        receivableOffsets,
-        creditApplications,
-      ),
+      summary,
     };
   }
 
@@ -3273,6 +3404,7 @@ export class TraderSettlementService {
     companyId: string,
     settlementId: string,
     settled: { readonly lines: readonly TraderSettlementDetailOrder[]; readonly summary: TraderSettlementSummaryTotals },
+    version: TraderSettlementReportVersion = "amended",
   ): Promise<{ readonly lines: readonly TraderSettlementDetailOrder[]; readonly summary: TraderSettlementSummaryTotals }> {
     const rows = (
       await sql<{
@@ -3329,7 +3461,7 @@ export class TraderSettlementService {
              -- Chosen for this Settlement on Create Settlement.
              exists (select 1 from trader_settlement_zero_due_orders z
                       where z.company_id = cur.company_id and z.settlement_id = cur.id
-                        and z.order_id = o.id)
+                        and z.order_id = o.id and ${zeroDueLineActiveSql("z")})
              -- Otherwise by date: delivered after the previous effective
              -- Settlement and no later than this one, unless chosen elsewhere.
              or (o.delivered_at <= cur.created_at
@@ -3338,7 +3470,14 @@ export class TraderSettlementService {
            )
       `.execute(this.database)
     ).rows;
-    if (rows.length === 0) return settled;
+    // The original copy also prints the 0-due Orders a correction took off.
+    const removedZeroLines =
+      version === "original"
+        ? (await this.removedSettlementLines(companyId, settlementId))
+            .filter((line) => line.lineKind === "zero_due" && line.reportLine !== null)
+            .map((line) => line.reportLine as TraderSettlementDetailOrder)
+        : [];
+    if (rows.length === 0 && removedZeroLines.length === 0) return settled;
     const zeroLines: TraderSettlementDetailOrder[] = rows.map((row) => ({
       additionalFees: new Decimal(row.additionalFees).toFixed(2),
       amountPaidNow: "0.00",
@@ -3364,7 +3503,7 @@ export class TraderSettlementService {
       totalDeductions: new Decimal(row.totalDeductions).toFixed(2),
       vatAmount: new Decimal(row.vatAmount).toFixed(2),
     }));
-    return mergeZeroDueLines(settled, zeroLines);
+    return mergeZeroDueLines(settled, [...zeroLines, ...removedZeroLines]);
   }
 
   /**
@@ -3379,11 +3518,12 @@ export class TraderSettlementService {
     settlementId: string,
     language: ReportLanguage,
     correlationId: string,
+    version: TraderSettlementReportVersion = "amended",
   ): Promise<{ bytes: Buffer; filename: string }> {
     this.assertAnyPermission(["settlements.create", "reports.export"]);
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
-    const data = await this.reportData(settlementId);
+    const data = await this.reportData(settlementId, version);
     const html = buildTraderSettlementStatementHtml(data, language);
     const footerTemplate =
       language === "ar"
@@ -3394,11 +3534,14 @@ export class TraderSettlementService {
     // always the `SET-XXXXXX` shape generated by `nextReferenceNumber` — the
     // allowlist strips anything else defensively rather than trusting that.
     const safeNumber = data.header.settlementNumber.replaceAll(/[^A-Za-z0-9-]/g, "");
-    const filename = `Trader-Settlement-${safeNumber}.pdf`;
+    const filename =
+      data.header.amendment?.version === "original"
+        ? `Trader-Settlement-${safeNumber}-original.pdf`
+        : `Trader-Settlement-${safeNumber}.pdf`;
     await this.history.audit(this.database, {
       action: "trader_settlement.report_pdf_generated",
       actorId: identity.identityId,
-      after: { language, settlementNumber: data.header.settlementNumber },
+      after: { language, settlementNumber: data.header.settlementNumber, version },
       companyId,
       correlationId,
       subjectId: settlementId,
@@ -3702,6 +3845,43 @@ export class TraderSettlementService {
    * Un-post a 0.00 invoice: mark it reversed (its Orders can be invoiced
    * again) and reopen the same lines as a new draft. No money was involved.
    */
+  /**
+   * The draft to reopen on Un-post, without the Orders an order correction
+   * (DCX) took off the posted documents: they are no longer delivered and
+   * would make the reopened draft impossible to post.
+   */
+  private async payloadWithoutCorrectedOrders(
+    transaction: Transaction<DatabaseSchema>,
+    companyId: string,
+    draft: PostedDraftRow,
+  ): Promise<CreateTraderSettlementDto> {
+    const removed = new Set(
+      (
+        await sql<{ orderId: string }>`
+          select distinct line.order_id::text as "orderId" from order_correction_lines line
+           where line.company_id = ${companyId}::uuid
+             and ((${draft.confirmedSettlementId}::uuid is not null
+                   and line.settlement_id = ${draft.confirmedSettlementId}::uuid)
+               or (${draft.zeroInvoiceId ?? null}::uuid is not null
+                   and line.zero_invoice_id = ${draft.zeroInvoiceId ?? null}::uuid))
+        `.execute(transaction)
+      ).rows.map((row) => row.orderId),
+    );
+    if (removed.size === 0) return draft.payload;
+    const allocations = draft.payload.allocations ?? [];
+    const removedMoney = allocations
+      .filter((line) => removed.has(line.orderId))
+      .reduce((sum, line) => sum.plus(line.amount), new Decimal(0));
+    return {
+      ...draft.payload,
+      allocations: allocations.filter((line) => !removed.has(line.orderId)),
+      amount: new Decimal(draft.payload.amount).minus(removedMoney).toNumber(),
+      ...(draft.payload.zeroDueOrderIds === undefined
+        ? {}
+        : { zeroDueOrderIds: draft.payload.zeroDueOrderIds.filter((id) => !removed.has(id)) }),
+    } as CreateTraderSettlementDto;
+  }
+
   private async unpostZeroInvoiceInTransaction(
     transaction: Transaction<DatabaseSchema>,
     companyId: string,
@@ -3753,7 +3933,8 @@ export class TraderSettlementService {
         insert into trader_settlement_drafts(
           company_id, trader_id, payload, created_by_account_id, updated_by_account_id
         ) values (
-          ${companyId}::uuid, ${draft.traderId}::uuid, ${JSON.stringify(draft.payload)}::jsonb,
+          ${companyId}::uuid, ${draft.traderId}::uuid,
+          ${JSON.stringify(await this.payloadWithoutCorrectedOrders(transaction, companyId, draft))}::jsonb,
           ${identity.identityId}::uuid, ${identity.identityId}::uuid
         )
         returning id
@@ -3861,7 +4042,8 @@ export class TraderSettlementService {
         insert into trader_settlement_drafts(
           company_id, trader_id, payload, created_by_account_id, updated_by_account_id
         ) values (
-          ${companyId}::uuid, ${draft.traderId}::uuid, ${JSON.stringify(draft.payload)}::jsonb,
+          ${companyId}::uuid, ${draft.traderId}::uuid,
+          ${JSON.stringify(await this.payloadWithoutCorrectedOrders(transaction, companyId, draft))}::jsonb,
           ${identity.identityId}::uuid, ${identity.identityId}::uuid
         )
         returning id
@@ -3899,9 +4081,10 @@ export class TraderSettlementService {
     const allocations = (
       await sql<{ amount: string; orderId: string }>`
         select order_id as "orderId", allocated_amount::text as amount
-          from trader_settlement_orders
+          from trader_settlement_orders line
          where company_id = ${companyId}::uuid and settlement_id = ${settlement.id}::uuid
            and allocated_amount > 0
+           and ${settlementLineActiveSql("line")}
          order by created_at, id
       `.execute(transaction)
     ).rows;
@@ -3922,8 +4105,9 @@ export class TraderSettlementService {
     ).rows;
     const zeroDue = (
       await sql<{ orderId: string }>`
-        select order_id as "orderId" from trader_settlement_zero_due_orders
+        select order_id as "orderId" from trader_settlement_zero_due_orders zero_line
          where company_id = ${companyId}::uuid and settlement_id = ${settlement.id}::uuid
+           and ${zeroDueLineActiveSql("zero_line")}
       `.execute(transaction)
     ).rows;
     const payment = (
@@ -3951,9 +4135,18 @@ export class TraderSettlementService {
       `.execute(transaction)
     ).rows[0]?.notes;
     const method = payment?.method ?? "cash";
+    // Lines taken off by a correction (DCX) are not re-offered, so neither is
+    // the money they were paid.
+    const removedTotal = (
+      await sql<{ total: string }>`
+        select coalesce(sum(amount), 0)::text as total from order_correction_lines
+         where company_id = ${companyId}::uuid and settlement_id = ${settlement.id}::uuid
+           and line_kind = 'trader_settlement'
+      `.execute(transaction)
+    ).rows[0]?.total ?? "0";
     return {
       allocations: allocations.map((line) => ({ amount: Number(line.amount), orderId: line.orderId })),
-      amount: Number(settlement.netPayable),
+      amount: new Decimal(settlement.netPayable).minus(removedTotal).toNumber(),
       ...(method === "bank_transfer"
         ? {
             ...(payment?.bankAccountId ? { bankAccountId: payment.bankAccountId } : {}),
@@ -4003,7 +4196,8 @@ export class TraderSettlementService {
                (select a.username from accounts a
                  where a.id = zi.created_by_account_id and a.company_id = zi.company_id) as "confirmedBy",
                coalesce((select array_agg(z.order_id::text) from trader_settlement_zero_due_orders z
-                          where z.company_id = zi.company_id and z.zero_invoice_id = zi.id), '{}') as "orderIds"
+                          where z.company_id = zi.company_id and z.zero_invoice_id = zi.id
+                            and ${zeroDueLineActiveSql("z")}), '{}') as "orderIds"
           from trader_zero_invoices zi
          where zi.id = ${draft.confirmedZeroInvoiceId}::uuid and zi.company_id = ${companyId}::uuid
       `.execute(this.database)
@@ -4532,13 +4726,17 @@ export class TraderSettlementService {
     };
   }
 
-  private async settlementOrders(
+  /**
+   * The Order lines still on a Settlement, as its screen and invoice show
+   * them. Also used by the order correction to store a removed line exactly
+   * as it was printed.
+   */
+  public async activeSettlementLines(
+    executor: Kysely<DatabaseSchema>,
     companyId: string,
     settlementId: string,
-  ): Promise<{
-    readonly lines: readonly TraderSettlementDetailOrder[];
-    readonly summary: TraderSettlementSummaryTotals;
-  }> {
+    orderId?: string,
+  ): Promise<TraderSettlementDetailOrder[]> {
     const rows = (
       await sql<{
         additionalFees: string;
@@ -4593,6 +4791,8 @@ export class TraderSettlementService {
           left join areas a on a.id = o.area_id and a.company_id = o.company_id
           left join emirates e on e.id = a.emirate_id
          where link.settlement_id = ${settlementId}::uuid and link.company_id = ${companyId}::uuid
+           and ${settlementLineActiveSql("link")}
+           and (${orderId ?? null}::uuid is null or link.order_id = ${orderId ?? null}::uuid)
          -- Reference Number first, compared NUMERICALLY (lexically '10' sorts
          -- before '9'); text as the tie-break for references that carry
          -- letters, Orders without a reference last, then the Serial Number
@@ -4602,9 +4802,9 @@ export class TraderSettlementService {
                   o.reference_number asc nulls last,
                   nullif(regexp_replace(coalesce(o.serial_number, o.order_number), '[^0-9]', '', 'g'), '')::numeric asc nulls last,
                   o.id asc
-      `.execute(this.database)
+      `.execute(executor)
     ).rows;
-    const lines: TraderSettlementDetailOrder[] = rows.map((row) => ({
+    return rows.map((row) => ({
       additionalFees: new Decimal(row.additionalFees).toFixed(2),
       amountPaidNow: new Decimal(row.allocatedAmount).toFixed(2),
       areaName: row.areaName,
@@ -4629,6 +4829,28 @@ export class TraderSettlementService {
       totalDeductions: new Decimal(row.totalDeductions).toFixed(2),
       vatAmount: new Decimal(row.vatAmount).toFixed(2),
     }));
+  }
+
+  private async settlementOrders(
+    companyId: string,
+    settlementId: string,
+    version: TraderSettlementReportVersion = "amended",
+  ): Promise<{
+    readonly lines: readonly TraderSettlementDetailOrder[];
+    readonly summary: TraderSettlementSummaryTotals;
+  }> {
+    const activeLines = await this.activeSettlementLines(this.database, companyId, settlementId);
+    // The original copy prints the Orders a correction took off as they were
+    // when it did (their stored report line), in the usual order.
+    const lines =
+      version === "original"
+        ? sortSettlementLines([
+            ...activeLines,
+            ...(await this.removedSettlementLines(companyId, settlementId))
+              .filter((line) => line.lineKind === "trader_settlement" && line.reportLine !== null)
+              .map((line) => line.reportLine as TraderSettlementDetailOrder),
+          ])
+        : activeLines;
     const totals = lines.reduce(
       (acc, line) => ({
         amountPaidNow: acc.amountPaidNow.plus(line.amountPaidNow),
@@ -4670,6 +4892,73 @@ export class TraderSettlementService {
         totalVat: totals.totalVat.toFixed(2),
         traderFeeDeductions: "0.00",
       },
+    };
+  }
+
+  /**
+   * Every line an order correction (DCX) took off this Settlement, with the
+   * report line stored when it did, so the original copy can print it as it
+   * was even after the Order itself was cancelled or edited.
+   */
+  private async removedSettlementLines(
+    companyId: string,
+    settlementId: string,
+  ): Promise<
+    readonly (TraderSettlementRemovedLine & {
+      readonly lineKind: "trader_settlement" | "zero_due";
+      readonly reportLine: TraderSettlementDetailOrder | null;
+    })[]
+  > {
+    const rows = await sql<{
+      amount: string;
+      correctedAt: string;
+      correctionNumber: string;
+      lineKind: "trader_settlement" | "zero_due";
+      orderNumber: string;
+      reason: string;
+      recoveryReceivableNumber: string | null;
+      referenceNumber: string | null;
+      reportLine: TraderSettlementDetailOrder | null;
+      serialNumber: string;
+    }>`
+      select line.line_kind as "lineKind", line.amount::text as amount,
+             line.snapshot -> 'reportLine' as "reportLine",
+             c.correction_number as "correctionNumber", c.reason,
+             c.created_at::text as "correctedAt",
+             o.order_number as "orderNumber",
+             coalesce(o.serial_number, o.order_number) as "serialNumber",
+             o.reference_number as "referenceNumber",
+             r.receivable_number as "recoveryReceivableNumber"
+        from order_correction_lines line
+        join order_corrections c on c.id = line.correction_id and c.company_id = line.company_id
+        join orders o on o.id = line.order_id and o.company_id = line.company_id
+        left join trader_receivables r
+          on r.id = line.trader_receivable_id and r.company_id = line.company_id
+       where line.company_id = ${companyId}::uuid
+         and line.settlement_id = ${settlementId}::uuid
+       order by c.created_at, c.correction_number
+    `.execute(this.database);
+    return rows.rows.map((row) => ({ ...row, amount: new Decimal(row.amount).toFixed(2) }));
+  }
+
+  /** The amendment block for a Settlement, or null when no correction touched it. */
+  private async settlementAmendment(
+    companyId: string,
+    settlementId: string,
+    version: TraderSettlementReportVersion,
+    shownNetPayment: string,
+  ): Promise<TraderSettlementAmendment | null> {
+    const removed = await this.removedSettlementLines(companyId, settlementId);
+    if (removed.length === 0) return null;
+    const removedMoney = removed
+      .filter((line) => line.lineKind === "trader_settlement")
+      .reduce((total, line) => total.plus(line.amount), new Decimal(0));
+    const shown = new Decimal(shownNetPayment);
+    return {
+      amendedNetPayment: (version === "original" ? shown.minus(removedMoney) : shown).toFixed(2),
+      originalNetPayment: (version === "original" ? shown : shown.plus(removedMoney)).toFixed(2),
+      removedLines: removed.map(({ lineKind: _lineKind, reportLine: _reportLine, ...line }) => line),
+      version,
     };
   }
 
@@ -5144,6 +5433,7 @@ export class TraderSettlementService {
         left join lateral (
           select count(*)::int as total from trader_settlement_orders link
            where link.settlement_id = s.id and link.company_id = s.company_id
+             and ${settlementLineActiveSql("link")}
         ) lines on true
         left join lateral (
           select count(*)::int as total from trader_settlement_receivable_offsets x

@@ -139,6 +139,7 @@ import {
   ProposeTraderAllocationDto,
   ReconciliationListQueryDto,
   ReopenDeliveredOrderDto,
+  CreateOrderCorrectionDto,
   ReverseTraderSettlementDto,
   ReverseTraderSettlementReceiptDto,
   ReverseTraderCollectionDto,
@@ -166,6 +167,12 @@ import {
   UpdateTraderPortalProfileDto,
 } from "./operations.dto.js";
 import { OrderDeliveryReopenService } from "./order-delivery-reopen.service.js";
+import {
+  OrderCorrectionService,
+  type OrderCorrectionHistoryRow,
+  type OrderCorrectionPreview,
+  type OrderCorrectionResult,
+} from "./order-correction.service.js";
 import { OrderMaintenanceService, type TraderReceivableResetPreview } from "./order-maintenance.service.js";
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
 import { FastEntrySheetService, type FastEntrySheetResult } from "./fast-entry-sheet.service.js";
@@ -202,6 +209,8 @@ export class OperationsController {
     private readonly orderQuestionAsk: OrderQuestionAskService,
     @Inject(FastEntrySheetService)
     private readonly fastEntrySheet: FastEntrySheetService,
+    @Inject(OrderCorrectionService)
+    private readonly orderCorrections: OrderCorrectionService,
   ) {}
 
   // Either permission reaches the route; the SERVICE decides which one the
@@ -1017,8 +1026,12 @@ export class OperationsController {
   @Get("cash/reconciliations/:reconciliationId/report-data")
   public driverReconciliationReportData(
     @Param("reconciliationId", new ParseUUIDPipe()) reconciliationId: string,
+    @Query("version") version: string | undefined,
   ): Promise<DriverCollectionReportData> {
-    return this.reconciliations.reportData(reconciliationId);
+    return this.reconciliations.reportData(
+      reconciliationId,
+      version === "original" ? "original" : "amended",
+    );
   }
 
   @RequireAnyPermission("reconciliations.create", "reports.export", "users_roles.manage")
@@ -1027,6 +1040,7 @@ export class OperationsController {
   public async driverReconciliationPdf(
     @Param("reconciliationId", new ParseUUIDPipe()) reconciliationId: string,
     @Query("language") language: string | undefined,
+    @Query("version") version: string | undefined,
     @Req() request: Request,
     @Res() response: Response,
   ): Promise<void> {
@@ -1035,6 +1049,7 @@ export class OperationsController {
       reconciliationId,
       resolvedLanguage,
       this.correlationId(request),
+      version === "original" ? "original" : "amended",
     );
     response.setHeader("Content-Type", "application/pdf");
     response.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
@@ -1310,6 +1325,41 @@ export class OperationsController {
     @Req() request: Request,
   ): Promise<{ created: boolean; amount: string }> {
     return this.operations.repairTraderReceivable(orderId, this.correlationId(request));
+  }
+
+  @RequireAnyPermission("users_roles.manage")
+  @ApiOperation({
+    summary: "Preview correcting a wrongly delivered Order (DCX): what would be taken off which document",
+  })
+  @Get("orders/:orderId/correction-preview")
+  public orderCorrectionPreview(
+    @Param("orderId", new ParseUUIDPipe()) orderId: string,
+  ): Promise<OrderCorrectionPreview> {
+    return this.orderCorrections.preview(orderId);
+  }
+
+  @RequireAnyPermission("users_roles.manage")
+  @ApiOperation({
+    summary:
+      "Correct a wrongly delivered Order (DCX): take it off its Driver collection and Trader settlements and reopen it",
+  })
+  @Post("orders/:orderId/corrections")
+  public correctOrder(
+    @Param("orderId", new ParseUUIDPipe()) orderId: string,
+    @Body() input: CreateOrderCorrectionDto,
+    @Req() request: Request,
+  ): Promise<OrderCorrectionResult> {
+    return this.orderCorrections.correct(orderId, input.reason, this.correlationId(request));
+  }
+
+  // Any Company user who can open the Order sees why its documents changed.
+  @RequireAnyPermission()
+  @ApiOperation({ summary: "Order corrections (DCX) made to one Order, newest first" })
+  @Get("orders/:orderId/corrections")
+  public orderCorrectionHistory(
+    @Param("orderId", new ParseUUIDPipe()) orderId: string,
+  ): Promise<readonly OrderCorrectionHistoryRow[]> {
+    return this.orderCorrections.correctionsForOrder(orderId);
   }
 
   @RequireAnyPermission("users_roles.manage")
@@ -1701,8 +1751,13 @@ export class OperationsController {
   @Get("settlements/payments/:settlementId/report-data")
   public traderSettlementReportData(
     @Param("settlementId", new ParseUUIDPipe()) settlementId: string,
+    @Query("version") version: string | undefined,
   ): Promise<TraderSettlementReportData> {
-    return this.traderSettlementService.reportData(settlementId);
+    // "original": as first posted, before any order correction took Orders off.
+    return this.traderSettlementService.reportData(
+      settlementId,
+      version === "original" ? "original" : "amended",
+    );
   }
 
   @RequireAnyPermission("settlements.create", "reports.export", "users_roles.manage")
@@ -1711,6 +1766,7 @@ export class OperationsController {
   public async traderSettlementPdf(
     @Param("settlementId", new ParseUUIDPipe()) settlementId: string,
     @Query("language") language: string | undefined,
+    @Query("version") version: string | undefined,
     @Req() request: Request,
     @Res() response: Response,
   ): Promise<void> {
@@ -1719,6 +1775,7 @@ export class OperationsController {
       settlementId,
       resolvedLanguage,
       this.correlationId(request),
+      version === "original" ? "original" : "amended",
     );
     response.setHeader("Content-Type", "application/pdf");
     response.setHeader("Content-Disposition", `attachment; filename="${filename}"`);

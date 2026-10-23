@@ -872,6 +872,15 @@ export class ReopenDeliveredOrderDto {
   public readonly reason!: string;
 }
 
+/** Correct a wrongly delivered Order (DCX): the reason is printed on the amended documents. */
+export class CreateOrderCorrectionDto {
+  @IsString()
+  @MinLength(3)
+  @MaxLength(500)
+  @TrimText()
+  public readonly reason!: string;
+}
+
 export class OrderQuoteDto {
   @IsUUID()
   public readonly traderId!: string;

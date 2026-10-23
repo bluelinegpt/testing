@@ -98,6 +98,8 @@ const APPROVED_TRIGGERS: TriggerApproval[] = [
       "order_assignments_history_guard",
       "order_events_append_only",
       "order_status_history_append_only",
+      "order_corrections_append_only",
+      "order_correction_lines_append_only",
       "orders_assignment_consistency",
     ],
   },

@@ -5,6 +5,7 @@ import { Decimal } from "decimal.js";
 import { type Kysely, sql, type Transaction } from "kysely";
 
 import { CompanyProfileService } from "../company-profile/company-profile.service.js";
+import { collectionLineActiveSql } from "./order-correction-sql.js";
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
 import {
   buildDriverCollectionReportHtml,
@@ -295,6 +296,21 @@ export interface DriverCollectionsSummary {
  * state, so a report regenerated later is byte-identical. No internal database
  * IDs appear anywhere in this shape.
  */
+export interface DriverCollectionAmendment {
+  readonly version: "amended" | "original";
+  readonly originalReceived: string;
+  readonly amendedReceived: string;
+  readonly removedLines: readonly {
+    readonly amount: string;
+    readonly correctedAt: string;
+    readonly correctionNumber: string;
+    readonly orderNumber: string;
+    readonly reason: string;
+    readonly referenceNumber: string | null;
+    readonly serialNumber: string;
+  }[];
+}
+
 export interface DriverCollectionReportData {
   readonly expenses: readonly {
     readonly amount: string;
@@ -344,6 +360,8 @@ export interface DriverCollectionReportData {
     readonly reversedByReconciliationNumber: string | null;
     readonly status: "confirmed" | "draft";
     readonly statusLabel: string;
+    /** Present only when an order correction (DCX) took Orders off this collection. */
+    readonly amendment?: DriverCollectionAmendment | null;
   };
   readonly orders: readonly {
     readonly additionalFees: string;
@@ -1206,6 +1224,26 @@ export class DriverCashReconciliationService {
           HttpStatus.CONFLICT,
         );
       }
+      // A correction (DCX) already took an Order and its money off this
+      // collection. Reversing the whole collection would undo that money a
+      // second time, so it is refused.
+      const correction = (
+        await sql<{ correctionNumber: string }>`
+          select c.correction_number as "correctionNumber"
+            from order_correction_lines line
+            join order_corrections c on c.id = line.correction_id and c.company_id = line.company_id
+           where line.company_id = ${companyId}::uuid
+             and line.reconciliation_id = ${reconciliationId}::uuid
+           order by c.created_at limit 1
+        `.execute(transaction)
+      ).rows[0];
+      if (correction !== undefined) {
+        throw new ApplicationException(
+          "reconciliation_reversal_blocked_by_correction",
+          `Cannot reverse: an Order was already taken off this collection by ${correction.correctionNumber}`,
+          HttpStatus.CONFLICT,
+        );
+      }
       const links = (
         await sql<{
           driverReconciliationStatus: string;
@@ -1678,6 +1716,7 @@ export class DriverCashReconciliationService {
         left join lateral (
           select count(*)::int as total from driver_reconciliation_orders link
            where link.reconciliation_id = r.id and link.company_id = r.company_id
+             and ${collectionLineActiveSql("link")}
         ) links on true
         left join lateral (
           select coalesce(sum(${signedPaymentAmount}), 0) as total from driver_reconciliation_payments p
@@ -1783,9 +1822,13 @@ export class DriverCashReconciliationService {
           as "paidToDrivers",
         coalesce(sum(r.reconciliation_expenses) filter (where r.status = 'confirmed'), 0)::text
           as "driverExpenses",
-        coalesce(sum(r.net_amount_received) filter (where r.status = 'confirmed'), 0)::text
+        -- Money an order correction (DCX) took back out is neither expected
+        -- nor received any more.
+        coalesce(sum(r.net_amount_received - coalesce(removed.total, 0))
+          filter (where r.status = 'confirmed'), 0)::text
           as "netExpectedFromDrivers",
-        coalesce(sum(coalesce(payments.total, 0)) filter (where r.status = 'confirmed'), 0)::text
+        coalesce(sum(coalesce(payments.total, 0) - coalesce(removed.total, 0))
+          filter (where r.status = 'confirmed'), 0)::text
           as "actualAmountReceived",
         count(*) filter (
           where r.status = 'confirmed' and not exists (
@@ -1815,7 +1858,13 @@ export class DriverCashReconciliationService {
             ), 0) as visa_total
             from driver_reconciliation_orders link
            where link.reconciliation_id = r.id and link.company_id = r.company_id
+             and ${collectionLineActiveSql("link")}
         ) lines on true
+        left join lateral (
+          select sum(x.amount) as total from order_correction_lines x
+           where x.company_id = r.company_id and x.reconciliation_id = r.id
+             and x.line_kind = 'driver_collection'
+        ) removed on true
        where ${filters}
     `.execute(this.database);
 
@@ -1871,6 +1920,7 @@ export class DriverCashReconciliationService {
         left join lateral (
           select count(*)::int as total from driver_reconciliation_orders link
            where link.reconciliation_id = r.id and link.company_id = r.company_id
+             and ${collectionLineActiveSql("link")}
         ) links on true
         left join lateral (
           select coalesce(sum(${signedPaymentAmount}), 0) as total from driver_reconciliation_payments p
@@ -1894,7 +1944,11 @@ export class DriverCashReconciliationService {
       select o.id, o.order_number as "orderNumber", o.customer_name as "customerName",
              link.customer_collection_amount::text as "amountCollected",
              link.driver_payable_deduction::text as "driverPayableDeduction",
-             o.driver_reconciliation_status as "cashStatus"
+             o.driver_reconciliation_status as "cashStatus",
+             (select c.correction_number from order_correction_lines removed
+                join order_corrections c on c.id = removed.correction_id and c.company_id = removed.company_id
+               where removed.company_id = link.company_id
+                 and removed.driver_reconciliation_order_id = link.id) as "removedByCorrectionNumber"
         from driver_reconciliation_orders link
         join orders o on o.id = link.order_id and o.company_id = link.company_id
        where link.reconciliation_id = ${reconciliationId}::uuid
@@ -2032,6 +2086,7 @@ export class DriverCashReconciliationService {
           left join areas a on a.id = o.area_id and a.company_id = o.company_id
          where link.reconciliation_id = ${reconciliationId}::uuid
            and link.company_id = ${companyId}::uuid
+           and ${collectionLineActiveSql("link")}
          order by t.name_en, coalesce(o.serial_number, o.order_number)
       `.execute(this.database)
     ).rows;
@@ -2111,6 +2166,7 @@ export class DriverCashReconciliationService {
         join driver_reconciliations r on r.id = link.reconciliation_id and r.company_id = link.company_id
        where link.company_id = ${companyId}::uuid
          and link.order_id = ${orderId}::uuid
+         and ${collectionLineActiveSql("link")}
          and r.status = 'confirmed'
          and not exists (
            select 1 from driver_reconciliations rv
@@ -2132,7 +2188,10 @@ export class DriverCashReconciliationService {
    * reconciliation is identical. No internal database IDs are returned. Three
    * queries total (header+company, orders, expenses): no N+1.
    */
-  public async reportData(reconciliationId: string): Promise<DriverCollectionReportData> {
+  public async reportData(
+    reconciliationId: string,
+    version: "amended" | "original" = "amended",
+  ): Promise<DriverCollectionReportData> {
     this.assertAnyPermission(["reconciliations.create", "reports.export"]);
     const { companyId } = this.tenants.current();
     const header = (
@@ -2206,59 +2265,18 @@ export class DriverCashReconciliationService {
     }
     const branding = await this.companyProfile.branding();
 
+    // Lines a correction (DCX) took off this collection: shown "amended"
+    // (without them) by default; the original copy prints them as they were.
+    const removed = await this.removedCollectionLines(this.database, companyId, reconciliationId);
+    const removedByLine = new Map(removed.map((line) => [line.driverReconciliationOrderId, line]));
     const orderRows = (
-      await sql<{
-        additionalFees: string;
-        areaName: string;
-        codAmount: string;
-        customerAmountToCollect: string;
-        customerName: string;
-        deliveryDate: string | null;
-        driverReconciliationStatus: string;
-        emirateName: string | null;
-        paymentMethod: LineMethod | null;
-        orderNumber: string;
-        referenceNumber: string | null;
-        serialNumber: string;
-        serviceFee: string;
-        totalDeductions: string;
-        traderCode: string | null;
-        traderName: string;
-        traderPayable: string;
-        vatAmount: string;
-      }>`
-        -- Order NUMBER and Trader CODE are the values the detail routes
-        -- consume; the Serial Number and Trader Name stay as the values the
-        -- User reads. Additive: no existing field changes.
-        select o.order_number as "orderNumber", t.code as "traderCode",
-               coalesce(o.serial_number, o.order_number) as "serialNumber",
-               o.reference_number as "referenceNumber",
-               o.delivered_at::text as "deliveryDate",
-               coalesce(t.name_ar, t.name_en) as "traderName",
-               o.customer_name as "customerName",
-               coalesce(e.name_ar, e.name_en) as "emirateName",
-               coalesce(o.customer_area_name_ar_snapshot, a.name_ar,
-                        o.customer_area_name_snapshot, a.name_en, '') as "areaName",
-               o.cod_amount::text as "codAmount",
-               o.customer_amount_due::text as "customerAmountToCollect",
-               o.service_fee::text as "serviceFee",
-               coalesce(o.additional_fees, 0)::text as "additionalFees",
-               coalesce(o.vat_amount, 0)::text as "vatAmount",
-               coalesce(o.total_deductions, o.customer_amount_due - o.trader_net_payable)::text
-                 as "totalDeductions",
-               o.trader_net_payable::text as "traderPayable",
-               link.collection_payment_method as "paymentMethod",
-               o.driver_reconciliation_status as "driverReconciliationStatus"
-          from driver_reconciliation_orders link
-          join orders o on o.id = link.order_id and o.company_id = link.company_id
-          join traders t on t.id = o.trader_id and t.company_id = o.company_id
-          left join areas a on a.id = o.area_id and a.company_id = o.company_id
-          left join emirates e on e.id = a.emirate_id
-         where link.reconciliation_id = ${reconciliationId}::uuid
-           and link.company_id = ${companyId}::uuid
-         order by coalesce(o.serial_number, o.order_number)
-      `.execute(this.database)
-    ).rows;
+      await this.reportOrderRows(this.database, companyId, reconciliationId)
+    )
+      .filter((row) => version === "original" || !removedByLine.has(row.linkId))
+      .map((row) => {
+        const stored = removedByLine.get(row.linkId)?.reportRow;
+        return stored === undefined || stored === null ? row : { ...row, ...stored, linkId: row.linkId };
+      });
 
     const expenseRows = (
       await sql<{
@@ -2291,7 +2309,12 @@ export class DriverCashReconciliationService {
          where p.reconciliation_id = ${reconciliationId}::uuid and p.company_id = ${companyId}::uuid
       `.execute(this.database)
     ).rows[0]?.total;
-    const actualReceived = new Decimal(paymentTotal ?? "0");
+    // The amended copy no longer counts the money a correction took out: it
+    // was never received for the removed Orders.
+    const removedMoney = removed.reduce((sum, line) => sum.plus(line.amount), new Decimal(0));
+    const receivedAsPosted = new Decimal(paymentTotal ?? "0");
+    const actualReceived =
+      version === "original" ? receivedAsPosted : receivedAsPosted.minus(removedMoney);
 
     const grossCollections = orderRows.reduce(
       (sum, order) => sum.plus(order.customerAmountToCollect),
@@ -2361,6 +2384,23 @@ export class DriverCashReconciliationService {
         reversesReconciliationNumber: header.reversesReconciliationNumber,
         status: header.status,
         statusLabel: reconciliationStatusLabel(header.status),
+        amendment:
+          removed.length === 0
+            ? null
+            : {
+                amendedReceived: receivedAsPosted.minus(removedMoney).toFixed(2),
+                originalReceived: receivedAsPosted.toFixed(2),
+                removedLines: removed.map((line) => ({
+                  amount: line.amount,
+                  correctedAt: line.correctedAt,
+                  correctionNumber: line.correctionNumber,
+                  orderNumber: line.orderNumber,
+                  reason: line.reason,
+                  referenceNumber: line.referenceNumber,
+                  serialNumber: line.serialNumber,
+                })),
+                version,
+              },
       },
       orders: orderRows.map((row) => ({
         additionalFees: new Decimal(row.additionalFees).toFixed(2),
@@ -2407,6 +2447,107 @@ export class DriverCashReconciliationService {
   }
 
   /**
+   * The Order lines of a collection as its report reads them. Also used by
+   * the order correction to store the removed line as it was printed.
+   */
+  public async reportOrderRows(
+    executor: Kysely<DatabaseSchema>,
+    companyId: string,
+    reconciliationId: string,
+    orderId?: string,
+  ) {
+    return (
+      await sql<{
+        linkId: string;
+        additionalFees: string;
+        areaName: string;
+        codAmount: string;
+        customerAmountToCollect: string;
+        customerName: string;
+        deliveryDate: string | null;
+        driverReconciliationStatus: string;
+        emirateName: string | null;
+        paymentMethod: LineMethod | null;
+        orderNumber: string;
+        referenceNumber: string | null;
+        serialNumber: string;
+        serviceFee: string;
+        totalDeductions: string;
+        traderCode: string | null;
+        traderName: string;
+        traderPayable: string;
+        vatAmount: string;
+      }>`
+        -- Order NUMBER and Trader CODE are the values the detail routes
+        -- consume; the Serial Number and Trader Name stay as the values the
+        -- User reads. Additive: no existing field changes.
+        select link.id as "linkId", o.order_number as "orderNumber", t.code as "traderCode",
+               coalesce(o.serial_number, o.order_number) as "serialNumber",
+               o.reference_number as "referenceNumber",
+               o.delivered_at::text as "deliveryDate",
+               coalesce(t.name_ar, t.name_en) as "traderName",
+               o.customer_name as "customerName",
+               coalesce(e.name_ar, e.name_en) as "emirateName",
+               coalesce(o.customer_area_name_ar_snapshot, a.name_ar,
+                        o.customer_area_name_snapshot, a.name_en, '') as "areaName",
+               o.cod_amount::text as "codAmount",
+               o.customer_amount_due::text as "customerAmountToCollect",
+               o.service_fee::text as "serviceFee",
+               coalesce(o.additional_fees, 0)::text as "additionalFees",
+               coalesce(o.vat_amount, 0)::text as "vatAmount",
+               coalesce(o.total_deductions, o.customer_amount_due - o.trader_net_payable)::text
+                 as "totalDeductions",
+               o.trader_net_payable::text as "traderPayable",
+               link.collection_payment_method as "paymentMethod",
+               o.driver_reconciliation_status as "driverReconciliationStatus"
+          from driver_reconciliation_orders link
+          join orders o on o.id = link.order_id and o.company_id = link.company_id
+          join traders t on t.id = o.trader_id and t.company_id = o.company_id
+          left join areas a on a.id = o.area_id and a.company_id = o.company_id
+          left join emirates e on e.id = a.emirate_id
+         where link.reconciliation_id = ${reconciliationId}::uuid
+           and link.company_id = ${companyId}::uuid
+           and (${orderId ?? null}::uuid is null or link.order_id = ${orderId ?? null}::uuid)
+         order by coalesce(o.serial_number, o.order_number)
+      `.execute(executor)
+    ).rows;
+  }
+
+  /** Lines an order correction (DCX) took off this collection. */
+  private async removedCollectionLines(
+    executor: Kysely<DatabaseSchema>,
+    companyId: string,
+    reconciliationId: string,
+  ) {
+    const rows = await sql<{
+      amount: string;
+      correctedAt: string;
+      correctionNumber: string;
+      driverReconciliationOrderId: string;
+      orderNumber: string;
+      reason: string;
+      referenceNumber: string | null;
+      reportRow: Record<string, unknown> | null;
+      serialNumber: string;
+    }>`
+      select line.driver_reconciliation_order_id as "driverReconciliationOrderId",
+             line.amount::text as amount, line.snapshot -> 'reportRow' as "reportRow",
+             c.correction_number as "correctionNumber", c.reason,
+             c.created_at::text as "correctedAt", o.order_number as "orderNumber",
+             coalesce(o.serial_number, o.order_number) as "serialNumber",
+             o.reference_number as "referenceNumber"
+        from order_correction_lines line
+        join order_corrections c on c.id = line.correction_id and c.company_id = line.company_id
+        join orders o on o.id = line.order_id and o.company_id = line.company_id
+       where line.company_id = ${companyId}::uuid
+         and line.reconciliation_id = ${reconciliationId}::uuid
+         and line.line_kind = 'driver_collection'
+       order by c.created_at, c.correction_number
+    `.execute(executor);
+    return rows.rows.map((row) => ({ ...row, amount: new Decimal(row.amount).toFixed(2) }));
+  }
+
+  /**
    * True, downloadable PDF file for the Driver Collection Report (§12/§19),
    * server-authoritative end to end: the same `reportData()` snapshot backs
    * both the JSON view and this PDF, rendered from server-built HTML via a
@@ -2418,11 +2559,12 @@ export class DriverCashReconciliationService {
     reconciliationId: string,
     language: ReportLanguage,
     correlationId: string,
+    version: "amended" | "original" = "amended",
   ): Promise<{ bytes: Buffer; filename: string }> {
     this.assertAnyPermission(["reconciliations.create", "reports.export"]);
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
-    const data = await this.reportData(reconciliationId);
+    const data = await this.reportData(reconciliationId, version);
     const logoDataUri = data.header.company.hasLogo
       ? await this.companyProfile
           .logoContent()
@@ -2644,6 +2786,7 @@ export class DriverCashReconciliationService {
         join orders o on o.id = link.order_id and o.company_id = link.company_id
        where link.company_id = ${companyId}::uuid
          and link.order_id in (${sql.join(orders.map((order) => sql`${order.id}::uuid`))})
+         and ${collectionLineActiveSql("link")}
          and r.status = 'confirmed'
          and not exists (
            select 1 from driver_reconciliations rv
@@ -2837,6 +2980,7 @@ export class DriverCashReconciliationService {
         select count(*)::int as total
         from driver_reconciliation_orders ro
         where ro.reconciliation_id = r.id and ro.company_id = r.company_id
+          and ${collectionLineActiveSql("ro")}
       ) reconciled_orders on true
       left join lateral (
         select sum(${signedPaymentAmount}) as total

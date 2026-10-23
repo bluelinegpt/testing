@@ -116,6 +116,18 @@ interface ReportData {
     readonly reversesReconciliationNumber: string | null;
     readonly status: string;
     readonly statusLabel: string;
+    /** Present only when an order correction (DCX) took Orders off this collection. */
+    readonly amendment?: {
+      readonly amendedReceived: string;
+      readonly originalReceived: string;
+      readonly removedLines: readonly {
+        readonly amount: string;
+        readonly correctionNumber: string;
+        readonly reason: string;
+        readonly referenceNumber: string | null;
+        readonly serialNumber: string;
+      }[];
+    } | null;
   };
   readonly orders: readonly ReportDataOrder[];
   readonly summary: {
@@ -2285,11 +2297,15 @@ export function DriverCollectionDetailDialog({
       );
   }, [api, reconciliationId, t]);
 
-  const openPdf = async (mode: PdfAction) => {
+  const openPdf = async (mode: PdfAction, version: "amended" | "original" = "amended") => {
     setError(undefined);
-    const filename = `Driver-Collection-${data?.header.reconciliationNumber ?? reconciliationId}.pdf`;
+    const filename = `Driver-Collection-${data?.header.reconciliationNumber ?? reconciliationId}${
+      version === "original" ? "-original" : ""
+    }.pdf`;
     const requestError = await pdf.run(
-      `operations/cash/reconciliations/${reconciliationId}/pdf?language=${reportLanguage}`,
+      `operations/cash/reconciliations/${reconciliationId}/pdf?language=${reportLanguage}${
+        version === "original" ? "&version=original" : ""
+      }`,
       filename,
       mode,
     );
@@ -2334,6 +2350,26 @@ export function DriverCollectionDetailDialog({
           ) : null
         ) : (
           <>
+          {data.header.amendment == null ? null : (
+            <div className="alert alert-warning">
+              <strong>{t("orderCorrection.amendedBadge")}</strong>{" "}
+              {t("orderCorrection.amendedNotice", {
+                numbers: [...new Set(data.header.amendment.removedLines.map((line) => line.correctionNumber))].join(", "),
+              })}
+              <ul className="order-correction-lines">
+                {data.header.amendment.removedLines.map((line) => (
+                  <li key={`${line.correctionNumber}-${line.serialNumber}`}>
+                    {line.serialNumber}
+                    {line.referenceNumber === null ? "" : ` (${line.referenceNumber})`} — {line.amount} —{" "}
+                    {line.correctionNumber}: {line.reason}
+                  </li>
+                ))}
+              </ul>
+              <div>
+                {data.header.amendment.originalReceived} → {data.header.amendment.amendedReceived}
+              </div>
+            </div>
+          )}
           <dl className="reconciliation-summary">
             <div className="detail-line">
               <dt>{t("operations.reconciliationNumber")}</dt>
@@ -2590,6 +2626,24 @@ export function DriverCollectionDetailDialog({
             >
               {pdf.busy === "download" ? t("common.loading") : t("operations.downloadPdf")}
             </button>
+            {data.header.amendment == null ? null : (
+              <>
+                <button
+                  disabled={pdf.busy !== undefined}
+                  onClick={() => void openPdf("preview", "original")}
+                  type="button"
+                >
+                  {t("orderCorrection.viewOriginal")}
+                </button>
+                <button
+                  disabled={pdf.busy !== undefined}
+                  onClick={() => void openPdf("print", "original")}
+                  type="button"
+                >
+                  {t("orderCorrection.printOriginal")}
+                </button>
+              </>
+            )}
             {data.header.linkedDriverFeePaymentId === null ? null : (
               <>
                 <button onClick={() => void openLinkedPayment()} type="button">

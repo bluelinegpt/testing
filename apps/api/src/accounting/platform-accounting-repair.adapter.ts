@@ -76,6 +76,7 @@ const OUT_OF_SCOPE_TYPES: readonly AccountingEventType[] = [
   "bank_to_cash_transfer_confirmed",
   "bank_to_bank_transfer_confirmed",
   "cash_to_cash_transfer_confirmed",
+  "driver_collection_corrected",
 ];
 
 /**
@@ -202,6 +203,7 @@ const PRODUCERS: Readonly<Partial<Record<AccountingEventType, string>>> = {
   trader_settlement_reversed: "trigger capture_trader_settlement_accounting_event (confirmed reversal Settlement)",
   driver_collection_confirmed: "trigger capture_driver_collection_accounting_event (confirmed, reversal_of_id null)",
   driver_collection_reversed: "trigger capture_driver_collection_accounting_event (confirmed reversal)",
+  driver_collection_corrected: "trigger capture_order_correction_accounting_event (order correction with collection money)",
   employee_payroll_approved: "trigger capture_payroll_period_accounting_event",
   employee_payroll_reversed: "trigger capture_payroll_period_accounting_event",
   employee_payroll_paid: "trigger capture_payroll_payment_accounting_event",

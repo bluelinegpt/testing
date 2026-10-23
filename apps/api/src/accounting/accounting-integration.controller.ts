@@ -44,6 +44,7 @@ const relatedSourceTypes: readonly string[] = [
   "general_expense",
   "general_expense_payment",
   "order",
+  "order_correction",
   "outsourced_driver_fee_accrual",
   "outsourced_driver_fee_payment",
   "payroll_payment",

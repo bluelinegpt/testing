@@ -33,6 +33,11 @@ export const PURGE_TABLES = new Set([
   // before Orders (the FK also cascades, but explicit ordering keeps the reset
   // manifest and row-count verification authoritative).
   "order_maintenance_findings",
+  // Order corrections (DCX, 20261023100000): append-only records of an Order
+  // taken off its Driver collection / Trader settlement. Company-owned, removed
+  // with the Orders and documents they point at.
+  "order_correction_lines",
+  "order_corrections",
   "order_status_history",
   "orders",
   "saas_usage_events",

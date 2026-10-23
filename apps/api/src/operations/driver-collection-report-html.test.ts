@@ -260,4 +260,38 @@ describe("buildDriverCollectionReportHtml", () => {
     );
     expect(html).not.toContain("<span>Net Cash</span>");
   });
+
+  it("lists the Orders an order correction took off the collection (23 Oct 2026)", () => {
+    const html = buildDriverCollectionReportHtml(
+      {
+        ...sample,
+        header: {
+          ...sample.header,
+          amendment: {
+            amendedReceived: "4943.00",
+            originalReceived: "5213.00",
+            removedLines: [
+              {
+                amount: "270.00",
+                correctedAt: "2026-10-23T08:00:00.000Z",
+                correctionNumber: "DCX-000001",
+                orderNumber: "ORD-000212",
+                reason: "Not delivered",
+                referenceNumber: "4353",
+                serialNumber: "SER-212",
+              },
+            ],
+            version: "amended",
+          },
+        },
+      },
+      "en",
+      "now",
+    );
+    expect(html).toContain("Amended collection");
+    expect(html).toContain("SER-212 (ref 4353) removed by DCX-000001");
+    expect(html).toContain("5213.00");
+    expect(html).toContain("4943.00");
+    expect(buildDriverCollectionReportHtml(sample, "en", "now")).not.toContain('class="notes-block amendment-block"');
+  });
 });

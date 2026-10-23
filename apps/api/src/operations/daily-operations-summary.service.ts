@@ -1,4 +1,5 @@
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
+import { collectionLineActiveSql, settlementLineActiveSql } from "./order-correction-sql.js";
 import { type Kysely, sql } from "kysely";
 
 import { accountingXlsx } from "../accounting/accounting-xlsx.js";
@@ -331,6 +332,7 @@ export class DailyOperationsSummaryService {
                   on r.id = line.reconciliation_id and r.company_id = line.company_id
                where line.company_id = o.company_id
                  and line.order_id = o.id
+                 and ${collectionLineActiveSql("line")}
                  and r.status = 'confirmed'
                  and r.confirmed_at is not null
                order by r.confirmed_at desc
@@ -462,6 +464,7 @@ export class DailyOperationsSummaryService {
           join trader_settlements s on s.id = p.settlement_id and s.company_id = p.company_id
           join trader_settlement_orders link
             on link.settlement_id = s.id and link.company_id = s.company_id
+           and ${settlementLineActiveSql("link")}
           join orders o on o.id = link.order_id and o.company_id = link.company_id
           join traders t on t.id = s.trader_id and t.company_id = s.company_id
          where p.company_id = ${companyId}::uuid
@@ -767,6 +770,7 @@ export class DailyOperationsSummaryService {
                 on r.id = line.reconciliation_id and r.company_id = line.company_id
              where line.company_id = o.company_id
                and line.order_id = o.id
+               and ${collectionLineActiveSql("line")}
                and r.status = 'confirmed'
                and r.confirmed_at is not null
              order by r.confirmed_at desc

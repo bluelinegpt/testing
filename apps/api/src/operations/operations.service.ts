@@ -53,6 +53,7 @@ import { traderCommerceOrderScopePairs } from "./trader-commerce-order-scope.js"
 import { mobileComparisonKey, normalizeUaeMobile } from "../shared/uae-mobile.js";
 import { PushOutboxWriter } from "../push/push-outbox-writer.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
+import { settlementLineActiveSql } from "./order-correction-sql.js";
 import { driverCashStatusAfterStatusChange } from "./driver-cash-status-rule.js";
 import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
@@ -1323,6 +1324,7 @@ export class OperationsService {
                  and accountant_s.company_id = accountant_tso.company_id
                 where accountant_tso.company_id = o.company_id
                   and accountant_tso.order_id = o.id
+                  and ${settlementLineActiveSql("accountant_tso")}
                   and accountant_s.reversal_of_id is null
                   and accountant_s.status = 'confirmed'
                   and not exists (
@@ -1539,6 +1541,7 @@ export class OperationsService {
           on s.id = tso.settlement_id and s.company_id = tso.company_id
         where tso.company_id = o.company_id
           and tso.order_id = o.id
+          and ${settlementLineActiveSql("tso")}
           -- Only an Order actually awaiting receipt has a confirmable target.
           and o.trader_settlement_status = 'money_sent_to_trader'
           and s.status = 'confirmed'
@@ -2214,6 +2217,7 @@ export class OperationsService {
                 from trader_settlement_orders tso
                 join trader_settlements s on s.id = tso.settlement_id and s.company_id = tso.company_id
                where tso.company_id = o.company_id and tso.order_id = o.id
+                 and ${settlementLineActiveSql("tso")}
                  and s.status = 'confirmed' and s.reversal_of_id is null
                  and not exists (select 1 from trader_settlements r
                                   where r.company_id = s.company_id and r.reversal_of_id = s.id)
@@ -2222,6 +2226,7 @@ export class OperationsService {
                 from trader_settlement_orders tso
                 join trader_settlements s on s.id = tso.settlement_id and s.company_id = tso.company_id
                where tso.company_id = o.company_id and tso.order_id = o.id
+                 and ${settlementLineActiveSql("tso")}
                  and s.status = 'confirmed' and s.reversal_of_id is null
                  and not exists (select 1 from trader_settlements r
                                   where r.company_id = s.company_id and r.reversal_of_id = s.id)

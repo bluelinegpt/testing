@@ -108,7 +108,9 @@ describe("permanent Company deletion manifest", () => {
     // Orders printed on a chosen Settlement; PURGE, with its Settlement).
     // 181 -> 182 (22 Oct 2026): `trader_zero_invoices` (0.00 Trader invoices
     // for Nothing-to-pay Orders; PURGE, with its Settlement data).
-    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(182);
+    // 182 -> 184 (23 Oct 2026): `order_corrections` and
+    // `order_correction_lines` (DCX order corrections; PURGE, with the Orders).
+    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(184);
     expect(COMPANY_DELETION_MANIFEST_HASH).toMatch(/^[a-f0-9]{64}$/);
   });
 

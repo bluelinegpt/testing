@@ -1,4 +1,5 @@
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
+import { collectionLineActiveSql } from "./order-correction-sql.js";
 import { type Kysely, type RawBuilder, sql } from "kysely";
 
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
@@ -1048,6 +1049,7 @@ export class CompanyOrderHealthService {
           from driver_reconciliation_orders ro
           join driver_reconciliations dr on dr.id = ro.reconciliation_id and dr.company_id = ro.company_id
          where ro.company_id = ${company} and dr.status = 'confirmed' and dr.reversal_of_id is null
+           and ${collectionLineActiveSql("ro")}
            ${reconciliationFilter}
            and not exists (
              select 1 from driver_reconciliations rv

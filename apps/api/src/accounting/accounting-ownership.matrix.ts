@@ -85,6 +85,15 @@ export const accountingPostingOwnershipMatrix: readonly AccountingPostingOwnersh
     reversal: true,
   },
   {
+    // An order correction (DCX) taking one Order's money back out of a
+    // confirmed Driver collection; its Cash/Bank Movement points at this event.
+    area: "driver_collections",
+    eventType: "driver_collection_corrected",
+    journalSource: "driver_collection",
+    movementOwner: "order_corrections",
+    reversal: false,
+  },
+  {
     area: "employee_payroll",
     eventType: "employee_payroll_approved",
     journalSource: "employee_payroll",

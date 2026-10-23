@@ -89,6 +89,7 @@ import { DriverCollectionDetailDialog } from "./DriverCollectionsWorkspace.js";
 import { openOrderWaybill, OrderBarcode } from "./OperationsWorkspace.js";
 import { type PdfAction, useReconciliationPdfActions } from "./reconciliation-pdf.js";
 import { SettlementDetailDialog } from "./TraderSettlementsWorkspace.js";
+import { OrderCorrectionDialog, OrderCorrectionHistorySection } from "./OrderCorrectionPanels.js";
 import { useOneScreenSettlement } from "./OneScreenSettlementDialog.js";
 import {
   hasOrdersListState,
@@ -4676,6 +4677,9 @@ export function OrderDetailsWorkspace({
   const [editOpen, setEditOpen] = useState(false);
   const [holdOpen, setHoldOpen] = useState(false);
   const [reopenDeliveryOpen, setReopenDeliveryOpen] = useState(false);
+  const [correctionOpen, setCorrectionOpen] = useState(false);
+  const [correctionNotice, setCorrectionNotice] = useState<string>();
+  const [correctionRefresh, setCorrectionRefresh] = useState(0);
   const [statusBusy, setStatusBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [viewCollectionId, setViewCollectionId] = useState<string>();
@@ -4989,6 +4993,11 @@ export function OrderDetailsWorkspace({
   };
   return (
     <>
+      {correctionNotice === undefined ? null : (
+        <div className="alert alert-success" role="status">
+          {correctionNotice}
+        </div>
+      )}
       <div className="order-detail-header">
         <button className="button button-link" onClick={onBack} type="button">
           <ArrowLeft aria-hidden="true" size={18} />
@@ -5078,6 +5087,15 @@ export function OrderDetailsWorkspace({
               type="button"
             >
               {t("operations.reopenDelivery")}
+            </button>
+          ) : null}
+          {detail.deliveryStatus === "delivered" && permissions.includes("users_roles.manage") ? (
+            <button
+              className="button button-secondary"
+              onClick={() => setCorrectionOpen(true)}
+              type="button"
+            >
+              {t("orderCorrection.open")}
             </button>
           ) : null}
           <button
@@ -5528,6 +5546,12 @@ export function OrderDetailsWorkspace({
             </div>
           </section>
         )}
+        <OrderCorrectionHistorySection
+          api={api}
+          orderId={detail.id}
+          refreshKey={correctionRefresh}
+          reportLanguage={reportLanguage}
+        />
         {traderCollectionSummary === undefined ? null : (
           <section className="order-detail-section">
             <h2>{t("operations.traderCollectionDetail")}</h2>
@@ -5702,6 +5726,19 @@ export function OrderDetailsWorkspace({
               .finally(() => setStatusBusy(false));
           }}
           title={t("operations.actions.hold")}
+        />
+      ) : null}
+      {correctionOpen ? (
+        <OrderCorrectionDialog
+          api={api}
+          onClose={() => setCorrectionOpen(false)}
+          onCorrected={(notice) => {
+            setCorrectionOpen(false);
+            setCorrectionNotice(notice);
+            setCorrectionRefresh((value) => value + 1);
+            void load();
+          }}
+          orderId={detail.id}
         />
       ) : null}
       {reopenDeliveryOpen ? (

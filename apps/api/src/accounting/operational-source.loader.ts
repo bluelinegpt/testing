@@ -97,6 +97,8 @@ export class OperationalSourceLoader {
         return this.traderSettlement(database, event);
       case "driver_collection_confirmed":
         return this.driverCollection(database, event);
+      case "driver_collection_corrected":
+        return this.driverCollectionCorrection(database, event);
       case "employee_payroll_approved":
         return this.payrollApproval(database, event);
       case "employee_payroll_paid":
@@ -408,6 +410,7 @@ export class OperationalSourceLoader {
     const result = await sql<{
       amount: string;
       businessDate: string;
+      correctionRecovery: boolean;
       reason: string;
       receivableNumber: string;
       sourceType: string;
@@ -416,9 +419,11 @@ export class OperationalSourceLoader {
     }>`
       select receivable_number as "receivableNumber",trader_id as "traderId",
              source_type as "sourceType",business_date::text as "businessDate",
-             original_amount_due::text as amount,status,reason
-        from trader_receivables where id=${event.sourceEntityId}::uuid
-         and company_id=${event.companyId}::uuid for share
+             original_amount_due::text as amount,status,reason,
+             exists(select 1 from order_correction_lines l
+                     where l.company_id=r.company_id and l.trader_receivable_id=r.id) as "correctionRecovery"
+        from trader_receivables r where r.id=${event.sourceEntityId}::uuid
+         and r.company_id=${event.companyId}::uuid for share of r
     `.execute(database);
     const row = result.rows[0];
     if (row === undefined || ["cancelled", "reversed"].includes(row.status)) {
@@ -443,14 +448,26 @@ export class OperationalSourceLoader {
           dimensions,
           `Trader receivable ${row.receivableNumber}`,
         ),
-        component(
-          "additional_fee_revenue",
-          row.amount,
-          "credit",
-          "additional_fee_revenue",
-          dimensions,
-          row.reason,
-        ),
+        // An order correction (DCX) recovering what a Settlement already paid
+        // the Trader for an Order taken off it: the Trader was overpaid, so
+        // the counter-entry restores Trader Payable -- it is not revenue.
+        row.correctionRecovery
+          ? component(
+              "trader_payable",
+              row.amount,
+              "credit",
+              "trader_payable",
+              { ...dimensions, subledgerId: row.traderId, subledgerType: "trader" },
+              row.reason,
+            )
+          : component(
+              "additional_fee_revenue",
+              row.amount,
+              "credit",
+              "additional_fee_revenue",
+              dimensions,
+              row.reason,
+            ),
       ]),
       description: `Trader receivable ${row.receivableNumber}`,
       journalSource: "trader_receivable",
@@ -643,6 +660,11 @@ export class OperationalSourceLoader {
          and settlement_id=${event.sourceEntityId}::uuid
        order by created_at,id
     `.execute(database);
+    // Deliberately ALL lines, including any an order correction (DCX) later
+    // took off: this is the Settlement's own Journal as it was posted, and its
+    // amounts come from the header and payments, not from these lines (they
+    // are metadata). A correction posts its own entries; a reversal inverts
+    // this posted Journal. Filtering here would change the original facts.
     const allocations = await sql<Record<string, unknown>>`
       select id,order_id as "orderId",gross_payable::text as "grossPayable",
              deductions_and_charges::text as "deductionsAndCharges",
@@ -764,6 +786,78 @@ export class OperationalSourceLoader {
     };
   }
 
+  /**
+   * An order correction (DCX) taking one Order's money back out of a confirmed
+   * Driver collection: the exact inverse of that Order's share of the
+   * collection Journal -- Cr Cash/Bank (as the collection debited it) and
+   * Dr COD Receivable -- dated on the correction's own business date. The
+   * Order's own recognition is reversed separately when it is reopened.
+   */
+  private async driverCollectionCorrection(
+    database: Kysely<DatabaseSchema>,
+    event: OperationalAccountingEventRecord,
+  ): Promise<OperationalJournalFacts> {
+    const result = await sql<{
+      amount: string;
+      bankAccountId: string | null;
+      businessDate: string;
+      correctionNumber: string;
+      driverId: string | null;
+      method: "cash" | "visa" | null;
+      reconciliationId: string | null;
+      reconciliationNumber: string | null;
+    }>`
+      select c.correction_number as "correctionNumber",c.business_date::text as "businessDate",
+             c.collection_amount::text as amount,c.collection_payment_method as method,
+             c.driver_id as "driverId",c.reconciliation_id as "reconciliationId",
+             r.reconciliation_number as "reconciliationNumber",
+             c.collection_bank_account_id as "bankAccountId"
+        from order_corrections c
+        left join driver_reconciliations r on r.id=c.reconciliation_id and r.company_id=c.company_id
+       where c.id=${event.sourceEntityId}::uuid and c.company_id=${event.companyId}::uuid
+       for share of c
+    `.execute(database);
+    const row = result.rows[0];
+    if (row === undefined || row.reconciliationId === null || row.method === null) {
+      this.invalidSource("accounting_order_correction_not_recognizable");
+    }
+    const base = {
+      driverCollectionId: row.reconciliationId,
+      driverId: row.driverId,
+      sourceEntityId: event.sourceEntityId,
+      sourceEntityType: "order_correction",
+      sourceReference: row.correctionNumber,
+      subledgerId: row.driverId,
+      subledgerType: "driver",
+    };
+    const isCash = row.method === "cash";
+    return {
+      accountingDate: row.businessDate,
+      components: present([
+        component(
+          "driver_collection_cash",
+          row.amount,
+          "credit",
+          isCash ? "driver_collection_cash" : "trader_settlement_bank",
+          { ...base, companyBankAccountId: isCash ? null : row.bankAccountId },
+          `${row.correctionNumber}: money not received in ${row.reconciliationNumber ?? ""}`,
+        ),
+        component(
+          "cod_receivable",
+          row.amount,
+          "debit",
+          "order_cod_receivable",
+          base,
+          `${row.correctionNumber}: COD not cleared by ${row.reconciliationNumber ?? ""}`,
+        ),
+      ]),
+      description: `Order correction ${row.correctionNumber}`,
+      journalSource: "driver_collection",
+      metadata: { ...base, method: row.method },
+      sourceReference: row.correctionNumber,
+    };
+  }
+
   private async driverCollection(
     database: Kysely<DatabaseSchema>,
     event: OperationalAccountingEventRecord,
@@ -802,6 +896,9 @@ export class OperationalSourceLoader {
          and reconciliation_id=${event.sourceEntityId}::uuid
        order by created_at,id
     `.execute(database);
+    // Deliberately ALL lines, as for the Settlement above: the collection's
+    // own Journal as confirmed. A correction (DCX) posts its own
+    // `driver_collection_corrected` entry for the removed Order's money.
     const allocations = await sql<Record<string, unknown>>`
       select id,order_id as "orderId",
              customer_collection_amount::text as "customerCollectionAmount",

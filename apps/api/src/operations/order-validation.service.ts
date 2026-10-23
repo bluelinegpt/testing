@@ -1,4 +1,5 @@
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
+import { collectionLineActiveSql, settlementLineActiveSql } from "./order-correction-sql.js";
 import { Decimal } from "decimal.js";
 import type { Kysely } from "kysely";
 import { sql } from "kysely";
@@ -426,6 +427,7 @@ export class OrderValidationService {
         join trader_settlements s on s.company_id = l.company_id and s.id = l.settlement_id
        where l.company_id = ${companyId}::uuid and s.company_id = ${companyId}::uuid
          and l.order_id = ${order.id}::uuid
+         and ${settlementLineActiveSql("l")}
          and ${effectiveSettlement("s")}
        order by s.settlement_number
     `.execute(this.database);
@@ -577,6 +579,7 @@ export class OrderValidationService {
         join driver_reconciliations r on r.company_id = l.company_id and r.id = l.reconciliation_id
        where l.company_id = ${companyId}::uuid and r.company_id = ${companyId}::uuid
          and l.order_id = ${order.id}::uuid
+         and ${collectionLineActiveSql("l")}
          and r.reversal_of_id is null
          and not exists (
            select 1 from driver_reconciliations reversal

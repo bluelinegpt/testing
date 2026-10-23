@@ -401,7 +401,7 @@ describe.skipIf(!runDatabaseTests)("trader settlement", () => {
           basePayment(companyA.traderId, [{ amount: 25, orderId: confirmationOrder.id }]),
         );
         const confirmed = await service.confirmDraft(confirmationDraft.id, randomUUID());
-        expect(confirmed.orderCount).toBe(1);
+        expect("orderCount" in confirmed ? confirmed.orderCount : undefined).toBe(1);
         const linkedDraft = await sql<{ settlementId: string | null }>`
           select confirmed_settlement_id as "settlementId"
             from trader_settlement_drafts where id=${confirmationDraft.id}::uuid

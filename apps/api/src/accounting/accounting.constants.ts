@@ -133,6 +133,7 @@ export const accountingEventTypes = [
   "trader_settlement_reversed",
   "driver_collection_confirmed",
   "driver_collection_reversed",
+  "driver_collection_corrected",
   "driver_expense_confirmed",
   "employee_payroll_approved",
   "employee_payroll_reversed",

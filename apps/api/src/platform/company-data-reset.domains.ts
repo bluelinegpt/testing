@@ -69,6 +69,8 @@ export const DOMAIN_TABLES: Readonly<Record<ResetDomain, readonly string[]>> = {
     "order_expenses",
     "order_items",
     "order_maintenance_findings",
+    "order_correction_lines",
+    "order_corrections",
     "order_serial_history",
     "order_status_history",
     "orders",

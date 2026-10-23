@@ -582,4 +582,41 @@ describe("buildTraderSettlementStatementHtml", () => {
     const plain = buildTraderSettlementStatementHtml({ ...shortfall, header: sample.header }, "en");
     expect(plain).toContain('<bdi dir="ltr">110.00</bdi>');
   });
+
+  it("marks an amended invoice and its original copy with the removed Orders (order correction, 23 Oct 2026)", () => {
+    const amendment = {
+      amendedNetPayment: "2750.00",
+      originalNetPayment: "3000.00",
+      removedLines: [
+        {
+          amount: "250.00",
+          correctedAt: "2026-10-23T08:00:00.000Z",
+          correctionNumber: "DCX-000001",
+          orderNumber: "ORD-000212",
+          reason: "Not delivered, marked by mistake",
+          recoveryReceivableNumber: "RCV-000101",
+          referenceNumber: "4353",
+          serialNumber: "SER-212",
+        },
+      ],
+    };
+    const amended = buildTraderSettlementStatementHtml(
+      { ...sample, header: { ...sample.header, amendment: { ...amendment, version: "amended" } } },
+      "en",
+    );
+    expect(amended).toContain("Amended invoice");
+    expect(amended).toContain("SER-212 (ref 4353) removed by DCX-000001");
+    expect(amended).toContain("RCV-000101");
+    expect(amended).toContain("3000.00");
+    expect(amended).toContain("2750.00");
+    expect(amended).not.toContain('class="draft-watermark watermark-original"');
+    const original = buildTraderSettlementStatementHtml(
+      { ...sample, header: { ...sample.header, amendment: { ...amendment, version: "original" } } },
+      "ar",
+    );
+    expect(original).toContain('class="draft-watermark watermark-original"');
+    expect(original).toContain("النسخة الأصلية");
+    // No correction: nothing changes.
+    expect(buildTraderSettlementStatementHtml(sample, "en")).not.toContain('class="notice notice-amended"');
+  });
 });

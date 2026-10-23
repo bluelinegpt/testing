@@ -1,4 +1,5 @@
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
+import { settlementLineActiveSql } from "./order-correction-sql.js";
 import { Decimal } from "decimal.js";
 import { type Kysely, sql, type Transaction } from "kysely";
 
@@ -880,6 +881,7 @@ export class OrderMaintenanceService {
           from trader_settlement_orders so
           join trader_settlements s on s.id = so.settlement_id and s.company_id = so.company_id
          where so.company_id = ${companyId}::uuid and so.order_id = ${orderId}::uuid
+           and ${settlementLineActiveSql("so")}
          order by s.business_date, s.settlement_number
       `.execute(this.database)
     ).rows;

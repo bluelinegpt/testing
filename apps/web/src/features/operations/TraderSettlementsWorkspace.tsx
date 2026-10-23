@@ -289,6 +289,19 @@ interface TraderSettlementReceivableOffset {
 }
 
 interface TraderSettlementDetail {
+  /** Present only when an order correction (DCX) took Orders off this Settlement. */
+  readonly amendment?: {
+    readonly amendedNetPayment: string;
+    readonly originalNetPayment: string;
+    readonly removedLines: readonly {
+      readonly amount: string;
+      readonly correctionNumber: string;
+      readonly reason: string;
+      readonly recoveryReceivableNumber: string | null;
+      readonly referenceNumber: string | null;
+      readonly serialNumber: string;
+    }[];
+  } | null;
   readonly beneficiaryBank: MaskedBankSnapshot | null;
   readonly confirmedBy: string;
   readonly createdBy: string;
@@ -4654,11 +4667,15 @@ export function SettlementDetailDialog({
 
   useEffect(() => load(), [load]);
 
-  const openPdf = async (mode: PdfAction) => {
+  const openPdf = async (mode: PdfAction, version: "amended" | "original" = "amended") => {
     setPdfError(undefined);
     const requestError = await pdf.run(
-      `operations/settlements/payments/${settlementId}/pdf?language=${reportLanguage}`,
-      `Trader-Settlement-${detail?.settlementNumber ?? settlementId}.pdf`,
+      `operations/settlements/payments/${settlementId}/pdf?language=${reportLanguage}${
+        version === "original" ? "&version=original" : ""
+      }`,
+      `Trader-Settlement-${detail?.settlementNumber ?? settlementId}${
+        version === "original" ? "-original" : ""
+      }.pdf`,
       mode,
     );
     if (requestError !== undefined)
@@ -4692,6 +4709,27 @@ export function SettlementDetailDialog({
         ) : null
       ) : (
         <>
+          {detail.amendment == null ? null : (
+            <div className="alert alert-warning">
+              <strong>{t("orderCorrection.amendedBadge")}</strong>{" "}
+              {t("orderCorrection.amendedNotice", {
+                numbers: [...new Set(detail.amendment.removedLines.map((line) => line.correctionNumber))].join(", "),
+              })}
+              <ul className="order-correction-lines">
+                {detail.amendment.removedLines.map((line) => (
+                  <li key={`${line.correctionNumber}-${line.serialNumber}`}>
+                    {line.serialNumber}
+                    {line.referenceNumber === null ? "" : ` (${line.referenceNumber})`} — {line.amount}
+                    {line.recoveryReceivableNumber === null ? "" : ` → ${line.recoveryReceivableNumber}`} —{" "}
+                    {line.correctionNumber}: {line.reason}
+                  </li>
+                ))}
+              </ul>
+              <div>
+                {detail.amendment.originalNetPayment} → {detail.amendment.amendedNetPayment}
+              </div>
+            </div>
+          )}
           <dl className="reconciliation-summary">
             <div className="detail-line">
               <dt>{t("traderSettlements.columnSettlementNumber")}</dt>
@@ -5008,6 +5046,24 @@ export function SettlementDetailDialog({
                     ? t("common.loading")
                     : t("traderSettlements.actionDownloadPdf")}
                 </button>
+                {detail.amendment == null ? null : (
+                  <>
+                    <button
+                      disabled={pdf.busy !== undefined}
+                      onClick={() => void openPdf("preview", "original")}
+                      type="button"
+                    >
+                      {t("orderCorrection.viewOriginal")}
+                    </button>
+                    <button
+                      disabled={pdf.busy !== undefined}
+                      onClick={() => void openPdf("print", "original")}
+                      type="button"
+                    >
+                      {t("orderCorrection.printOriginal")}
+                    </button>
+                  </>
+                )}
               </>
             )}
             {oneScreenSetting !== false || detail.status === "reversed" || moneyReceivedConfirmed ? null : (

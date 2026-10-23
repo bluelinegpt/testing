@@ -1,4 +1,5 @@
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
+import { settlementLineActiveSql } from "./order-correction-sql.js";
 import { Decimal } from "decimal.js";
 import { type Kysely, sql } from "kysely";
 
@@ -356,6 +357,7 @@ export class TraderAccountStatementService {
           from trader_settlements s
           join trader_settlement_payments p on p.settlement_id = s.id and p.company_id = s.company_id
           left join trader_settlement_orders link on link.settlement_id = s.id and link.company_id = s.company_id
+            and ${settlementLineActiveSql("link")}
          where s.company_id = ${companyId}::uuid and s.trader_id = ${traderId}::uuid
            and s.reversal_of_id is null and s.business_date between ${from}::date and ${to}::date
            and not exists (select 1 from trader_settlements rv
@@ -380,6 +382,7 @@ export class TraderAccountStatementService {
                       and previous_settlement.company_id = previous.company_id
                     where previous.company_id = link.company_id
                       and previous.order_id = link.order_id
+                      and ${settlementLineActiveSql("previous")}
                       and previous.settlement_id <> link.settlement_id
                       and (previous_settlement.business_date, previous_settlement.created_at, previous_settlement.id)
                           < (s.business_date, s.created_at, s.id)
@@ -399,6 +402,7 @@ export class TraderAccountStatementService {
                       and previous_settlement.company_id = previous.company_id
                     where previous.company_id = link.company_id
                       and previous.order_id = link.order_id
+                      and ${settlementLineActiveSql("previous")}
                       and previous.settlement_id <> link.settlement_id
                       and (previous_settlement.business_date, previous_settlement.created_at, previous_settlement.id)
                           < (s.business_date, s.created_at, s.id)
@@ -416,6 +420,7 @@ export class TraderAccountStatementService {
             join orders o on o.id = link.order_id and o.company_id = link.company_id
            where link.company_id = ${companyId}::uuid
              and link.settlement_id = ${settlement.settlementId}::uuid
+             and ${settlementLineActiveSql("link")}
            order by o.delivered_at, o.created_at, o.id
         `.execute(this.database)
       ).rows;

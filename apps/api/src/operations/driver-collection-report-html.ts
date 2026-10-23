@@ -80,6 +80,11 @@ interface Labels {
   readonly visaToBank: string;
   readonly visaTotal: string;
   readonly zeroOrders: string;
+  readonly amendedNotice: string;
+  readonly originalNotice: string;
+  readonly removedLine: string;
+  readonly originalReceived: string;
+  readonly amendedReceived: string;
 }
 
 const LABELS: Record<ReportLanguage, Labels> = {
@@ -152,6 +157,11 @@ const LABELS: Record<ReportLanguage, Labels> = {
     visaToBank: "فيزا إلى البنك",
     visaTotal: "إجمالي الفيزا",
     zeroOrders: "طلبات بدون تحصيل",
+    amendedNotice: "تحصيل معدّل — تم إلغاء الطلبات التالية منه بعد تأكيده:",
+    originalNotice: "النسخة الأصلية كما تم تأكيدها — تم تعديل هذا التحصيل لاحقاً:",
+    removedLine: "{order} (المرجع {reference}) أُلغي بموجب {correction} بتاريخ {date}: {reason}. المبلغ {amount}",
+    originalReceived: "المبلغ المستلم الأصلي",
+    amendedReceived: "المبلغ المستلم بعد التعديل",
   },
   en: {
     additionalFees: "Additional Fees",
@@ -222,8 +232,46 @@ const LABELS: Record<ReportLanguage, Labels> = {
     visaToBank: "Visa to Bank",
     visaTotal: "Visa Total",
     zeroOrders: "Nothing to collect",
+    amendedNotice: "Amended collection — these Orders were removed from it after it was confirmed:",
+    originalNotice: "ORIGINAL COPY, as first confirmed — this collection was amended later:",
+    removedLine: "{order} (ref {reference}) removed by {correction} on {date}: {reason}. Amount {amount}",
+    originalReceived: "Received as confirmed",
+    amendedReceived: "Received after amendment",
   },
 };
+
+/** The "removed by a correction (DCX)" notice, or nothing when no correction touched it. */
+function amendmentBlock(
+  labels: Labels,
+  amendment: NonNullable<DriverCollectionReportData["header"]["amendment"]> | null,
+): string {
+  if (amendment === null) return "";
+  const fill = (values: Readonly<Record<string, string>>) =>
+    Object.entries(values).reduce(
+      (text, [key, value]) => text.replaceAll(`{${key}}`, escapeHtml(value)),
+      escapeHtml(labels.removedLine),
+    );
+  return (
+    `<div class="notes-block amendment-block"><strong>${escapeHtml(
+      amendment.version === "original" ? labels.originalNotice : labels.amendedNotice,
+    )}</strong><ul>` +
+    amendment.removedLines
+      .map(
+        (line) =>
+          `<li>${fill({
+            amount: line.amount,
+            correction: line.correctionNumber,
+            date: line.correctedAt.slice(0, 16).replace("T", " "),
+            order: line.serialNumber,
+            reason: line.reason,
+            reference: line.referenceNumber ?? "—",
+          })}</li>`,
+      )
+      .join("") +
+    `</ul><div>${escapeHtml(labels.originalReceived)}: <strong>${escapeHtml(amendment.originalReceived)}</strong> · ` +
+    `${escapeHtml(labels.amendedReceived)}: <strong>${escapeHtml(amendment.amendedReceived)}</strong></div></div>`
+  );
+}
 
 function escapeHtml(value: string): string {
   return value
@@ -431,6 +479,7 @@ export function buildDriverCollectionReportHtml(
     (data.header.notes === null
       ? ""
       : `<div class="notes-block"><strong>${escapeHtml(labels.notes)}:</strong> ${escapeHtml(data.header.notes)}</div>`) +
+    amendmentBlock(labels, data.header.amendment ?? null) +
     `</header>`;
 
   const summaryLine = (label: string, value: string, className = "summary-line") =>
@@ -482,6 +531,8 @@ export function buildDriverCollectionReportHtml(
     .meta-label { color: #555; }
     .meta-value { font-weight: 600; }
     .notes-block { margin-top: 8px; font-size: 11px; }
+    .amendment-block { background: #fff4e5; border-inline-start: 3px solid #c2410c; padding: 4px 8px; }
+    .amendment-block ul { margin: 4px 0; padding-inline-start: 18px; }
     .section-title { font-size: 13px; margin: 14px 0 6px; }
     table.grid { width: 100%; border-collapse: collapse; font-size: 10px; margin-bottom: 10px; }
     table.grid th, table.grid td { border: 1px solid #999; padding: 3px 5px; text-align: start; }

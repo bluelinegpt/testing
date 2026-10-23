@@ -1,4 +1,5 @@
 import { type Kysely, sql } from "kysely";
+import { collectionLineActiveSql } from "./order-correction-sql.js";
 
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { effectiveSettlement } from "./effective-settlement-offsets.js";
@@ -244,6 +245,7 @@ export async function loadOrderDependencyGraph(
           from driver_reconciliation_orders ro
           join driver_reconciliations dr on dr.id = ro.reconciliation_id and dr.company_id = ro.company_id
          where ro.company_id = ${company} and ro.order_id = (select id from o)
+           and ${collectionLineActiveSql("ro")}
       )
       select case when not exists (select 1 from o) then null else json_build_object(
         'order', (select json_build_object(
