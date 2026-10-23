@@ -3140,3 +3140,13 @@ button.agent-live-indicator {
     grid-template-columns: 1fr;
   }
 }
+
+.seo-guide-publication {
+  padding: 1rem;
+  border: 1px solid currentColor;
+  border-radius: 0.75rem;
+}
+.seo-guide-publication__url {
+  overflow-wrap: anywhere;
+  text-align: left;
+}
