@@ -5,7 +5,7 @@
       "id": "public-web",
       "displayName": "Public website",
       "path": "apps/public-web",
-      "renderService": "tawseelhub-public-web",
+      "renderService": "tawseelhub-public-web-service",
       "status": "pushed_awaiting_confirmation",
       "localCommit": "5e9af6ef",
       "localCommitDate": "2026-10-23",

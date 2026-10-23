@@ -2,7 +2,7 @@
 
 ## Scope and release state
 
-Code and content prepared and verified locally, then committed for the user-requested push with [skip render] to prevent automatic deployment. No deployment, CMS writes, schema changes, migrations applied, Search Console changes, indexing requests, validation restarts or sitemap submissions. Unrelated registry/mobile/worktree changes were preserved. The published Arabic delivery-management page was not edited; a verified shared prerender defect affecting service pages was corrected.
+Code and content committed as 5e9af6ef, with registry commit 65913d2f. On 24 October (Asia/Dubai), the user authorized release: a verified full remote backup preceded the single content migration, followed by API and public website deployment. No schema changes, Search Console changes, indexing requests, validation restarts or sitemap submissions. Unrelated registry/mobile/worktree changes were preserved. The published Arabic delivery-management content was not edited.
 
 ## Confirmed findings
 
@@ -53,3 +53,16 @@ The content follows `OrdersWorkflowService.statusIneligibility` and assignment v
 ## Limits
 
 No new Arabic translations were invented or published. Current hosting challenge/rate-limit logs are unavailable, so the reported one-off Google asset errors cannot be attributed to a specific hosting cause. The historical Soft 404 remains Google's classification until Google recrawls/reassesses; no timeline is promised.
+
+## Authorized release evidence — 24 October 2026 (Asia/Dubai)
+
+- Verified the remote database against the published article ID, required columns, exact original seed and ordered migration ledger. Only the SEO content migration was pending after the project's existing compatibility aliases.
+- Full custom-format backup: `.backups/seo-release-20261023/before-seo.dump`, 48,205,367 bytes, SHA256 `aa7223d0fc76307108d064185f0257f80ab6ff5bb204dba43dccb5a218c6cf00`. Archive listing and full extraction to NUL passed; no database restore was performed. Original article row saved separately and verified. TLS certificate verification retained.
+- Normal ordered migration runner reported `20261023110000_order_status_help_content: Success`. Remote ledger, published status, canonical, title and exact expanded 30-block body verified afterward.
+- API Render deployment `dep-dbdrqidg1s2s73aseafg` succeeded at 65913d2f. API returns fallback noindex and reciprocal actual English/Arabic pairs.
+- Actual canonical website host is Render Web Service `tawseelhub-public-web-service` (`srv-dafgtd740ujc73b88p5g`), not the older Static Site. First deployment `dep-dbdrrrkipgvc739u1ibg` succeeded, but build content feeds failed because PUBLIC_API_BASE_URL was absent (only VITE_API_BASE_URL was configured). Added the public, non-secret PUBLIC_API_BASE_URL for the existing API and triggered a rebuild.
+- Canonical-domain checks: expanded English order-status article and four Arabic fallback URLs return 200 and one H1; fallback URLs are noindex with English canonicals. Actual Arabic what-is-tawseelhub remains self-canonical/indexable with language alternates. Track and empty Shopify category retain intentional noindex. Sitemap excludes track and fallback URLs and includes the published Arabic commercial page.
+- Googlebot requests returned 200 with correct types for current CSS, initial scripts and logo.
+- Separate Arabic Courier Management draft was not published. Registry remains awaiting human confirmation by project policy, even after deployment verification.
+
+- Corrected public website rebuild `dep-dbdrss3l550s73869fug` succeeded and went Live at 00:08 Asia/Dubai on 24 October, at 65913d2f. Content-feed warning is absent from the corrected build logs. Render registry service name corrected; human-confirmation status preserved.
