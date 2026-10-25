@@ -213,4 +213,19 @@ describe("One-screen Trader Settlement", () => {
     const draft = posts.find((call) => call.path === "operations/settlements/drafts")!.body as Record<string, unknown>;
     expect(draft).toMatchObject({ allocations: [], amount: 0, receivableOffsets: [], zeroDueOrderIds: ["zero-1"] });
   });
+
+  it("select all ticks every line shown, Nothing to pay included, and each can be unticked", async () => {
+    setup({ zeroOnly: true });
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.click(await dialog.findByRole("button", { name: "ARMAN ABYA (TRD-1)" }));
+    const zero = await dialog.findByRole("checkbox", { name: "Include 04980" });
+    expect(zero).not.toBeChecked();
+    const all = dialog.getByRole("checkbox", { name: "Tick all lines shown" });
+    expect(all).toBeEnabled();
+    fireEvent.click(all);
+    await waitFor(() => expect(zero).toBeChecked());
+    fireEvent.click(zero);
+    expect(zero).not.toBeChecked();
+    expect(all).not.toBeChecked();
+  });
 });

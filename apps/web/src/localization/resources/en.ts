@@ -4590,7 +4590,7 @@ export const englishTranslations = {
       previewDraft: "Preview invoice",
       previewInvoice: "Preview invoice (DRAFT)",
       search: "Search order / reference / customer",
-      selectAll: "Tick all orders and fees",
+      selectAll: "Tick all lines shown",
       show: "Show",
       tick: "Include {{number}}",
       totalCredits: "Credits paid back (+)",

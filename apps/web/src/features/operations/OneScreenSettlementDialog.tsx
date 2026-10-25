@@ -458,8 +458,10 @@ export function OneScreenSettlementDialog({
     return [line.orderNumber, line.reference, line.customer, line.mobile, line.note]
       .some((value) => value.toLowerCase().includes(term));
   });
-  const moneyLines = lines.filter((line) => line.kind === "pay" || line.kind === "fee");
-  const allMoneyTicked = moneyLines.length > 0 && moneyLines.every((line) => selected.has(line.key));
+  // Select all ticks EVERY line shown -- including "Nothing to pay" -- and the
+  // user unticks what he does not want (Aiman, 25 Oct 2026: a Trader with only
+  // 0-due lines left the box greyed out). It follows the filter and search.
+  const allVisibleTicked = visible.length > 0 && visible.every((line) => selected.has(line.key));
   const count = (kind: LineKind) => lines.filter((line) => line.kind === kind).length;
 
   const toggle = (key: string, on: boolean) =>
@@ -821,12 +823,12 @@ export function OneScreenSettlementDialog({
               <th scope="col">
                 <input
                   aria-label={t("traderSettlements.oneScreen.selectAll")}
-                  checked={allMoneyTicked}
-                  disabled={moneyLines.length === 0}
+                  checked={allVisibleTicked}
+                  disabled={visible.length === 0}
                   onChange={(event) =>
                     setSelected((current) => {
                       const next = new Set(current);
-                      for (const line of moneyLines) {
+                      for (const line of visible) {
                         if (event.target.checked) next.add(line.key);
                         else next.delete(line.key);
                       }

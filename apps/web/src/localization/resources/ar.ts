@@ -4542,7 +4542,7 @@ export const arabicTranslations = {
       previewDraft: "معاينة الفاتورة",
       previewInvoice: "معاينة الفاتورة (مسودة)",
       search: "بحث برقم الطلب / المرجع / العميل",
-      selectAll: "اختيار كل الطلبات والرسوم",
+      selectAll: "اختيار كل الأسطر المعروضة",
       show: "عرض",
       tick: "تضمين {{number}}",
       totalCredits: "أرصدة دائنة مدفوعة (+)",
