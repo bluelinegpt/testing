@@ -597,6 +597,18 @@ export interface TraderSettlementReportData {
     readonly traderName: string;
     /** Present only when an order correction took Orders off this Settlement. */
     readonly amendment?: TraderSettlementAmendment | null;
+    /**
+     * Who issued the invoice and where the Trader is, for Company-specific
+     * invoice layouts (Lahthza, 25 Oct 2026). Optional: other layouts ignore it.
+     */
+    readonly invoiceParty?: {
+      readonly employeeName: string;
+      readonly employeeMobile: string | null;
+      readonly traderAddressEn: string | null;
+      readonly traderAddressAr: string | null;
+    };
+    /** "zero_invoice" for a posted 0.00 invoice (INV-…), which keeps the standard layout. */
+    readonly invoiceKind?: "settlement" | "zero_invoice";
   };
   readonly orders: readonly TraderSettlementDetailOrder[];
   readonly receivableOffsets: readonly TraderSettlementReceivableOffset[];
@@ -3378,6 +3390,8 @@ export class TraderSettlementService {
           version,
           summary.netPayment,
         ),
+        invoiceParty: await this.invoiceParty(companyId, header.traderId, header.createdBy),
+        invoiceKind: "settlement",
       },
       orders: orders.lines,
       receivableOffsets,
@@ -4537,6 +4551,12 @@ export class TraderSettlementService {
         status: posted === undefined ? "draft" : "confirmed",
         traderMobile: trader.mobile,
         traderName: trader.name,
+        invoiceParty: await this.invoiceParty(
+          companyId,
+          input.traderId,
+          posted?.confirmedBy || preparer,
+        ),
+        invoiceKind: posted?.zeroInvoice === true ? "zero_invoice" : "settlement",
       },
       orders: orders.lines,
       receivableOffsets,
@@ -4548,6 +4568,55 @@ export class TraderSettlementService {
   // ---------------------------------------------------------------------
   // Shared internals
   // ---------------------------------------------------------------------
+
+  /** The issuing user (name and mobile) and the Trader's address, for the invoice header. */
+  private async invoiceParty(
+    companyId: string,
+    traderId: string,
+    username: string,
+  ): Promise<NonNullable<TraderSettlementReportData["header"]["invoiceParty"]>> {
+    const row = (
+      await sql<{
+        employeeMobile: string | null;
+        employeeName: string | null;
+        traderAddressAr: string | null;
+        traderAddressEn: string | null;
+      }>`
+        select
+          (select coalesce(nullif(btrim(cu.display_name), ''), nullif(btrim(cu.name_en), ''))
+             from accounts a
+             join company_users cu on cu.account_id = a.id and cu.company_id = a.company_id
+            where a.company_id = ${companyId}::uuid and a.username = ${username}
+            limit 1) as "employeeName",
+          (select coalesce(nullif(btrim(a.mobile_number), ''), nullif(btrim(cu.mobile_number), ''))
+             from accounts a
+             left join company_users cu on cu.account_id = a.id and cu.company_id = a.company_id
+            where a.company_id = ${companyId}::uuid and a.username = ${username}
+            limit 1) as "employeeMobile",
+          (select coalesce(
+                    nullif(concat_ws(', ', e.name_en, a.name_en), ''),
+                    nullif(btrim(t.address_en), ''), nullif(btrim(t.pickup_address), ''))
+             from traders t
+             left join areas a on a.id = t.pickup_area_id and a.company_id = t.company_id
+             left join emirates e on e.id = a.emirate_id
+            where t.id = ${traderId}::uuid and t.company_id = ${companyId}::uuid) as "traderAddressEn",
+          (select coalesce(
+                    nullif(concat_ws('، ', coalesce(e.name_ar, e.name_en), coalesce(a.name_ar, a.name_en)), ''),
+                    nullif(btrim(t.address_ar), ''), nullif(btrim(t.address_en), ''),
+                    nullif(btrim(t.pickup_address), ''))
+             from traders t
+             left join areas a on a.id = t.pickup_area_id and a.company_id = t.company_id
+             left join emirates e on e.id = a.emirate_id
+            where t.id = ${traderId}::uuid and t.company_id = ${companyId}::uuid) as "traderAddressAr"
+      `.execute(this.database)
+    ).rows[0];
+    return {
+      employeeMobile: row?.employeeMobile ?? null,
+      employeeName: row?.employeeName ?? username,
+      traderAddressAr: row?.traderAddressAr ?? null,
+      traderAddressEn: row?.traderAddressEn ?? null,
+    };
+  }
 
   private async settlementHeader(
     companyId: string,

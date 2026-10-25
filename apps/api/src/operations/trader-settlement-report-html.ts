@@ -1,4 +1,5 @@
 import type { TraderSettlementReportData } from "./trader-settlement.service.js";
+import { buildLahthzaTraderInvoiceHtml, LAHTHZA_COMPANY_ID } from "./lahthza-trader-invoice-html.js";
 import { Decimal } from "decimal.js";
 
 /**
@@ -341,6 +342,11 @@ export function buildTraderSettlementStatementHtml(
   language: ReportLanguage,
 ): string {
   const labels = LABELS[language];
+  // Lahthza's settlement invoice has its own layout (Aiman, 25 Oct 2026);
+  // its 0.00 invoice keeps this standard one.
+  if (data.companyId === LAHTHZA_COMPANY_ID && data.header.invoiceKind !== "zero_invoice") {
+    return buildLahthzaTraderInvoiceHtml(data, language);
+  }
   const dir = language === "ar" ? "rtl" : "ltr";
   const header = data.header;
   const isFahdAlMalikiCompany = data.companyId === "2f0703c3-2b3b-45ef-a6ab-de9b3694c0a1";

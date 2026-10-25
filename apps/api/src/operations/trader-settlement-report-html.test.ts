@@ -384,7 +384,7 @@ describe("buildTraderSettlementStatementHtml", () => {
       expect(headerCells(html)).toBe(7);
     }
     const other = buildTraderSettlementStatementHtml(
-      { ...sample, companyId: "4d9095cb-3da6-4b8b-9d8e-ff01f8192bdb" },
+      { ...sample, companyId: "e7042c01-0480-41c9-b119-7621d158e7f6" },
       "en",
     );
     expect(other).toContain("Delivery Date");
@@ -618,5 +618,43 @@ describe("buildTraderSettlementStatementHtml", () => {
     expect(original).toContain("النسخة الأصلية");
     // No correction: nothing changes.
     expect(buildTraderSettlementStatementHtml(sample, "en")).not.toContain('class="notice notice-amended"');
+  });
+
+  it("prints Lahthza's settlement invoice in its own layout, sorted by reference (25 Oct 2026)", () => {
+    const lahthza = {
+      ...sample,
+      companyId: "4d9095cb-3da6-4b8b-9d8e-ff01f8192bdb",
+      header: {
+        ...sample.header,
+        invoiceKind: "settlement" as const,
+        invoiceParty: {
+          employeeMobile: "0586589946",
+          employeeName: "ahmad assi",
+          traderAddressAr: null,
+          traderAddressEn: "Sharjah, Al Majaz",
+        },
+      },
+      orders: [
+        { ...sample.orders[0]!, amountPaidNow: "250.00", referenceNumber: "4353" },
+        { ...sample.orders[0]!, amountPaidNow: "150.00", referenceNumber: "0840", orderNumber: "ORD-000002" },
+      ],
+    };
+    const html = buildTraderSettlementStatementHtml(lahthza, "en");
+    expect(html).toContain("Trader Invoice");
+    expect(html).toContain("Employee : <bdi>ahmad assi, 0586589946</bdi>");
+    expect(html).toContain("Address : Sharjah, Al Majaz");
+    expect(html).toContain("Pro Price");
+    expect(html).toContain("Please review the accounts within only a week");
+    expect(html).toContain("<svg class=\"barcode\"");
+    expect(html.indexOf(">0840<")).toBeLessThan(html.indexOf(">4353<"));
+    expect(html).toContain(">400.00<");
+    expect(html).not.toContain("Beneficiary");
+    // Its 0.00 invoice and every other Company keep the standard layout.
+    const zero = buildTraderSettlementStatementHtml(
+      { ...lahthza, header: { ...lahthza.header, invoiceKind: "zero_invoice" as const } },
+      "en",
+    );
+    expect(zero).not.toContain("Pro Price");
+    expect(buildTraderSettlementStatementHtml(sample, "en")).not.toContain("Pro Price");
   });
 });
