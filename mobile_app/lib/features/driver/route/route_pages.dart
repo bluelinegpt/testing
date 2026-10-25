@@ -130,6 +130,47 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
   Future<void> _refresh() =>
       _run((_) => ref.read(driverRouteRepositoryProvider).current());
 
+  /// Like / dislike of today's route (one answer per route; may be changed).
+  Future<void> _rate(RouteRun run, {required bool like}) async {
+    final l10n = AppLocalizations.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    if (like) {
+      final saved = await _run(
+        (_) => ref.read(driverRouteRepositoryProvider).feedback('like'),
+      );
+      if (saved && mounted) {
+        messenger.showSnackBar(SnackBar(content: Text(l10n.routeFeedbackThanks)));
+      }
+      return;
+    }
+    final answer = await showModalBottomSheet<_DislikeAnswer>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => _DislikeSheet(
+        run: run,
+        locale: Localizations.localeOf(context).languageCode,
+        initial: run.feedback != null && !run.feedback!.isLike
+            ? run.feedback
+            : null,
+      ),
+    );
+    if (answer == null || !mounted) return;
+    final saved = await _run(
+      (_) => ref
+          .read(driverRouteRepositoryProvider)
+          .feedback(
+            'dislike',
+            reason: answer.reason,
+            comment: answer.comment,
+            areaIds: answer.areaIds,
+          ),
+    );
+    if (saved && mounted) {
+      messenger.showSnackBar(SnackBar(content: Text(l10n.routeFeedbackThanks)));
+    }
+  }
+
   Future<void> _plan({String? startAreaId}) => _run(
     (key) => ref
         .read(driverRouteRepositoryProvider)
@@ -539,6 +580,12 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
               _saveStops(run, TripPlan.of(run).moved(from, to)),
           onMoveArea: (areaIndex) => _setTripAreaPosition(run, areaIndex),
           onShowMap: _showRouteOnMap,
+          footer: _RouteFeedbackCard(
+            feedback: run.feedback,
+            enabled: actionsEnabled,
+            onLike: () => _rate(run, like: true),
+            onDislike: () => _rate(run, like: false),
+          ),
         ),
       );
     }
@@ -694,6 +741,13 @@ final class _DriverRoutePageState extends ConsumerState<DriverRoutePage> {
               icon: const Icon(Icons.play_arrow_rounded),
               label: Text(l10n.routeStartTrip),
             ),
+            const SizedBox(height: AppSpacing.md),
+            _RouteFeedbackCard(
+              feedback: run.feedback,
+              enabled: actionsEnabled,
+              onLike: () => _rate(run, like: true),
+              onDislike: () => _rate(run, like: false),
+            ),
           ],
         ],
       ),
@@ -721,6 +775,7 @@ final class _TripView extends StatefulWidget {
     required this.onMoveStop,
     required this.onMoveArea,
     required this.onShowMap,
+    this.footer,
   });
 
   final RouteRun run;
@@ -735,6 +790,9 @@ final class _TripView extends StatefulWidget {
   final Future<void> Function(int from, int to) onMoveStop;
   final Future<void> Function(int areaIndex) onMoveArea;
   final Future<void> Function(List<TripStop> stops) onShowMap;
+
+  /// Shown under the trip (the route feedback card).
+  final Widget? footer;
 
   @override
   State<_TripView> createState() => _TripViewState();
@@ -914,7 +972,220 @@ final class _TripViewState extends State<_TripView> {
             ),
           ),
         ],
+        if (widget.footer case final footer?) ...[
+          const SizedBox(height: AppSpacing.md),
+          footer,
+        ],
       ],
+    );
+  }
+}
+
+/// "How is this route?" with a like and a dislike. The answer the Driver
+/// gave stays highlighted; tapping again changes it.
+final class _RouteFeedbackCard extends StatelessWidget {
+  const _RouteFeedbackCard({
+    required this.feedback,
+    required this.enabled,
+    required this.onLike,
+    required this.onDislike,
+  });
+
+  final RouteFeedback? feedback;
+  final bool enabled;
+  final VoidCallback onLike;
+  final VoidCallback onDislike;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final liked = feedback?.isLike == true;
+    final disliked = feedback != null && !feedback!.isLike;
+    return BluelineSectionCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(l10n.routeFeedbackQuestion, style: theme.textTheme.titleSmall),
+          if (feedback != null)
+            Text(l10n.routeFeedbackGiven, style: theme.textTheme.bodySmall),
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            children: [
+              Expanded(
+                child: liked
+                    ? FilledButton.icon(
+                        key: const ValueKey('route-feedback-like'),
+                        onPressed: enabled ? onLike : null,
+                        icon: const Icon(Icons.thumb_up),
+                        label: Text(l10n.routeFeedbackLike),
+                      )
+                    : OutlinedButton.icon(
+                        key: const ValueKey('route-feedback-like'),
+                        onPressed: enabled ? onLike : null,
+                        icon: const Icon(Icons.thumb_up_outlined),
+                        label: Text(l10n.routeFeedbackLike),
+                      ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: disliked
+                    ? FilledButton.icon(
+                        key: const ValueKey('route-feedback-dislike'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.warning,
+                        ),
+                        onPressed: enabled ? onDislike : null,
+                        icon: const Icon(Icons.thumb_down),
+                        label: Text(l10n.routeFeedbackDislike),
+                      )
+                    : OutlinedButton.icon(
+                        key: const ValueKey('route-feedback-dislike'),
+                        onPressed: enabled ? onDislike : null,
+                        icon: const Icon(Icons.thumb_down_outlined),
+                        label: Text(l10n.routeFeedbackDislike),
+                      ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+final class _DislikeAnswer {
+  const _DislikeAnswer({required this.reason, this.comment, this.areaIds});
+  final String reason;
+  final String? comment;
+  final List<String>? areaIds;
+}
+
+/// Why the route was not good: one reason, the Areas for a wrong location,
+/// and an optional comment.
+final class _DislikeSheet extends StatefulWidget {
+  const _DislikeSheet({required this.run, required this.locale, this.initial});
+  final RouteRun run;
+  final String locale;
+  final RouteFeedback? initial;
+
+  @override
+  State<_DislikeSheet> createState() => _DislikeSheetState();
+}
+
+final class _DislikeSheetState extends State<_DislikeSheet> {
+  static const _reasons = [
+    'wrong_order',
+    'wrong_location',
+    'too_long',
+    'other',
+  ];
+  late String _reason = widget.initial?.reason ?? 'wrong_order';
+  late final Set<String> _areas = {...?widget.initial?.areaIds};
+  late final TextEditingController _comment = TextEditingController(
+    text: widget.initial?.comment ?? '',
+  );
+
+  @override
+  void dispose() {
+    _comment.dispose();
+    super.dispose();
+  }
+
+  String _label(AppLocalizations l10n, String reason) => switch (reason) {
+    'wrong_order' => l10n.routeFeedbackWrongOrder,
+    'wrong_location' => l10n.routeFeedbackWrongLocation,
+    'too_long' => l10n.routeFeedbackTooLong,
+    _ => l10n.routeFeedbackOther,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final areas = [
+      for (final area in widget.run.areas)
+        if (area.sequencePosition != null) area,
+    ];
+    return Padding(
+      padding: EdgeInsets.only(
+        left: AppSpacing.md,
+        right: AppSpacing.md,
+        bottom: MediaQuery.viewInsetsOf(context).bottom + AppSpacing.md,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(l10n.routeFeedbackWhy, style: theme.textTheme.titleMedium),
+            const SizedBox(height: AppSpacing.sm),
+            Wrap(
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.xs,
+              children: [
+                for (final reason in _reasons)
+                  ChoiceChip(
+                    key: ValueKey('route-feedback-reason-$reason'),
+                    label: Text(_label(l10n, reason)),
+                    selected: _reason == reason,
+                    onSelected: (_) => setState(() => _reason = reason),
+                  ),
+              ],
+            ),
+            if (_reason == 'wrong_location' && areas.isNotEmpty) ...[
+              const SizedBox(height: AppSpacing.md),
+              Text(l10n.routeFeedbackWhichAreas, style: theme.textTheme.titleSmall),
+              const SizedBox(height: AppSpacing.xs),
+              Wrap(
+                spacing: AppSpacing.sm,
+                runSpacing: AppSpacing.xs,
+                children: [
+                  for (final area in areas)
+                    FilterChip(
+                      label: Text(area.areaName(widget.locale)),
+                      selected: _areas.contains(area.areaId),
+                      onSelected: (selected) => setState(
+                        () => selected
+                            ? _areas.add(area.areaId)
+                            : _areas.remove(area.areaId),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+            const SizedBox(height: AppSpacing.md),
+            TextField(
+              key: const ValueKey('route-feedback-comment'),
+              controller: _comment,
+              maxLength: 500,
+              maxLines: 3,
+              minLines: 1,
+              decoration: InputDecoration(labelText: l10n.routeFeedbackComment),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            FilledButton(
+              key: const ValueKey('route-feedback-send'),
+              onPressed: () {
+                final comment = _comment.text.trim();
+                Navigator.of(context).pop(
+                  _DislikeAnswer(
+                    reason: _reason,
+                    comment: comment.isEmpty ? null : comment,
+                    areaIds: _reason == 'wrong_location'
+                        ? [
+                            for (final area in areas)
+                              if (_areas.contains(area.areaId)) area.areaId,
+                          ]
+                        : null,
+                  ),
+                );
+              },
+              child: Text(l10n.routeFeedbackSend),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

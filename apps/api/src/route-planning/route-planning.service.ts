@@ -23,6 +23,7 @@ import {
   type RoutePlanResult,
   sortByManualSequence,
 } from "./route-planner.js";
+import type { RouteFeedbackReason } from "./route-planning.dto.js";
 import { ROUTE_PROVIDERS, type RoutePoint, type RouteProviderRegistry } from "./route-provider.js";
 
 type Executor = Kysely<DatabaseSchema> | Transaction<DatabaseSchema>;
@@ -71,6 +72,21 @@ export interface RouteAreaView {
   readonly orders: readonly RouteOrderView[];
 }
 
+export interface RouteFeedbackView {
+  readonly rating: "like" | "dislike";
+  readonly reason: RouteFeedbackReason | null;
+  readonly comment: string | null;
+  readonly areaIds: readonly string[];
+  readonly updatedAt: string;
+}
+
+export interface RouteFeedbackInput {
+  readonly rating: "like" | "dislike";
+  readonly reason?: RouteFeedbackReason;
+  readonly comment?: string;
+  readonly areaIds?: readonly string[];
+}
+
 export interface RouteRunView {
   readonly id: string;
   readonly referenceNumber: string;
@@ -99,6 +115,8 @@ export interface RouteRunView {
   readonly orderSequence: readonly string[];
   readonly branchLatitude: number | null;
   readonly branchLongitude: number | null;
+  /** The Driver's like / dislike of this route, if he gave one. */
+  readonly feedback: RouteFeedbackView | null;
 }
 
 export interface RouteResponse {
@@ -703,6 +721,58 @@ export class RoutePlanningService {
     return this.respond(scope, settings.platformEnabled, run, false);
   }
 
+  /**
+   * The Driver's like / dislike of today's route (Aiman, 25 Oct 2026). One
+   * answer per run, which he may change; the planned Area order at that
+   * moment is kept with it so the report can compare it with the order he
+   * actually delivered in. Not a route action: the run itself is unchanged.
+   */
+  public async feedback(input: RouteFeedbackInput): Promise<RouteResponse> {
+    const scope = await this.scope();
+    const settings = await this.settings(this.database, scope.companyId);
+    const run = await this.requireActiveRun(scope);
+    const stops = await sql<{ areaId: string }>`
+      select area_id as "areaId"
+        from driver_route_stops
+       where company_id = ${scope.companyId}::uuid and run_id = ${run.id}::uuid
+       order by sequence_position
+    `.execute(this.database);
+    const planned = stops.rows.map((stop) => stop.areaId);
+    const dislike = input.rating === "dislike";
+    const areaIds = dislike ? [...new Set(input.areaIds ?? [])] : [];
+    const known = new Set(planned);
+    if (areaIds.some((areaId) => !known.has(areaId))) {
+      throw new ApplicationException(
+        "route_feedback_area_not_in_run",
+        "Choose Areas from today's route",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const comment = dislike ? input.comment?.trim() || null : null;
+    const reason = dislike ? (input.reason ?? null) : null;
+    await sql`
+      insert into driver_route_feedback (
+        company_id, run_id, driver_id, rating, reason, comment, area_ids,
+        planned_area_ids, direction, run_revision, created_by_account_id
+      ) values (
+        ${scope.companyId}::uuid, ${run.id}::uuid, ${scope.driverId}::uuid,
+        ${input.rating}, ${reason}, ${comment}, ${JSON.stringify(areaIds)}::jsonb,
+        ${JSON.stringify(planned)}::jsonb, ${run.direction}, ${run.revision},
+        ${scope.accountId}::uuid
+      )
+      on conflict (company_id, run_id) do update
+        set rating = excluded.rating,
+            reason = excluded.reason,
+            comment = excluded.comment,
+            area_ids = excluded.area_ids,
+            planned_area_ids = excluded.planned_area_ids,
+            direction = excluded.direction,
+            run_revision = excluded.run_revision,
+            updated_at = now()
+    `.execute(this.database);
+    return this.respond(scope, settings.companyEnabled && settings.platformEnabled, run, false);
+  }
+
   // ---------------------------------------------------------------------------
 
   private async mutate(
@@ -1133,7 +1203,7 @@ export class RoutePlanningService {
    * Area that was not in the plan show as a new Area until Replan.
    */
   private async view(executor: Executor, scope: DriverScope, run: RunRow): Promise<RouteRunView> {
-    const [stopsResult, ordersResult, settings] = await Promise.all([
+    const [stopsResult, ordersResult, settings, feedbackResult] = await Promise.all([
       sql<{
         areaId: string;
         position: number;
@@ -1176,6 +1246,17 @@ export class RoutePlanningService {
          order by o.serial_number nulls last, o.order_number, o.id
       `.execute(executor),
       this.settings(executor, scope.companyId),
+      sql<{
+        rating: "like" | "dislike";
+        reason: RouteFeedbackReason | null;
+        comment: string | null;
+        areaIds: readonly string[];
+        updatedAt: string;
+      }>`
+        select rating, reason, comment, area_ids as "areaIds", updated_at::text as "updatedAt"
+          from driver_route_feedback
+         where company_id = ${scope.companyId}::uuid and run_id = ${run.id}::uuid
+      `.execute(executor),
     ]);
     const stops = stopsResult.rows;
     const orders = sortByManualSequence(ordersResult.rows, run.orderSequence);
@@ -1297,6 +1378,7 @@ export class RoutePlanningService {
       orderSequence: run.orderSequence,
       branchLatitude: settings.branch?.latitude ?? null,
       branchLongitude: settings.branch?.longitude ?? null,
+      feedback: feedbackResult.rows[0] ?? null,
     };
   }
 }

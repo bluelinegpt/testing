@@ -1013,4 +1013,43 @@ class AppLocalizationsAr extends AppLocalizations {
   @override
   String get mobileAppDisabled =>
       'تم إيقاف تطبيق الجوال لشركتك. يرجى التواصل مع المسؤول.';
+
+  @override
+  String get routeFeedbackQuestion => 'ما رأيك في هذا المسار؟';
+
+  @override
+  String get routeFeedbackLike => 'مسار جيد';
+
+  @override
+  String get routeFeedbackDislike => 'غير جيد';
+
+  @override
+  String get routeFeedbackWhy => 'ما المشكلة؟';
+
+  @override
+  String get routeFeedbackWrongOrder => 'ترتيب المناطق خاطئ';
+
+  @override
+  String get routeFeedbackWrongLocation => 'موقع منطقة خاطئ';
+
+  @override
+  String get routeFeedbackTooLong => 'المسار طويل جدًا';
+
+  @override
+  String get routeFeedbackOther => 'أخرى';
+
+  @override
+  String get routeFeedbackWhichAreas => 'أي المناطق؟';
+
+  @override
+  String get routeFeedbackComment => 'ملاحظة (اختياري)';
+
+  @override
+  String get routeFeedbackSend => 'إرسال';
+
+  @override
+  String get routeFeedbackThanks => 'شكرًا. رأيك يساعدنا على تحسين المسارات.';
+
+  @override
+  String get routeFeedbackGiven => 'قيّمت هذا المسار. اضغط مرة أخرى لتغييره.';
 }

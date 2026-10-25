@@ -46,6 +46,15 @@ abstract interface class DriverRouteRepository {
     String status, {
     String? reason,
   });
+
+  /// The Driver's like / dislike of today's route. [rating] is `like` or
+  /// `dislike`; a reason, comment and Areas only go with a dislike.
+  Future<RouteState> feedback(
+    String rating, {
+    String? reason,
+    String? comment,
+    List<String>? areaIds,
+  });
 }
 
 final class ApiDriverRouteRepository implements DriverRouteRepository {
@@ -115,6 +124,25 @@ final class ApiDriverRouteRepository implements DriverRouteRepository {
     'status': status,
     'reason': ?reason,
   });
+
+  @override
+  Future<RouteState> feedback(
+    String rating, {
+    String? reason,
+    String? comment,
+    List<String>? areaIds,
+  }) async {
+    final response = await api.post<Object?>(
+      'portal/driver/route/feedback',
+      data: {
+        'rating': rating,
+        'reason': ?reason,
+        'comment': ?comment,
+        'areaIds': ?areaIds,
+      },
+    );
+    return _state(response.data);
+  }
 
   Future<RouteState> _post(
     String action,
@@ -213,6 +241,21 @@ final class CachedDriverRouteRepository implements DriverRouteRepository {
   }) => _guard(
     () =>
         inner.changeStopStatus(idempotencyKey, orderId, status, reason: reason),
+  );
+
+  @override
+  Future<RouteState> feedback(
+    String rating, {
+    String? reason,
+    String? comment,
+    List<String>? areaIds,
+  }) => _guard(
+    () => inner.feedback(
+      rating,
+      reason: reason,
+      comment: comment,
+      areaIds: areaIds,
+    ),
   );
 
   Future<RouteState> _guard(

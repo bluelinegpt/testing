@@ -55,6 +55,7 @@ export const DOMAIN_TABLES: Readonly<Record<ResetDomain, readonly string[]>> = {
     "driver_reconciliation_payments",
     "driver_reconciliations",
     "driver_route_actions",
+    "driver_route_feedback",
     "driver_route_runs",
     "driver_route_stops",
     "idempotency_records",

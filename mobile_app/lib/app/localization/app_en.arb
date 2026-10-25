@@ -326,5 +326,18 @@
   "routeMoveArea": "Move Area",
   "routeNow": "now",
   "routeThen": "Then",
-  "mobileAppDisabled": "The mobile app is turned off for your company. Please contact your administrator."
+  "mobileAppDisabled": "The mobile app is turned off for your company. Please contact your administrator.",
+  "routeFeedbackQuestion": "How is this route?",
+  "routeFeedbackLike": "Good route",
+  "routeFeedbackDislike": "Not good",
+  "routeFeedbackWhy": "What was wrong?",
+  "routeFeedbackWrongOrder": "Wrong order of Areas",
+  "routeFeedbackWrongLocation": "An Area is in the wrong place",
+  "routeFeedbackTooLong": "Route too long",
+  "routeFeedbackOther": "Other",
+  "routeFeedbackWhichAreas": "Which Areas?",
+  "routeFeedbackComment": "Comment (optional)",
+  "routeFeedbackSend": "Send",
+  "routeFeedbackThanks": "Thank you. Your answer helps us improve routes.",
+  "routeFeedbackGiven": "You rated this route. Tap again to change it."
 }

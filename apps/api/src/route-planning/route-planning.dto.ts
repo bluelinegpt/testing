@@ -135,3 +135,35 @@ export class RoutePointDto {
   @IsLongitude()
   public longitude!: number;
 }
+
+export const ROUTE_FEEDBACK_REASONS = ["wrong_order", "wrong_location", "too_long", "other"] as const;
+export type RouteFeedbackReason = (typeof ROUTE_FEEDBACK_REASONS)[number];
+
+/**
+ * The Driver's like / dislike of today's route. A reason, comment and the
+ * Areas he means (for a wrong location) only go with a dislike.
+ */
+export class RouteFeedbackDto {
+  @ApiProperty({ enum: ["like", "dislike"] })
+  @IsIn(["like", "dislike"])
+  public rating!: "like" | "dislike";
+
+  @ApiPropertyOptional({ enum: ROUTE_FEEDBACK_REASONS })
+  @IsOptional()
+  @IsIn(ROUTE_FEEDBACK_REASONS)
+  public reason?: RouteFeedbackReason;
+
+  @ApiPropertyOptional({ maxLength: 500 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  public comment?: string;
+
+  @ApiPropertyOptional({ type: [String], format: "uuid" })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ArrayUnique()
+  @IsUUID("all", { each: true })
+  public areaIds?: string[];
+}

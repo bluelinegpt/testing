@@ -73,6 +73,14 @@ export interface AppConfiguration {
      */
     firebaseServiceAccountJson: string | undefined;
   };
+  routing: {
+    /**
+     * Google Maps Platform key, used only to suggest Area pins (Geocoding
+     * API). Optional: absent means "Suggest pins from Google" reports that
+     * the key is not set; route planning itself never needs it.
+     */
+    googleMapsApiKey: string | undefined;
+  };
   whatsapp: {
     accessToken: string | undefined;
     appSecret: string | undefined;
@@ -418,6 +426,9 @@ export function configuration(): AppConfiguration {
         process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim() === ""
           ? undefined
           : process.env.FIREBASE_SERVICE_ACCOUNT_JSON,
+    },
+    routing: {
+      googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY?.trim() || undefined,
     },
     whatsapp: {
       accessToken: process.env.WHATSAPP_ACCESS_TOKEN?.trim() || undefined,

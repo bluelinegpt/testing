@@ -194,6 +194,24 @@ final class _FakeRoutes implements DriverRouteRepository {
       'run': _runJson(startedAt: '2026-10-10 09:00:00+04', finished: {orderId}),
     });
   }
+
+  @override
+  Future<RouteState> feedback(
+    String rating, {
+    String? reason,
+    String? comment,
+    List<String>? areaIds,
+  }) async {
+    calls.add('feedback:$rating:${reason ?? ''}:${comment ?? ''}:${(areaIds ?? []).join(',')}');
+    final run = _runJson();
+    run['feedback'] = {
+      'rating': rating,
+      'reason': reason,
+      'comment': comment,
+      'areaIds': areaIds ?? <String>[],
+    };
+    return state = RouteState.fromJson({'enabled': true, 'run': run});
+  }
 }
 
 Widget _wrap(
@@ -402,6 +420,49 @@ void main() {
       expect(routes.calls, contains('reverse:1'));
     });
 
+    testWidgets('a like is sent at once; a dislike asks why and which Areas', (
+      tester,
+    ) async {
+      _tall(tester);
+      final routes = _FakeRoutes(
+        RouteState.fromJson({'enabled': true, 'run': _runJson()}),
+      );
+      await tester.pumpWidget(
+        _wrap(DriverRoutePage(initial: routes.state), routes),
+      );
+      await tester.scrollUntilVisible(
+        find.text('How is this route?'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(find.byKey(const ValueKey('route-feedback-like')));
+      await tester.pumpAndSettle();
+      expect(routes.calls, contains('feedback:like:::'));
+      expect(
+        find.text('You rated this route. Tap again to change it.'),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('route-feedback-dislike')));
+      await tester.pumpAndSettle();
+      expect(find.text('What was wrong?'), findsOneWidget);
+      await tester.tap(
+        find.byKey(const ValueKey('route-feedback-reason-wrong_location')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilterChip, 'Al Nuaimiya'));
+      await tester.enterText(
+        find.byKey(const ValueKey('route-feedback-comment')),
+        'Pin is far',
+      );
+      await tester.tap(find.byKey(const ValueKey('route-feedback-send')));
+      await tester.pumpAndSettle();
+      expect(
+        routes.calls,
+        contains('feedback:dislike:wrong_location:Pin is far:area-ajm'),
+      );
+    });
+
     testWidgets('a saved offline route disables changes', (tester) async {
       _tall(tester);
       final offline = RouteState.fromJson({
@@ -512,16 +573,14 @@ void main() {
       final plan = TripPlan.of(run);
       expect(plan.areaGroups.length, 2);
       expect(plan.areaGroups.last.stops.single.$1, 2);
-      expect([for (final stop in plan.movedArea(1, 0)) stop.order.id], [
-        'order-3',
-        'order-1',
-        'order-2',
-      ]);
-      expect([for (final stop in plan.afterPrevious) stop.order.id], [
-        'order-3',
-        'order-1',
-        'order-2',
-      ]);
+      expect(
+        [for (final stop in plan.movedArea(1, 0)) stop.order.id],
+        ['order-3', 'order-1', 'order-2'],
+      );
+      expect(
+        [for (final stop in plan.afterPrevious) stop.order.id],
+        ['order-3', 'order-1', 'order-2'],
+      );
     });
 
     test('the Driver\'s own order is used across Areas', () {
@@ -785,5 +844,13 @@ final class _Failing implements DriverRouteRepository {
     String orderId,
     String status, {
     String? reason,
+  }) async => throw error;
+
+  @override
+  Future<RouteState> feedback(
+    String rating, {
+    String? reason,
+    String? comment,
+    List<String>? areaIds,
   }) async => throw error;
 }

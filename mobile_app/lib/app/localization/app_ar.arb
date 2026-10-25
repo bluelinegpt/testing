@@ -319,5 +319,18 @@
   "routeMoveArea": "نقل المنطقة",
   "routeNow": "الآن",
   "routeThen": "بعدها",
-  "mobileAppDisabled": "تم إيقاف تطبيق الجوال لشركتك. يرجى التواصل مع المسؤول."
+  "mobileAppDisabled": "تم إيقاف تطبيق الجوال لشركتك. يرجى التواصل مع المسؤول.",
+  "routeFeedbackQuestion": "ما رأيك في هذا المسار؟",
+  "routeFeedbackLike": "مسار جيد",
+  "routeFeedbackDislike": "غير جيد",
+  "routeFeedbackWhy": "ما المشكلة؟",
+  "routeFeedbackWrongOrder": "ترتيب المناطق خاطئ",
+  "routeFeedbackWrongLocation": "موقع منطقة خاطئ",
+  "routeFeedbackTooLong": "المسار طويل جدًا",
+  "routeFeedbackOther": "أخرى",
+  "routeFeedbackWhichAreas": "أي المناطق؟",
+  "routeFeedbackComment": "ملاحظة (اختياري)",
+  "routeFeedbackSend": "إرسال",
+  "routeFeedbackThanks": "شكرًا. رأيك يساعدنا على تحسين المسارات.",
+  "routeFeedbackGiven": "قيّمت هذا المسار. اضغط مرة أخرى لتغييره."
 }

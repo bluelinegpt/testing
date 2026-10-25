@@ -10,6 +10,8 @@ import { ROUTE_PROVIDERS } from "./route-provider.js";
 import { DefaultRouteProviderRegistry } from "./route-provider.registry.js";
 import { RouteSetupController } from "./route-setup.controller.js";
 import { RouteSetupService } from "./route-setup.service.js";
+import { AreaGeocoder, GEOCODER_FETCH } from "./area-geocoder.js";
+import { RouteFeedbackService } from "./route-feedback.service.js";
 
 /**
  * Driver route planning. A module of its own, so it does not touch the
@@ -23,6 +25,9 @@ import { RouteSetupService } from "./route-setup.service.js";
   providers: [
     RoutePlanningService,
     RouteSetupService,
+    RouteFeedbackService,
+    AreaGeocoder,
+    { provide: GEOCODER_FETCH, useValue: (url: string, init?: RequestInit) => fetch(url, init) },
     AreaMatrixRouteProvider,
     { provide: ROUTE_PROVIDERS, useClass: DefaultRouteProviderRegistry },
   ],

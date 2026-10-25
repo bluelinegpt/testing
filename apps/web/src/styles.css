@@ -13189,3 +13189,16 @@ tr.row-highlighted {
 .order-correction-lines { margin: 6px 0 0; padding-inline-start: 18px; display: grid; gap: 6px; }
 .status-badge.order-correction-removed { background: #fdeeee; color: #b42318; border: 1px solid #f3b9b4; }
 .order-correction-print { display: inline-flex; gap: 6px; margin-inline-start: 8px; }
+
+/* Route planning: Google pin suggestions and Driver feedback (25 Oct 2026) */
+.route-suggestion small {
+  display: block;
+  max-width: 320px;
+}
+.route-suggestion .status-warning {
+  display: inline-block;
+  margin-block-start: 4px;
+}
+.route-feedback td {
+  vertical-align: top;
+}

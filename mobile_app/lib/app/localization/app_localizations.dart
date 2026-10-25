@@ -2005,6 +2005,84 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'The mobile app is turned off for your company. Please contact your administrator.'**
   String get mobileAppDisabled;
+
+  /// No description provided for @routeFeedbackQuestion.
+  ///
+  /// In en, this message translates to:
+  /// **'How is this route?'**
+  String get routeFeedbackQuestion;
+
+  /// No description provided for @routeFeedbackLike.
+  ///
+  /// In en, this message translates to:
+  /// **'Good route'**
+  String get routeFeedbackLike;
+
+  /// No description provided for @routeFeedbackDislike.
+  ///
+  /// In en, this message translates to:
+  /// **'Not good'**
+  String get routeFeedbackDislike;
+
+  /// No description provided for @routeFeedbackWhy.
+  ///
+  /// In en, this message translates to:
+  /// **'What was wrong?'**
+  String get routeFeedbackWhy;
+
+  /// No description provided for @routeFeedbackWrongOrder.
+  ///
+  /// In en, this message translates to:
+  /// **'Wrong order of Areas'**
+  String get routeFeedbackWrongOrder;
+
+  /// No description provided for @routeFeedbackWrongLocation.
+  ///
+  /// In en, this message translates to:
+  /// **'An Area is in the wrong place'**
+  String get routeFeedbackWrongLocation;
+
+  /// No description provided for @routeFeedbackTooLong.
+  ///
+  /// In en, this message translates to:
+  /// **'Route too long'**
+  String get routeFeedbackTooLong;
+
+  /// No description provided for @routeFeedbackOther.
+  ///
+  /// In en, this message translates to:
+  /// **'Other'**
+  String get routeFeedbackOther;
+
+  /// No description provided for @routeFeedbackWhichAreas.
+  ///
+  /// In en, this message translates to:
+  /// **'Which Areas?'**
+  String get routeFeedbackWhichAreas;
+
+  /// No description provided for @routeFeedbackComment.
+  ///
+  /// In en, this message translates to:
+  /// **'Comment (optional)'**
+  String get routeFeedbackComment;
+
+  /// No description provided for @routeFeedbackSend.
+  ///
+  /// In en, this message translates to:
+  /// **'Send'**
+  String get routeFeedbackSend;
+
+  /// No description provided for @routeFeedbackThanks.
+  ///
+  /// In en, this message translates to:
+  /// **'Thank you. Your answer helps us improve routes.'**
+  String get routeFeedbackThanks;
+
+  /// No description provided for @routeFeedbackGiven.
+  ///
+  /// In en, this message translates to:
+  /// **'You rated this route. Tap again to change it.'**
+  String get routeFeedbackGiven;
 }
 
 class _AppLocalizationsDelegate

@@ -23,6 +23,7 @@ import {
   ReorderRouteDto,
   ReplanRouteDto,
   ReverseRouteDto,
+  RouteFeedbackDto,
   RouteOrderActionDto,
   RouteStopStatusDto,
 } from "./route-planning.dto.js";
@@ -140,6 +141,13 @@ export class RoutePlanningController {
     @Headers("x-idempotency-key") idempotencyKey: string | undefined,
   ): Promise<RouteResponse> {
     return this.routes.noAnswer(input.orderId, requireKey(idempotencyKey));
+  }
+
+  @ApiOperation({ summary: "Like or dislike today's route (one answer per route, may be changed)" })
+  @Post("feedback")
+  @HttpCode(HttpStatus.OK)
+  public feedback(@Body() input: RouteFeedbackDto): Promise<RouteResponse> {
+    return this.routes.feedback(input);
   }
 }
 

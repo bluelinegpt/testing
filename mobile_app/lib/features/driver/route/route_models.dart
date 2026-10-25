@@ -186,6 +186,44 @@ final class RouteArea {
   };
 }
 
+/// The Driver's like / dislike of today's route.
+final class RouteFeedback {
+  const RouteFeedback({
+    required this.rating,
+    this.reason,
+    this.comment,
+    this.areaIds = const [],
+  });
+
+  factory RouteFeedback.fromJson(Map<String, dynamic> json) => RouteFeedback(
+    rating: _string(json['rating']) ?? 'like',
+    reason: _string(json['reason']),
+    comment: _string(json['comment']),
+    areaIds: [
+      if (json['areaIds'] case final List<Object?> ids)
+        for (final id in ids)
+          if (id is String && id.isNotEmpty) id,
+    ],
+  );
+
+  /// `like` or `dislike`.
+  final String rating;
+
+  /// `wrong_order`, `wrong_location`, `too_long` or `other` (dislike only).
+  final String? reason;
+  final String? comment;
+  final List<String> areaIds;
+
+  bool get isLike => rating == 'like';
+
+  Map<String, dynamic> toJson() => {
+    'rating': rating,
+    'reason': reason,
+    'comment': comment,
+    'areaIds': areaIds,
+  };
+}
+
 final class RouteRun {
   const RouteRun({
     required this.id,
@@ -208,6 +246,7 @@ final class RouteRun {
     this.branchLatitude,
     this.branchLongitude,
     this.orderSequence = const [],
+    this.feedback,
   });
 
   factory RouteRun.fromJson(Map<String, dynamic> json) => RouteRun(
@@ -238,6 +277,11 @@ final class RouteRun {
         for (final id in ids)
           if (id is String && id.isNotEmpty) id,
     ],
+    feedback: json['feedback'] is Map
+        ? RouteFeedback.fromJson(
+            Map<String, dynamic>.from(json['feedback'] as Map),
+          )
+        : null,
   );
 
   final String id, referenceNumber, businessDate, direction, resultSource;
@@ -254,6 +298,9 @@ final class RouteRun {
 
   /// The Driver's own Order order across Areas (empty until he arranges it).
   final List<String> orderSequence;
+
+  /// His like / dislike of this route, if he gave one.
+  final RouteFeedback? feedback;
 
   bool get isFallback => resultSource != 'provider';
   bool get isStarted => startedAt != null;
@@ -286,6 +333,7 @@ final class RouteRun {
     'branchLatitude': branchLatitude,
     'branchLongitude': branchLongitude,
     'orderSequence': orderSequence,
+    'feedback': feedback?.toJson(),
   };
 }
 

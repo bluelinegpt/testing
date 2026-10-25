@@ -1010,7 +1010,8 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get routeListHint => 'Tap a number or use the arrows to change the order.';
+  String get routeListHint =>
+      'Tap a number or use the arrows to change the order.';
 
   @override
   String get routeMoveArea => 'Move Area';
@@ -1024,4 +1025,45 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get mobileAppDisabled =>
       'The mobile app is turned off for your company. Please contact your administrator.';
+
+  @override
+  String get routeFeedbackQuestion => 'How is this route?';
+
+  @override
+  String get routeFeedbackLike => 'Good route';
+
+  @override
+  String get routeFeedbackDislike => 'Not good';
+
+  @override
+  String get routeFeedbackWhy => 'What was wrong?';
+
+  @override
+  String get routeFeedbackWrongOrder => 'Wrong order of Areas';
+
+  @override
+  String get routeFeedbackWrongLocation => 'An Area is in the wrong place';
+
+  @override
+  String get routeFeedbackTooLong => 'Route too long';
+
+  @override
+  String get routeFeedbackOther => 'Other';
+
+  @override
+  String get routeFeedbackWhichAreas => 'Which Areas?';
+
+  @override
+  String get routeFeedbackComment => 'Comment (optional)';
+
+  @override
+  String get routeFeedbackSend => 'Send';
+
+  @override
+  String get routeFeedbackThanks =>
+      'Thank you. Your answer helps us improve routes.';
+
+  @override
+  String get routeFeedbackGiven =>
+      'You rated this route. Tap again to change it.';
 }

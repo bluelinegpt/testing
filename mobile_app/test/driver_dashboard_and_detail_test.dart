@@ -1526,4 +1526,12 @@ final class _RoutePlanningOff implements DriverRouteRepository {
     String status, {
     String? reason,
   }) => throw UnimplementedError();
+
+  @override
+  Future<RouteState> feedback(
+    String rating, {
+    String? reason,
+    String? comment,
+    List<String>? areaIds,
+  }) => throw UnimplementedError();
 }

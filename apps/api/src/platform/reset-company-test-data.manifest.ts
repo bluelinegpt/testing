@@ -59,6 +59,8 @@ export const PURGE_TABLES = new Set([
   // data reset.
   "company_route_optimization_usage",
   "driver_route_actions",
+  // Driver like / dislike of a run (20261025100000), removed with the runs.
+  "driver_route_feedback",
   "driver_route_runs",
   "driver_route_stops",
   // Driver commissions and outsourced Driver fees
@@ -221,6 +223,9 @@ export const PRESERVE_TABLES = new Set([
   "accounting_zero_opening_confirmations",
   "accounts",
   "allowance_types",
+  // Google pin suggestions for Areas (20261025100000): Area set-up, kept
+  // with the Areas they belong to.
+  "area_coordinate_suggestions",
   "areas",
   "audit_events",
   "balance_override_audits",

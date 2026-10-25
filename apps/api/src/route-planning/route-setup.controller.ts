@@ -6,6 +6,7 @@ import {
   Inject,
   Param,
   ParseUUIDPipe,
+  Post,
   Put,
   Req,
 } from "@nestjs/common";
@@ -20,7 +21,15 @@ import {
 // metadata to run the ValidationPipe.
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import { RoutePointDto } from "./route-planning.dto.js";
-import { type RouteSetup, RouteSetupService } from "./route-setup.service.js";
+import {
+  type RouteFeedbackReport,
+  RouteFeedbackService,
+} from "./route-feedback.service.js";
+import {
+  type RouteSetup,
+  RouteSetupService,
+  type SuggestPinsResult,
+} from "./route-setup.service.js";
 
 /**
  * Configuration › Route planning: Area pins and the branch location.
@@ -35,7 +44,10 @@ import { type RouteSetup, RouteSetupService } from "./route-setup.service.js";
 @RequirePermissions("users_roles.manage")
 @Controller("configuration/route-planning")
 export class RouteSetupController {
-  public constructor(@Inject(RouteSetupService) private readonly setup: RouteSetupService) {}
+  public constructor(
+    @Inject(RouteSetupService) private readonly setup: RouteSetupService,
+    @Inject(RouteFeedbackService) private readonly feedback: RouteFeedbackService,
+  ) {}
 
   @ApiOperation({ summary: "Route planning setup: status, branch and Area pins" })
   @Get()
@@ -60,6 +72,44 @@ export class RouteSetupController {
     @Req() request: Request,
   ): Promise<RouteSetup> {
     return this.setup.clearAreaPin(areaId, correlationId(request));
+  }
+
+  @ApiOperation({ summary: "Look up the next batch of Areas without a pin on Google (suggestions only)" })
+  @Post("suggestions")
+  public suggestPins(@Req() request: Request): Promise<SuggestPinsResult> {
+    return this.setup.suggestPins(correlationId(request));
+  }
+
+  @ApiOperation({ summary: "Accept every Google suggestion that carries no warning" })
+  @Post("suggestions/accept-clean")
+  public acceptClean(
+    @Req() request: Request,
+  ): Promise<{ readonly accepted: number; readonly setup: RouteSetup }> {
+    return this.setup.acceptCleanSuggestions(correlationId(request));
+  }
+
+  @ApiOperation({ summary: "Accept one Area's Google suggestion as its pin" })
+  @Post("areas/:areaId/suggestion/accept")
+  public acceptSuggestion(
+    @Param("areaId", ParseUUIDPipe) areaId: string,
+    @Req() request: Request,
+  ): Promise<RouteSetup> {
+    return this.setup.acceptSuggestion(areaId, correlationId(request));
+  }
+
+  @ApiOperation({ summary: "Reject one Area's Google suggestion" })
+  @Post("areas/:areaId/suggestion/reject")
+  public rejectSuggestion(
+    @Param("areaId", ParseUUIDPipe) areaId: string,
+    @Req() request: Request,
+  ): Promise<RouteSetup> {
+    return this.setup.rejectSuggestion(areaId, correlationId(request));
+  }
+
+  @ApiOperation({ summary: "Driver route feedback for the last 30 days" })
+  @Get("feedback")
+  public feedbackReport(): Promise<RouteFeedbackReport> {
+    return this.feedback.report();
   }
 
   @ApiOperation({ summary: "Save the branch location (where a run ends)" })

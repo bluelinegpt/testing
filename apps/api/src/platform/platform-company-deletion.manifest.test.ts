@@ -110,7 +110,9 @@ describe("permanent Company deletion manifest", () => {
     // for Nothing-to-pay Orders; PURGE, with its Settlement data).
     // 182 -> 184 (23 Oct 2026): `order_corrections` and
     // `order_correction_lines` (DCX order corrections; PURGE, with the Orders).
-    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(184);
+    // 184 -> 186 (25 Oct 2026): `driver_route_feedback` (PURGE, with the
+    // route runs) and `area_coordinate_suggestions` (PRESERVE, Area set-up).
+    expect(COMPANY_DELETION_DIRECT_TABLES.size).toBe(186);
     expect(COMPANY_DELETION_MANIFEST_HASH).toMatch(/^[a-f0-9]{64}$/);
   });
 

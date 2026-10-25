@@ -13,6 +13,7 @@ import type { DatabaseSchema } from "../infrastructure/database/database.types.j
 import type { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import { calculateOrderFinancials } from "../operations/order-financial-model.js";
 import type { IdentityContextAccessor } from "../security/identity-context.js";
+import type { AreaGeocoder, GeocodeOutcome } from "./area-geocoder.js";
 import { AreaMatrixRouteProvider } from "./area-matrix-route-provider.js";
 import { RouteOptimizationAdminService } from "./route-optimization-admin.service.js";
 import { RoutePlanningService } from "./route-planning.service.js";
@@ -431,6 +432,41 @@ describe.skipIf(!run)("Driver route planning (database)", () => {
     });
   });
 
+  it("keeps one like / dislike per run, which the Driver may change, and refuses Areas outside it", async () => {
+    await inRollback(async (tx) => {
+      const f = await companyFixture(tx, { platform: true });
+      const a = await areaFixture(tx, f, "Al Barsha");
+      const b = await areaFixture(tx, f, "Deira");
+      await orderFixture(tx, f, a);
+      await orderFixture(tx, f, b);
+      const service = serviceFor(tx, f, countingProvider());
+      const planned = await service.plan({}, "plan-key-0031");
+      expect(planned.run?.feedback).toBeNull();
+      const liked = await service.feedback({ rating: "like", reason: "other", comment: "ignored" });
+      expect(liked.run?.feedback).toMatchObject({ rating: "like", reason: null, comment: null });
+      const disliked = await service.feedback({
+        rating: "dislike",
+        reason: "wrong_location",
+        comment: "  Deira pin is in the sea ",
+        areaIds: [b],
+      });
+      expect(disliked.run?.feedback).toMatchObject({
+        rating: "dislike",
+        reason: "wrong_location",
+        comment: "Deira pin is in the sea",
+        areaIds: [b],
+      });
+      await expect(
+        service.feedback({ rating: "dislike", areaIds: [randomUUID()] }),
+      ).rejects.toMatchObject({ errorCode: "route_feedback_area_not_in_run" });
+      const rows = await sql<{ planned: string[] }>`
+        select planned_area_ids as planned from driver_route_feedback
+         where company_id = ${f.companyId}::uuid`.execute(tx);
+      expect(rows.rows).toHaveLength(1);
+      expect(rows.rows[0]?.planned).toEqual(planned.run?.areas.map((area) => area.areaId));
+    });
+  });
+
   it("defer moves the Order to the end of the run and changes no column on orders", async () => {
     await inRollback(async (tx) => {
       const f = await companyFixture(tx, { platform: false });
@@ -545,9 +581,17 @@ function txManager(tx: Transaction<DatabaseSchema>): KyselyTransactionManager {
   } as unknown as KyselyTransactionManager;
 }
 
+function fakeGeocoder(lookup?: (query: string) => GeocodeOutcome): AreaGeocoder {
+  return {
+    configured: lookup !== undefined,
+    geocode: (query: string) => Promise.resolve((lookup as (q: string) => GeocodeOutcome)(query)),
+  } as unknown as AreaGeocoder;
+}
+
 function setupFor(
   tx: Transaction<DatabaseSchema>,
   f: Pick<Fixture, "companyId" | "actorId">,
+  geocoder: AreaGeocoder = fakeGeocoder(),
 ): RouteSetupService {
   const identities = {
     current: () => ({
@@ -557,7 +601,12 @@ function setupFor(
       permissions: [],
     }),
   } as unknown as IdentityContextAccessor;
-  return new RouteSetupService(tx as unknown as Kysely<DatabaseSchema>, txManager(tx), identities);
+  return new RouteSetupService(
+    tx as unknown as Kysely<DatabaseSchema>,
+    txManager(tx),
+    identities,
+    geocoder,
+  );
 }
 
 async function platformActor(tx: Db) {
@@ -596,6 +645,53 @@ describe.skipIf(!run)("Route planning setup and Platform controls (database)", (
         "area.coordinates_verified",
         "area.coordinates_cleared",
       ]);
+    });
+  });
+
+  it("Google suggestions wait for the administrator; only clean ones are accepted in bulk", async () => {
+    await inRollback(async (tx) => {
+      const f = await companyFixture(tx, { enabled: false });
+      const clean = await areaFixture(tx, f, "Clean Area", { verified: false });
+      const loose = await areaFixture(tx, f, "Loose Area", { verified: false });
+      const missing = await areaFixture(tx, f, "Missing Area", { verified: false });
+      const g = await companyFixture(tx, { enabled: false });
+      const foreign = await areaFixture(tx, g, "Foreign Area", { verified: false });
+      const geocoder = fakeGeocoder((query) =>
+        query.startsWith("Missing")
+          ? { point: null, formattedAddress: null, resultTypes: [], partialMatch: false }
+          : {
+              point: { latitude: 25.2, longitude: 55.3 },
+              formattedAddress: query,
+              resultTypes: ["neighborhood", "political"],
+              partialMatch: query.startsWith("Loose"),
+            },
+      );
+      const setup = setupFor(tx, f, geocoder);
+      const first = await setup.suggestPins("corr-suggest-01");
+      expect(first).toMatchObject({ looked: 3, notFound: 1, remaining: 0, stopped: null });
+      const byId = (id: string) => first.setup.areas.find((area) => area.id === id);
+      expect(byId(clean)?.suggestion).toMatchObject({ flag: null, latitude: 25.2 });
+      expect(byId(clean)?.coordinatesVerifiedAt).toBeNull();
+      expect(byId(loose)?.suggestion?.flag).toBe("partial_match");
+      expect(byId(missing)?.suggestion?.flag).toBe("not_found");
+      // A second run looks nothing up again.
+      expect((await setup.suggestPins("corr-suggest-02")).looked).toBe(0);
+      const bulk = await setup.acceptCleanSuggestions("corr-suggest-03");
+      expect(bulk.accepted).toBe(1);
+      expect(bulk.setup.verifiedAreaCount).toBe(1);
+      await expect(setup.acceptSuggestion(missing, "corr-suggest-04")).rejects.toMatchObject({
+        errorCode: "route_suggestion_not_found",
+      });
+      await setup.acceptSuggestion(loose, "corr-suggest-05");
+      const rejected = await setup.rejectSuggestion(missing, "corr-suggest-06");
+      expect(rejected.areas.find((area) => area.id === missing)).toMatchObject({
+        suggestion: null,
+        suggestionRejected: true,
+      });
+      expect(rejected.verifiedAreaCount).toBe(2);
+      const other = await sql`select 1 from area_coordinate_suggestions
+        where company_id = ${g.companyId}::uuid and area_id = ${foreign}::uuid`.execute(tx);
+      expect(other.rows).toHaveLength(0);
     });
   });
 
@@ -718,6 +814,7 @@ describe.skipIf(!run)("Driver route planning concurrency (database, committed fi
     await database.transaction().execute(async (tx) => {
       await sql`set local session_replication_role = replica`.execute(tx);
       for (const table of [
+        "driver_route_feedback",
         "driver_route_actions",
         "driver_route_stops",
         "driver_route_runs",
