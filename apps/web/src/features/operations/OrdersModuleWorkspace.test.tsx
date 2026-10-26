@@ -1137,17 +1137,12 @@ describe("OrdersModuleWorkspace", () => {
     expect(screen.getByText("Serial Number: SER-000002")).toBeVisible();
     expect(holdGroupSelection).toBeChecked();
 
-    // Every group folds with + / -, and all groups fold at once.
+    // Every group folds with + / -.
     fireEvent.click(screen.getByRole("button", { name: "Hide the orders of Hold" }));
     expect(screen.queryByText("Serial Number: SER-000002")).toBeNull();
     expect(screen.getByText("Serial Number: SER-000001")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Show the orders of Hold" }));
     expect(screen.getByText("Serial Number: SER-000002")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: /Collapse all/ }));
-    expect(screen.queryByText("Serial Number: SER-000001")).toBeNull();
-    expect(screen.queryByText("Serial Number: SER-000002")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Expand all/ }));
-    expect(screen.getByText("Serial Number: SER-000001")).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: /Grouping/ }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Driver" }));

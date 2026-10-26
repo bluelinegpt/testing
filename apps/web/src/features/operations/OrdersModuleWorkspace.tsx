@@ -1681,8 +1681,6 @@ export function OrdersModuleWorkspace({
   };
   const toggleCollapsedGroup = (key: string) =>
     setCollapsedGroups((current) => toggleSet(current, key));
-  const allGroupKeys = (list: readonly VisibleOrderGroup[]): string[] =>
-    list.flatMap((group) => [group.key, ...allGroupKeys(group.children)]);
   const renderOrderRow = (order: OperationsOrder) => {
     const checked = orderSelected(order.id);
     const rowStatusClass = rowStatusColors
@@ -2631,24 +2629,6 @@ export function OrdersModuleWorkspace({
                 )}
               </div>
             </div>
-            {grouping === "" ? null : (
-              <div className="order-group-fold-all">
-                <button
-                  className="button button-secondary"
-                  onClick={() => setCollapsedGroups(new Set(allGroupKeys(groups)))}
-                  type="button"
-                >
-                  <Minus aria-hidden="true" size={16} /> {t("operations.collapseAllGroups")}
-                </button>
-                <button
-                  className="button button-secondary"
-                  onClick={() => setCollapsedGroups(new Set())}
-                  type="button"
-                >
-                  <Plus aria-hidden="true" size={16} /> {t("operations.expandAllGroups")}
-                </button>
-              </div>
-            )}
             <label className="filter-date">
               <span>{t("operations.dateFrom")}</span>
               <input

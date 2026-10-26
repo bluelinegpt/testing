@@ -2811,8 +2811,6 @@ export const englishTranslations = {
     selectVisibleGroup: "Select visible Orders in {{group}}",
     collapseGroup: "Hide the orders of {{group}}",
     expandGroup: "Show the orders of {{group}}",
-    collapseAllGroups: "Collapse all",
-    expandAllGroups: "Expand all",
     visibleOrderCount: "{{count}} visible Orders",
     groupSelectedCount: "{{count}} selected",
     closeBlockedHint:

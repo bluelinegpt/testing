@@ -2806,8 +2806,6 @@ export const arabicTranslations = {
     selectVisibleGroup: "تحديد الطلبات الظاهرة في {{group}}",
     collapseGroup: "إخفاء طلبات {{group}}",
     expandGroup: "إظهار طلبات {{group}}",
-    collapseAllGroups: "طي الكل",
-    expandAllGroups: "توسيع الكل",
     visibleOrderCount: "{{count}} طلبات ظاهرة",
     groupSelectedCount: "{{count}} محدد",
     closeBlockedHint:

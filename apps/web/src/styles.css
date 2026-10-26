@@ -13202,15 +13202,3 @@ tr.row-highlighted {
 .route-feedback td {
   vertical-align: top;
 }
-
-/* Orders grouping: collapse / expand every group at once (26 Oct 2026) */
-.order-group-fold-all {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-.order-group-fold-all .button {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
