@@ -51,22 +51,24 @@ export const ORDER_VIEW_DELIVERY_STATUSES = [
 ] as const;
 export type OrderViewDeliveryStatus = (typeof ORDER_VIEW_DELIVERY_STATUSES)[number];
 
-/** Today's Active Orders statuses -- the standard rule, unchanged. */
+/**
+ * Active Orders: Orders still waiting to be delivered (Aiman, 26 Oct 2026).
+ * Delivered and Closed Orders are not here -- money still owed on them is
+ * followed in the Accountant tab, and finished ones live under Closed.
+ */
 export const STANDARD_ACTIVE_STATUSES: readonly OrderViewDeliveryStatus[] = [
   "new",
   "in_branch",
   "assigned_to_driver",
   "out_for_delivery",
   "hold",
-  "delivered",
   "returned_to_branch",
   "returned_to_trader",
   "collect_order",
 ];
 /**
- * Statuses Active Orders may be narrowed to. Closed and Cancelled are not
- * offered: closed Orders still owing money are always included by the locked
- * rule, and a cancelled Order is never active work.
+ * Statuses Active Orders may be narrowed to. Delivered, Closed and Cancelled
+ * are not offered: none of them is waiting to be delivered.
  */
 export const ACTIVE_ALLOWED_STATUSES: ReadonlySet<string> = new Set(STANDARD_ACTIVE_STATUSES);
 
@@ -267,7 +269,12 @@ export function validateOrderViews(input: unknown): OrderViewsValidation {
     let definition: OrderView["definition"] = null;
     if (key === "active") {
       const source = isRecord(raw.definition) ? raw.definition : {};
-      const statuses = statusList(source.statuses, ACTIVE_ALLOWED_STATUSES, where, errors);
+      // Menus saved before 26 Oct 2026 may still list Delivered; it is dropped
+      // quietly so those menus keep working.
+      const saved = Array.isArray(source.statuses)
+        ? source.statuses.filter((status: unknown) => status !== "delivered")
+        : source.statuses;
+      const statuses = statusList(saved, ACTIVE_ALLOWED_STATUSES, where, errors);
       if (statuses.length === 0) errors.push(`${where}: Active Orders needs at least one status`);
       definition = { statuses };
     } else if (kind === "custom") {

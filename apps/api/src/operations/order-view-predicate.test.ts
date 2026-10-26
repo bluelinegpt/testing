@@ -104,10 +104,10 @@ describe("customOrderViewPredicate", () => {
 });
 
 describe("activeStatusPredicate", () => {
-  it("keeps today's literal list when no custom menu applies", () => {
+  it("uses the standard list, waiting-to-be-delivered only, when no custom menu applies", () => {
     const { parameters, sql } = compile(activeStatusPredicate(null));
     expect(sql).toBe(
-      "o.delivery_status in ('new','in_branch','assigned_to_driver','out_for_delivery','hold','delivered','returned_to_branch','returned_to_trader','collect_order')",
+      "o.delivery_status in ('new','in_branch','assigned_to_driver','out_for_delivery','hold','returned_to_branch','returned_to_trader','collect_order')",
     );
     expect(parameters).toEqual([]);
   });
@@ -116,5 +116,14 @@ describe("activeStatusPredicate", () => {
     const { parameters, sql } = compile(activeStatusPredicate(["new", "out_for_delivery"]));
     expect(sql).toBe("o.delivery_status in ($1, $2)");
     expect(parameters).toEqual(["new", "out_for_delivery"]);
+  });
+
+  it("never lets Delivered or Closed into Active Orders, whatever a menu holds", () => {
+    const { parameters, sql } = compile(
+      activeStatusPredicate(["delivered", "out_for_delivery", "closed"]),
+    );
+    expect(sql).toBe("o.delivery_status in ($1)");
+    expect(parameters).toEqual(["out_for_delivery"]);
+    expect(compile(activeStatusPredicate(["delivered"])).sql).toBe("false");
   });
 });

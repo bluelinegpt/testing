@@ -43,7 +43,11 @@ import {
   validateOrderViews,
 } from "../company-configuration/order-views.js";
 import { deliveryStatusFilterPredicate } from "./delivery-status-filter.js";
-import { activeStatusPredicate, customOrderViewPredicate } from "./order-view-predicate.js";
+import {
+  activeStatusPredicate,
+  customOrderViewPredicate,
+  standardActivePredicate,
+} from "./order-view-predicate.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
 import { ApplicationException } from "../presentation/errors/application.exception.js";
@@ -1227,24 +1231,6 @@ export class OperationsService {
           and workflow_event.processing_status = 'failed'
       )
     `;
-    /* A delivery can be closed operationally while money is still outstanding.
-       It must remain in the Active queue until every required cash, Trader
-       settlement, receivable, and accounting step is complete. Otherwise an
-       operator sees an apparently finished Order only under All Orders and can
-       miss the required next action. */
-    const financiallyPendingClosedPredicate = sql`
-      o.delivery_status = 'closed'
-      and (
-        (o.driver_reconciliation_status = 'pending' and o.customer_amount_due > 0)
-        or (
-          o.driver_reconciliation_status in ('reconciled', 'not_applicable')
-          and o.trader_net_payable > 0
-          and o.trader_settlement_status in ('unsettled', 'partially_settled', 'money_sent_to_trader')
-        )
-        or ${openTraderReceivablePredicate}
-        or ${failedAccountingPredicate}
-      )
-    `;
     const workflowStepPredicate = sql`
       (${workflowStep}::text is null
         or (${workflowStep} = 'collect_from_driver'
@@ -1302,11 +1288,9 @@ export class OperationsService {
     const serialSortKey = "nullif(regexp_replace(o.serial_number,'[^0-9]','','g'),'')::bigint";
     const quickViewPredicate = sql`
       (${quickView} = 'all'
-        or (${quickView} = 'active' and (
-          ${activeStatusPredicate(menuView?.kind === "active" ? menuView.statuses : null)}
-          or ${financiallyPendingClosedPredicate}
-        ))
-        or (${quickView} = 'closed' and o.delivery_status = 'closed' and not ${financiallyPendingClosedPredicate})
+        or (${quickView} = 'active'
+          and ${activeStatusPredicate(menuView?.kind === "active" ? menuView.statuses : null)})
+        or (${quickView} = 'closed' and o.delivery_status = 'closed')
         or (${quickView} = 'hold' and o.delivery_status = 'hold')
         or (${quickView} = 'cancelled' and o.delivery_status = 'cancelled')
         or (${quickView} = 'accountant'
@@ -1349,6 +1333,9 @@ export class OperationsService {
                 and accountant_receivable.status in ('outstanding', 'partially_collected')
                 and accountant_receivable.outstanding_amount > 0
             )
+            -- Its latest accounting posting failed: it needs the accountant,
+            -- and is no longer kept in Active Orders (26 Oct 2026).
+            or ${failedAccountingPredicate}
           )
         ))
     `;
@@ -3305,7 +3292,7 @@ export class OperationsService {
 
     const quickViewPredicate = sql`
       (${quickView} = 'all'
-        or (${quickView} = 'active' and o.delivery_status in ('new','in_branch','assigned_to_driver','out_for_delivery','hold','delivered','returned_to_branch','returned_to_trader','collect_order'))
+        or (${quickView} = 'active' and ${standardActivePredicate()})
         or (${quickView} = 'closed' and o.delivery_status = 'closed')
         or (${quickView} = 'hold' and o.delivery_status = 'hold')
         or (${quickView} = 'cancelled' and o.delivery_status = 'cancelled'))

@@ -127,6 +127,17 @@ describe("validateOrderViews", () => {
     expect(errorsOf(withStatuses(["cancelled"]))).toContain('View 1: "cancelled" is not an allowed status');
   });
 
+  it("drops Delivered quietly from a menu saved before Active meant waiting-for-delivery", () => {
+    const withStatuses = (statuses: unknown) =>
+      standard().map((view) => (view.key === "active" ? { ...view, definition: { statuses } } : view));
+    const saved = validateOrderViews(withStatuses(["new", "out_for_delivery", "delivered"]));
+    expect(saved.ok).toBe(true);
+    if (saved.ok) {
+      expect(saved.views[0]!.definition).toEqual({ statuses: ["new", "out_for_delivery"] });
+    }
+    expect(STANDARD_ACTIVE_STATUSES).not.toContain("delivered");
+  });
+
   it("requires exactly one visible view to open first", () => {
     const none = standard().map((view) => ({ ...view, isDefault: false }));
     expect(errorsOf(none)).toContain("Exactly one view must open first");

@@ -15,7 +15,22 @@
  */
 import { type RawBuilder, sql } from "kysely";
 
-import type { CustomViewDefinition } from "../company-configuration/order-views.js";
+import {
+  type CustomViewDefinition,
+  STANDARD_ACTIVE_STATUSES,
+} from "../company-configuration/order-views.js";
+
+/**
+ * Active Orders = still waiting to be delivered (Aiman, 26 Oct 2026). The one
+ * list every Active query uses: office Orders, Orders workflow, Trader portal
+ * and the shipment manifest.
+ */
+export const ACTIVE_STATUS_SQL_LIST = STANDARD_ACTIVE_STATUSES.map((status) => `'${status}'`).join(",");
+
+/** SQL: the Order (alias `o`) is still waiting to be delivered. */
+export function standardActivePredicate(alias: "o" = "o"): RawBuilder<unknown> {
+  return sql`${sql.raw(`${alias}.delivery_status`)} in (${sql.raw(ACTIVE_STATUS_SQL_LIST)})`;
+}
 
 function dateExpression(
   field: CustomViewDefinition["dateField"],
@@ -88,10 +103,12 @@ export function customOrderViewPredicate(
 /** Active Orders' statuses: the menu's list in place of the standard one. */
 export function activeStatusPredicate(statuses: readonly string[] | null): RawBuilder<unknown> {
   if (statuses === null) {
-    // Byte-for-byte the standard list, so Companies without a custom menu run
-    // exactly the query they always ran.
-    return sql`o.delivery_status in ('new','in_branch','assigned_to_driver','out_for_delivery','hold','delivered','returned_to_branch','returned_to_trader','collect_order')`;
+    return standardActivePredicate();
   }
-  if (statuses.length === 0) return sql`false`;
-  return sql`o.delivery_status in (${sql.join(statuses)})`;
+  // Only statuses that are still waiting to be delivered, whatever was saved.
+  const allowed = statuses.filter((status) =>
+    (STANDARD_ACTIVE_STATUSES as readonly string[]).includes(status),
+  );
+  if (allowed.length === 0) return sql`false`;
+  return sql`o.delivery_status in (${sql.join(allowed)})`;
 }

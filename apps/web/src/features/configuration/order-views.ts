@@ -37,14 +37,16 @@ export const ORDER_VIEW_DELIVERY_STATUSES = [
 ] as const;
 export type OrderViewDeliveryStatus = (typeof ORDER_VIEW_DELIVERY_STATUSES)[number];
 
-/** Statuses Active Orders may be narrowed to (Closed and Cancelled are not offered). */
+/**
+ * Statuses Active Orders may be narrowed to: only Orders still waiting to be
+ * delivered (Aiman, 26 Oct 2026). Delivered, Closed and Cancelled are not offered.
+ */
 export const ACTIVE_ALLOWED_STATUSES: readonly OrderViewDeliveryStatus[] = [
   "new",
   "in_branch",
   "assigned_to_driver",
   "out_for_delivery",
   "hold",
-  "delivered",
   "returned_to_branch",
   "returned_to_trader",
   "collect_order",

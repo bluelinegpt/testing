@@ -1421,9 +1421,7 @@ export const englishTranslations = {
       statusesHint: "No status ticked means every status.",
       activeStatuses: "What counts as active",
       activeLocked:
-        "Closed orders still awaiting settlement are always included in Active Orders. This rule can't be switched off.",
-      deliveredWarning:
-        "Delivered is not ticked: delivered orders still waiting for driver reconciliation will drop off Active Orders. They stay visible under Accountant and All Orders.",
+        "Active Orders shows only orders still waiting to be delivered. Delivered and closed orders still waiting for money are in the Accountant tab; finished ones are under Closed and All Orders.",
       fixedRule:
         "This tab follows reconciliation and settlement logic, so its rule can't be changed here. You can rename it, move it, hide it and choose whether it shows a count.",
       dateWindow: "Which dates",
@@ -2808,6 +2806,10 @@ export const englishTranslations = {
     clearGrouping: "Clear Grouping",
     groupSelection: "Group selection",
     selectVisibleGroup: "Select visible Orders in {{group}}",
+    collapseGroup: "Hide the orders of {{group}}",
+    expandGroup: "Show the orders of {{group}}",
+    collapseAllGroups: "Collapse all",
+    expandAllGroups: "Expand all",
     visibleOrderCount: "{{count}} visible Orders",
     groupSelectedCount: "{{count}} selected",
     closeBlockedHint:

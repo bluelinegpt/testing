@@ -142,15 +142,15 @@ describe("OrderViewsWorkspace", () => {
     expect(screen.getByRole("button", { name: "Save menu" })).toBeEnabled();
   });
 
-  it("only offers Active Orders statuses and warns when Delivered is removed", async () => {
+  it("only offers Active Orders the statuses still waiting to be delivered", async () => {
     setup();
     await screen.findByText("Custom menu is OFF — the standard menu is in use");
     fireEvent.click(screen.getByRole("button", { name: "Edit Active Orders" }));
     const dialog = await screen.findByRole("dialog", { name: /Edit view: Active Orders/ });
     expect(within(dialog).queryByLabelText("Closed")).not.toBeInTheDocument();
     expect(within(dialog).queryByLabelText("Cancelled")).not.toBeInTheDocument();
-    fireEvent.click(within(dialog).getByLabelText("Delivered"));
-    expect(within(dialog).getByText(/Delivered is not ticked/)).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText("Delivered")).not.toBeInTheDocument();
+    expect(within(dialog).getByText(/only orders still waiting to be delivered/)).toBeInTheDocument();
   });
 
   it("explains a fixed-rule tab instead of offering its rule", async () => {

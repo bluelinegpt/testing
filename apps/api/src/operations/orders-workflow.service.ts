@@ -26,6 +26,7 @@ import type {
   OrderSelectionDto,
   ReactivateHoldOrdersDto,
 } from "./operations.dto.js";
+import { standardActivePredicate } from "./order-view-predicate.js";
 
 interface SelectedOrder {
   readonly assignedDriverId: string | null;
@@ -727,19 +728,6 @@ export class OrdersWorkflowService {
           and workflow_event.processing_status = 'failed'
       )
     `;
-    const financiallyPendingClosedPredicate = sql`
-      o.delivery_status = 'closed'
-      and (
-        (o.driver_reconciliation_status = 'pending' and o.customer_amount_due > 0)
-        or (
-          o.driver_reconciliation_status in ('reconciled', 'not_applicable')
-          and o.trader_net_payable > 0
-          and o.trader_settlement_status in ('unsettled', 'partially_settled', 'money_sent_to_trader')
-        )
-        or ${openTraderReceivablePredicate}
-        or ${failedAccountingPredicate}
-      )
-    `;
     const workflowStepPredicate = sql`
       (${workflowStep}::text is null
         or (${workflowStep} = 'collect_from_driver'
@@ -780,11 +768,8 @@ export class OrdersWorkflowService {
       join traders t on t.id = o.trader_id and t.company_id = o.company_id
       where o.company_id = ${companyId}::uuid
         and (${quickView} = 'all'
-        or (${quickView} = 'active' and (
-          o.delivery_status in ('new','in_branch','assigned_to_driver','out_for_delivery','hold','delivered','returned_to_branch','returned_to_trader','collect_order')
-          or ${financiallyPendingClosedPredicate}
-        ))
-        or (${quickView} = 'closed' and o.delivery_status = 'closed' and not ${financiallyPendingClosedPredicate})
+        or (${quickView} = 'active' and ${standardActivePredicate()})
+        or (${quickView} = 'closed' and o.delivery_status = 'closed')
           or (${quickView} = 'hold' and o.delivery_status = 'hold')
           or (${quickView} = 'cancelled' and o.delivery_status = 'cancelled'))
         and (${search}::text is null or o.order_number ilike '%' || ${search} || '%'

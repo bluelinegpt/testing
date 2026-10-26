@@ -439,7 +439,11 @@ function OrderViewEditor({
   const [labelEn, setLabelEn] = useState(view.labelEn);
   const [labelAr, setLabelAr] = useState(view.labelAr ?? "");
   const [statuses, setStatuses] = useState<readonly OrderViewDeliveryStatus[]>(
-    view.definition?.statuses ?? [],
+    // A menu saved before 26 Oct 2026 may still list Delivered for Active
+    // Orders; it is no longer offered there.
+    (view.definition?.statuses ?? []).filter(
+      (status) => view.key !== "active" || ACTIVE_ALLOWED_STATUSES.includes(status),
+    ),
   );
   const [dateWindow, setDateWindow] = useState<OrderViewDateWindow>(
     view.definition?.dateWindow ?? "any",
@@ -553,11 +557,6 @@ function OrderViewEditor({
           {view.key === "active" ? (
             <>
               <p className="field-hint">{t("orderViews.editor.activeLocked")}</p>
-              {statuses.includes("delivered") ? null : (
-                <p className="alert alert-warning" role="alert">
-                  {t("orderViews.editor.deliveredWarning")}
-                </p>
-              )}
             </>
           ) : (
             <p className="field-hint">{t("orderViews.editor.statusesHint")}</p>

@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   HandCoins,
+  Minus,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -1612,9 +1613,9 @@ export function OrdersModuleWorkspace({
                   type="button"
                 >
                   {expanded ? (
-                    <ChevronDown aria-hidden="true" size={18} />
+                    <Minus aria-hidden="true" size={16} />
                   ) : (
-                    <ChevronRight aria-hidden="true" size={18} />
+                    <Plus aria-hidden="true" size={16} />
                   )}
                   <strong>{group.label}</strong>
                   <span>{t("operations.visibleOrderCount", { count: allOrderIds.length })}</span>
@@ -1628,8 +1629,24 @@ export function OrdersModuleWorkspace({
                 </button>
               ) : (
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <strong>{group.label}</strong>
-                  <span>{t("operations.visibleOrderCount", { count: leafOrders.length })}</span>
+                  {/* Every group folds, single-level grouping too (Aiman, 26 Oct 2026). */}
+                  <button
+                    aria-expanded={expanded}
+                    aria-label={t(expanded ? "operations.collapseGroup" : "operations.expandGroup", {
+                      group: group.label,
+                    })}
+                    className="order-group-toggle"
+                    onClick={() => toggleCollapsedGroup(group.key)}
+                    type="button"
+                  >
+                    {expanded ? (
+                      <Minus aria-hidden="true" size={16} />
+                    ) : (
+                      <Plus aria-hidden="true" size={16} />
+                    )}
+                    <strong>{group.label}</strong>
+                    <span>{t("operations.visibleOrderCount", { count: leafOrders.length })}</span>
+                  </button>
                   {(() => {
                     const action = questionGroupAction(group);
                     return action === null ? null : (
@@ -1666,6 +1683,8 @@ export function OrdersModuleWorkspace({
   };
   const toggleCollapsedGroup = (key: string) =>
     setCollapsedGroups((current) => toggleSet(current, key));
+  const allGroupKeys = (list: readonly VisibleOrderGroup[]): string[] =>
+    list.flatMap((group) => [group.key, ...allGroupKeys(group.children)]);
   const renderOrderRow = (order: OperationsOrder) => {
     const checked = orderSelected(order.id);
     const rowStatusClass = rowStatusColors
@@ -2604,6 +2623,24 @@ export function OrdersModuleWorkspace({
                 )}
               </div>
             </div>
+            {grouping === "" ? null : (
+              <div className="order-group-fold-all">
+                <button
+                  className="button button-secondary"
+                  onClick={() => setCollapsedGroups(new Set(allGroupKeys(groups)))}
+                  type="button"
+                >
+                  <Minus aria-hidden="true" size={16} /> {t("operations.collapseAllGroups")}
+                </button>
+                <button
+                  className="button button-secondary"
+                  onClick={() => setCollapsedGroups(new Set())}
+                  type="button"
+                >
+                  <Plus aria-hidden="true" size={16} /> {t("operations.expandAllGroups")}
+                </button>
+              </div>
+            )}
             <label className="filter-date">
               <span>{t("operations.dateFrom")}</span>
               <input

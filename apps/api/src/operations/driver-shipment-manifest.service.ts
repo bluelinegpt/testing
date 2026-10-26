@@ -19,6 +19,7 @@ import {
   type ManifestData,
 } from "./driver-shipment-manifest-html.js";
 import type { GenerateShipmentManifestDto } from "./operations.dto.js";
+import { standardActivePredicate } from "./order-view-predicate.js";
 
 const deliveryStatusLabels: Record<string, string> = {
   assigned_to_driver: "Assigned to Driver",
@@ -224,8 +225,7 @@ export class DriverShipmentManifestService {
            or o.customer_mobile_number ilike '%' || ${input.search?.trim() || null} || '%'
            or t.name_en ilike '%' || ${input.search?.trim() || null} || '%')
          and (${input.quickView ?? "active"} = 'all'
-           or (${input.quickView ?? "active"} = 'active'
-             and o.delivery_status in ('new','in_branch','assigned_to_driver','out_for_delivery','hold','delivered','returned_to_branch','returned_to_trader','collect_order'))
+           or (${input.quickView ?? "active"} = 'active' and ${standardActivePredicate()})
            or (${input.quickView ?? "active"} = 'hold' and o.delivery_status = 'hold')
            or (${input.quickView ?? "active"} = 'closed' and o.delivery_status = 'closed')
            or (${input.quickView ?? "active"} = 'cancelled' and o.delivery_status = 'cancelled'))
