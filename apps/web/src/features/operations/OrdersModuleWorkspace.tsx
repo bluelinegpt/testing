@@ -1487,9 +1487,7 @@ export function OrdersModuleWorkspace({
     setCollapsedGroups(new Set());
   };
 
-  const toggleGroupingDimension = (
-    dimension: "area" | "emirate" | "trader" | "driver" | "status",
-  ) => {
+  const toggleGroupingDimension = (dimension: OrdersGroupingDimension) => {
     const current = Array.isArray(grouping) ? grouping : [];
     const updated = current.includes(dimension)
       ? current.filter((d) => d !== dimension)
@@ -2551,7 +2549,9 @@ export function OrdersModuleWorkspace({
                                   ? t("operations.groupByTrader", { defaultValue: "Trader" })
                                   : d === "driver"
                                     ? t("operations.groupByDriver")
-                                    : t("operations.groupByStatus"),
+                                    : d === "date"
+                                      ? t("operations.groupByDate")
+                                      : t("operations.groupByStatus"),
                           )
                           .join(", ")}
                       </span>
@@ -2605,6 +2605,14 @@ export function OrdersModuleWorkspace({
                     onChange={() => toggleGroupingDimension("status")}
                   />
                   {t("operations.groupingStatus")}
+                </label>
+                <label className="grouping-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={Array.isArray(grouping) && grouping.includes("date")}
+                    onChange={() => toggleGroupingDimension("date")}
+                  />
+                  {t("operations.groupingDate")}
                 </label>
                 {grouping !== "" && (
                   <>
@@ -8051,6 +8059,8 @@ function groupVisibleOrders(
         return order.assignedDriverName ?? t("operations.unassigned");
       case "status":
         return orderStatusLabel(t, deriveOrderStatus(order).key);
+      case "date":
+        return orderDateGroupLabel(order.orderDate, locale) ?? t("operations.noDate");
       default:
         return t("operations.unknown");
     }
@@ -8068,6 +8078,8 @@ function groupVisibleOrders(
         return `driver:${order.assignedDriverId ?? "unassigned"}`;
       case "status":
         return `status:${deriveOrderStatus(order).key}`;
+      case "date":
+        return `date:${orderDateKey(order.orderDate) ?? "none"}`;
       default:
         return "unknown";
     }
@@ -8123,11 +8135,38 @@ function groupVisibleOrders(
         if (left.key === "driver:unassigned") return 1;
         if (right.key === "driver:unassigned") return -1;
       }
+      if (dimension === "date") {
+        // Newest day first; Orders without a date last.
+        if (left.key === "date:none") return 1;
+        if (right.key === "date:none") return -1;
+        return right.key.localeCompare(left.key);
+      }
       return left.label.localeCompare(right.label);
     });
   };
 
   return buildHierarchy(orders, grouping as string[], 0);
+}
+
+/** The Order's day as YYYY-MM-DD, or null when it has none. */
+function orderDateKey(value: string | null | undefined): string | null {
+  const match = /^(\d{4}-\d{2}-\d{2})/u.exec(value ?? "");
+  return match?.[1] ?? null;
+}
+
+/** "Sun, 26 Oct 2026" -- the group header for Grouping by Date. */
+function orderDateGroupLabel(value: string | null | undefined, locale: "ar" | "en"): string | null {
+  const key = orderDateKey(value);
+  if (key === null) return null;
+  const date = new Date(`${key}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat(locale === "ar" ? "ar-AE" : "en-GB", {
+    day: "2-digit",
+    month: "short",
+    timeZone: "UTC",
+    weekday: "short",
+    year: "numeric",
+  }).format(date);
 }
 
 function GroupSelectionCheckbox({

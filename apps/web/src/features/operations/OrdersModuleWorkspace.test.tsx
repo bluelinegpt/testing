@@ -1153,6 +1153,14 @@ describe("OrdersModuleWorkspace", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Driver" }));
     expect(screen.getByLabelText("Select visible Orders in Ahmed")).toBeVisible();
     expect(screen.getByLabelText("Select visible Orders in Unassigned")).toBeVisible();
+
+    // Grouping by Date: one group per order day.
+    fireEvent.click(screen.getByText("Clear Grouping"));
+    fireEvent.click(screen.getByRole("button", { name: /^Grouping/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Date" }));
+    const dateGroup = screen.getByRole("button", { name: /Hide the orders of .*15 Jul 2026/ });
+    expect(dateGroup).toHaveTextContent("2 visible Orders");
+    expect(screen.getByRole("button", { name: /Grouping: Group by Date/ })).toBeInTheDocument();
   });
 
   it("shows the Hold tab count and intentionally absent Reference Numbers", async () => {

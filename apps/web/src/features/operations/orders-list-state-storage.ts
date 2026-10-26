@@ -31,7 +31,7 @@ const listStateParameterNames = new Set([
   "workflowStep",
 ]);
 
-const groupingDimensions = ["area", "emirate", "trader", "driver", "status"] as const;
+const groupingDimensions = ["area", "emirate", "trader", "driver", "status", "date"] as const;
 export type OrdersGroupingDimension = (typeof groupingDimensions)[number];
 
 export interface OrdersListSnapshot {
