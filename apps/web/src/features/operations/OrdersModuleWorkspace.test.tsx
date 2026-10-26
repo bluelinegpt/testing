@@ -19,6 +19,7 @@ function renderWithRouter(ui: ReactElement, initialEntries: readonly string[] = 
 import { vi } from "vitest";
 
 import { ApiError, type ApiClient } from "../../api/api-client.js";
+import { SessionAccessProvider } from "../../app/SessionAccessContext.js";
 import { i18nInstance } from "../../localization/i18n.js";
 import { standardOrderViews } from "../configuration/order-views.js";
 import { OrderDetailsWorkspace, OrdersModuleWorkspace } from "./OrdersModuleWorkspace.js";
@@ -2261,6 +2262,71 @@ describe("Fast Entry loads the daily Excel sheet", () => {
       serviceFee: undefined,
       traderId: "trader-1",
     });
+  });
+
+  it("Lahthza: a saved Customer's mobile with another address is created for him, with a note", async () => {
+    const api = sheetApi();
+    api.postMultipart.mockResolvedValue({ excludedLines: 0, rows: [line({})], totalLines: 1 });
+    const baseGet = api.get.getMockImplementation()! as (path: string) => Promise<unknown>;
+    (api.get as unknown as { mockImplementation: (fn: (path: string) => Promise<unknown>) => void }).mockImplementation((path: string) => {
+      if (path.startsWith("configuration/customers/search")) {
+        return Promise.resolve({
+          items: [
+            {
+              address: "Old street",
+              addressId: "address-old",
+              areaId: "area-other",
+              code: "CUS-000044",
+              id: "customer-44",
+              mobileNumber: "971502222222",
+              name: "Old Name",
+              secondMobileNumber: null,
+            },
+          ],
+        });
+      }
+      if (path === "configuration/customers/CUS-000044") {
+        return Promise.resolve({
+          addresses: [
+            { address: "Old street", areaId: "area-other", id: "address-old", isActive: true },
+          ],
+        });
+      }
+      return baseGet(path);
+    });
+    renderWithRouter(
+      <SessionAccessProvider
+        value={{
+          companyId: "4d9095cb-3da6-4b8b-9d8e-ff01f8192bdb",
+          navigate: vi.fn(),
+          permissions: ["users_roles.manage"],
+        }}
+      >
+        <OrdersModuleWorkspace
+          api={api as unknown as ApiClient}
+          onNavigate={vi.fn()}
+          permissions={["users_roles.manage"]}
+        />
+      </SessionAccessProvider>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Fast entry" }));
+    const dialog = await screen.findByRole("dialog", { name: /Fast order entry/ });
+    const input = dialog.querySelector<HTMLInputElement>('input[type="file"]')!;
+    fireEvent.change(input, { target: { files: [new File(["x"], "26-10-2026.xlsx")] } });
+    await within(dialog).findByDisplayValue("17330");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create orders" }));
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith("operations/orders", expect.anything(), expect.anything()),
+    );
+    const create = api.post.mock.calls.find(([path]) => path === "operations/orders")!;
+    expect(create[1]).toMatchObject({
+      customerAddressId: undefined,
+      customerId: undefined,
+      customerName: "عميل",
+      inlineCustomer: { address: "ش التعاون", areaId: "area-1", name: "عميل" },
+    });
+    expect(await screen.findByText(/New address added to Customer CUS-000044/)).toBeInTheDocument();
+    expect(screen.queryByText(/does not match the saved Customer address/)).toBeNull();
   });
 
   it("marks what could not be matched in red and shows each error in English and Arabic", async () => {

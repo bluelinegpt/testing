@@ -2396,6 +2396,9 @@ export const englishTranslations = {
       "{{count}} row(s) need review. Fix the highlighted rows, then create again.",
     fastEntryHelp:
       "Enter multiple orders like a spreadsheet. Click Create orders to validate the entered rows first; if any row has an error, creation stops.",
+    fastEntryCustomerLinked: "Existing Customer {{code}} — his saved address is used.",
+    fastEntryCustomerNewAddress: "Existing Customer {{code}} — new address added to this Customer.",
+    fastEntryNewAddressNotice: "New address added to Customer {{customers}}",
     fastEntryExistingCustomerAddressMismatch:
       "This mobile number belongs to an existing Customer, but the entered Area or Address does not match the saved Customer address. Select the Customer in the normal Create Order form or update the Customer address first.",
     fastEntryMobileInvalid:
@@ -2441,7 +2444,8 @@ export const englishTranslations = {
     creatingOrder: "Creating Order…",
     customerFieldHint: "Search to select an existing Customer, or type a new Customer Name.",
     customerSearchOrType: "Search or type a new Customer Name",
-    customerLinkedByMobile: "Existing Customer {{code}} found by this mobile — his saved details and address are used.",
+    customerLinkedByMobile:
+      "Existing Customer {{code}} found by this mobile — his saved details are filled in. You can still change the name, Area or address for this order; a new address is added to the same Customer.",
     mobileAdvisory: "Recommended UAE format: 0506468442 or 971506468442.",
     overrideHint:
       "Overriding the configured Service Fee requires a reason and is recorded in the audit trail.",

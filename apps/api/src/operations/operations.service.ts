@@ -856,6 +856,11 @@ const INTERNATIONAL_CARRIER_FINISHED_STATUSES: ReadonlySet<string> = new Set([
 /** Lahthza: an existing Customer is identified by mobile alone (20 Oct 2026). */
 const LINK_CUSTOMER_BY_MOBILE_COMPANY_ID = "4d9095cb-3da6-4b8b-9d8e-ff01f8192bdb";
 
+/** Address text compared the way people see it: spaces and capital letters ignored. */
+export function normalizeAddressText(value: string): string {
+  return value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLowerCase();
+}
+
 @Injectable()
 export class OperationsService {
   public constructor(
@@ -7906,22 +7911,31 @@ export class OperationsService {
     typedAddress: string | null | undefined,
   ) {
     const area = await this.activeArea(transaction, input.companyId, input.orderAreaId);
+    // Aiman, 26 Oct 2026: one of his saved addresses is used when it is in the
+    // Order's Area and reads the same as the typed address (spaces and capital
+    // letters ignored). A blank typed address uses his saved address in that
+    // Area. Anything else is a new address, added to this same Customer.
+    const typedKey = normalizeAddressText(typedAddress ?? "");
     const saved = await sql<{
+      address: string;
       deliveryInstructions: string | null;
       id: string;
       latitude: string | null;
       locationLink: string | null;
       longitude: string | null;
     }>`
-      select ca.id, ca.location_link as "locationLink", ca.latitude::text, ca.longitude::text,
-             ca.delivery_instructions as "deliveryInstructions"
+      select ca.id, ca.address, ca.location_link as "locationLink", ca.latitude::text,
+             ca.longitude::text, ca.delivery_instructions as "deliveryInstructions"
         from customer_addresses ca
        where ca.company_id=${input.companyId}::uuid and ca.customer_id=${customer.id}::uuid
          and ca.area_id=${area.id}::uuid and ca.is_active
        order by ca.is_default desc, ca.created_at desc
-       limit 1
     `.execute(transaction);
-    let address = saved.rows[0];
+    let address: (typeof saved.rows)[number] | undefined =
+      typedKey === ""
+        ? saved.rows[0]
+        : saved.rows.find((row) => normalizeAddressText(row.address) === typedKey);
+    const addedAddress = address === undefined;
     if (address === undefined) {
       const added = await sql<{ id: string }>`
         insert into customer_addresses(
@@ -7934,12 +7948,19 @@ export class OperationsService {
       `.execute(transaction);
       const addedId = added.rows[0]?.id;
       if (addedId === undefined) throw new Error("Customer address creation returned no identifier");
-      address = { deliveryInstructions: null, id: addedId, latitude: null, locationLink: null, longitude: null };
+      address = {
+        address: typedAddress?.trim() ?? "",
+        deliveryInstructions: null,
+        id: addedId,
+        latitude: null,
+        locationLink: null,
+        longitude: null,
+      };
     }
     await this.audit(transaction, {
       action: "customer.linked_by_mobile_from_order",
       actorId: input.createdByAccountId,
-      after: { addressId: address.id, areaId: area.id, code: customer.code },
+      after: { addressId: address.id, addedAddress, areaId: area.id, code: customer.code },
       companyId: input.companyId,
       correlationId: input.correlationId,
       subjectId: customer.id,

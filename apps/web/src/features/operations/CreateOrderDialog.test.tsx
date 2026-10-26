@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { vi } from "vitest";
 
 import { ApiError, type ApiClient } from "../../api/api-client.js";
+import { SessionAccessProvider } from "../../app/SessionAccessContext.js";
 import { i18nInstance } from "../../localization/i18n.js";
 import { CreateOrderDialog } from "./CreateOrderDialog.js";
 
@@ -109,7 +110,7 @@ function dumpTrace(context: string) {
   console.error(header);
 }
 
-function setup() {
+function setup(companyId?: string) {
   let resolveOrder: ((value: unknown) => void) | undefined;
   let rejectOrder: ((reason: unknown) => void) | undefined;
   const api = {
@@ -180,7 +181,7 @@ function setup() {
   });
   const onClose = vi.fn();
   const onCreated = vi.fn();
-  render(
+  const dialog = (
     <CreateOrderDialog
       api={api as unknown as ApiClient}
       onClose={onClose}
@@ -188,7 +189,16 @@ function setup() {
       onSaved={onSaved}
       permissions={["users_roles.manage", "orders.override_service_fee"]}
       searchDebounceMs={0}
-    />,
+    />
+  );
+  render(
+    companyId === undefined ? (
+      dialog
+    ) : (
+      <SessionAccessProvider value={{ companyId, navigate: vi.fn(), permissions: [] }}>
+        {dialog}
+      </SessionAccessProvider>
+    ),
   );
   return {
     api,
@@ -932,6 +942,37 @@ describe("CreateOrderDialog validation (Phase 3)", () => {
       },
     });
     resolve({ orderNumber: "ORD-000400", serialNumber: "000123" });
+  });
+
+  it("Lahthza: a Customer found by mobile can still get another address for this Order", async () => {
+    const { api, resolve } = setup("4d9095cb-3da6-4b8b-9d8e-ff01f8192bdb");
+    await selectTraderOnly();
+    const mobile = screen.getAllByPlaceholderText(/9715XXXXXXXX/)[0];
+    if (mobile === undefined) throw new Error("Primary mobile input missing");
+    fireEvent.change(mobile, { target: { value: "0506468441" } });
+    fireEvent.blur(mobile);
+    expect(await screen.findByText(/Existing Customer CUS-000001 found by this mobile/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Customer address")).toHaveValue("Building 4, Dubai");
+    fireEvent.change(screen.getByLabelText("Customer address"), {
+      target: { value: "Office 12, Business Bay" },
+    });
+    fireEvent.change(screen.getByLabelText("COD amount"), { target: { value: "100" } });
+    await screen.findAllByText("AED 90.00");
+    fireEvent.click(screen.getByRole("button", { name: "Create order" }));
+    const creates = api.post.mock.calls.filter(([path]) => path === "operations/orders");
+    expect(creates).toHaveLength(1);
+    // Sent as typed: the server links CUS-000001 and adds the new address to him.
+    expect(creates[0]?.[1]).toMatchObject({
+      customerAddressId: undefined,
+      customerId: undefined,
+      inlineCustomer: {
+        address: "Office 12, Business Bay",
+        areaId: area.id,
+        mobileNumber: "971506468441",
+        name: "Aisha",
+      },
+    });
+    resolve({ orderNumber: "ORD-000402", serialNumber: "000123" });
   });
 
   it("allows a new Order with a typed Customer name and no Primary Mobile", async () => {

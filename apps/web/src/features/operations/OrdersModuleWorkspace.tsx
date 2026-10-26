@@ -3137,6 +3137,10 @@ interface FastEntryRow {
   excludedReason?: string | undefined;
   /** The Area was matched in another Emirate than the sheet said (both languages). */
   areaNote?: string | undefined;
+  /** The mobile belongs to a saved Customer: his address is used, or a new one is added. */
+  customerNote?: string | undefined;
+  /** Code of the saved Customer this row adds a new address to. */
+  customerNewAddressFor?: string | undefined;
   /**
    * "احضار" on the sheet: created as a Collect order (Aiman, 22 Oct 2026) --
    * operational only, no COD, no fees, no Driver.
@@ -3327,6 +3331,16 @@ function mobileComparisonKey(input: string | null | undefined): string {
   return digits;
 }
 
+/** Lahthza: a saved Customer is found by mobile; see the Fast Entry comment. */
+const LINK_CUSTOMER_BY_MOBILE_COMPANY_ID = "4d9095cb-3da6-4b8b-9d8e-ff01f8192bdb";
+
+/** One saved address of a Customer, as the Customer detail returns it. */
+interface SavedCustomerAddress {
+  readonly address?: string | null;
+  readonly areaId?: string;
+  readonly isActive?: boolean;
+}
+
 function normalizedAddress(value: string): string {
   return value.trim().replace(/\s+/g, " ").toLowerCase();
 }
@@ -3405,6 +3419,13 @@ export function FastOrderEntryDialog({
   // when a record has no Arabic name.
   const nameLanguage = locale;
   const isTrader = mode === "trader";
+  // Lahthza (Aiman, 20 and 26 Oct 2026): the mobile number identifies the
+  // Customer and the typed name is never compared (it is often generic). A row
+  // whose mobile belongs to a saved Customer is created for that Customer: his
+  // saved address is used when it is in the row's Area and reads the same,
+  // otherwise the new address is added to him -- never a second Customer.
+  const fastEntrySession = useSessionAccess();
+  const linkCustomerByMobile = fastEntrySession?.companyId === LINK_CUSTOMER_BY_MOBILE_COMPANY_ID;
   // Trader portal: the Company's active Areas, loaded once (no search endpoint there).
   const [traderAreas, setTraderAreas] = useState<readonly TraderPortalAreaOption[]>([]);
   useEffect(() => {
@@ -3618,6 +3639,8 @@ export function FastOrderEntryDialog({
           if (!packages.ok) errors.push(both("operations.errors.packagesInvalid"));
 
           let customerOption: CustomerOption | undefined;
+          let customerNote: string | undefined;
+          let customerNewAddressFor: string | undefined;
           // Trader portal: the server checks customers, references and
           // prices when each order is created.
           if (errors.length === 0 && !isTrader) {
@@ -3636,7 +3659,33 @@ export function FastOrderEntryDialog({
                 const sameAddress =
                   normalizedAddress(customerOption.address) ===
                   normalizedAddress(row.customerAddress);
-                if (!sameArea || !sameAddress) {
+                if (linkCustomerByMobile) {
+                  const matched = customerOption;
+                  // Sent as typed; the server links the same Customer and picks
+                  // or adds the address. This only tells the user which.
+                  customerOption = undefined;
+                  const detail = await api
+                    .get<{ addresses?: readonly SavedCustomerAddress[] }>(
+                      `configuration/customers/${encodeURIComponent(matched.code)}`,
+                    )
+                    .catch(() => undefined);
+                  const typed = normalizedAddress(row.customerAddress);
+                  const saved = (detail?.addresses ?? []).filter(
+                    (item) => item.isActive !== false && item.areaId === row.areaId,
+                  );
+                  const known =
+                    (sameArea && sameAddress) ||
+                    (typed === ""
+                      ? saved.length > 0
+                      : saved.some((item) => normalizedAddress(item.address ?? "") === typed));
+                  if (!known) customerNewAddressFor = matched.code;
+                  customerNote = both(
+                    known
+                      ? "operations.fastEntryCustomerLinked"
+                      : "operations.fastEntryCustomerNewAddress",
+                    { code: matched.code },
+                  );
+                } else if (!sameArea || !sameAddress) {
                   errors.push(both("operations.fastEntryExistingCustomerAddressMismatch"));
                   customerOption = undefined;
                 }
@@ -3744,13 +3793,18 @@ export function FastOrderEntryDialog({
           return {
             ...row,
             customerOption,
-            message: errors.length === 0 ? t("operations.fastEntryReady") : errors.join("\n"),
+            customerNewAddressFor,
+            customerNote,
+            message:
+              errors.length === 0
+                ? [t("operations.fastEntryReady"), customerNote].filter(Boolean).join("\n")
+                : errors.join("\n"),
             status: errors.length === 0 ? "ready" : "error",
           };
         }),
       );
     },
-    [api, both, isTrader, locale, t],
+    [api, both, isTrader, linkCustomerByMobile, locale, t],
   );
 
   const [sheetBusy, setSheetBusy] = useState(false);
@@ -3987,7 +4041,7 @@ export function FastOrderEntryDialog({
           );
           nextRows[index] = {
             ...row,
-            message: t("operations.fastEntryCreated"),
+            message: [t("operations.fastEntryCreated"), row.customerNote].filter(Boolean).join("\n"),
             // Show the Serial the server actually saved (assigned when blank).
             serialNumber: createdOrder?.serialNumber ?? row.serialNumber,
             status: "created",
@@ -4017,13 +4071,27 @@ export function FastOrderEntryDialog({
         // Everything was created: close the sheet, like Create order does, and
         // tell the user on the Orders list which Serial Numbers were saved.
         onCreated(
-          t("operations.fastEntryCreatedNotice", {
-            count: createdNow.length,
-            serialNumbers: createdNow
-              .map((row) => row.serialNumber.trim())
-              .filter((serial) => serial !== "")
-              .join(", "),
-          }),
+          [
+            t("operations.fastEntryCreatedNotice", {
+              count: createdNow.length,
+              serialNumbers: createdNow
+                .map((row) => row.serialNumber.trim())
+                .filter((serial) => serial !== "")
+                .join(", "),
+            }),
+            ...(() => {
+              const codes = [
+                ...new Set(
+                  createdNow.flatMap((row) =>
+                    row.customerNewAddressFor === undefined ? [] : [row.customerNewAddressFor],
+                  ),
+                ),
+              ];
+              return codes.length === 0
+                ? []
+                : [t("operations.fastEntryNewAddressNotice", { customers: codes.join(", ") })];
+            })(),
+          ].join(" · "),
         );
         onClose();
         return;

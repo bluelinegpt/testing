@@ -806,6 +806,18 @@ export function CreateOrderDialog({
         onClose();
         return;
       }
+      // A Customer found by his mobile is sent as typed: the server links the
+      // same Customer and uses his saved address in this Area when it reads
+      // the same, or adds the new one to him (never a second Customer).
+      const sendLinkedAsTyped = linkCustomerByMobile && linkedByMobile !== undefined;
+      const unchangedSavedAddress =
+        customer !== undefined &&
+        area?.id === customer.areaId &&
+        sameAddressText(address, customer.address);
+      const savedLocation =
+        customer !== undefined && (!sendLinkedAsTyped || unchangedSavedAddress)
+          ? customer
+          : undefined;
       const order = await api.post<OperationsOrder>(
         "operations/orders",
         {
@@ -830,12 +842,18 @@ export function CreateOrderDialog({
             : {}),
           ...(isFreeOrder ? { freeOrderReason: freeOrderReason.trim() } : {}),
           customerAddress: address.trim(),
-          customerAddressId: customer?.addressId,
+          customerAddressId: sendLinkedAsTyped ? undefined : customer?.addressId,
           customerDeliveryNotes: customerDeliveryNotes.trim() || undefined,
-          customerId: customer?.id,
-          customerLatitude: customer?.latitude == null ? undefined : Number(customer.latitude),
-          customerLocationLink: customer?.locationLink ?? undefined,
-          customerLongitude: customer?.longitude == null ? undefined : Number(customer.longitude),
+          customerId: sendLinkedAsTyped ? undefined : customer?.id,
+          ...(savedLocation === undefined
+            ? {}
+            : {
+                customerLatitude:
+                  savedLocation.latitude == null ? undefined : Number(savedLocation.latitude),
+                customerLocationLink: savedLocation.locationLink ?? undefined,
+                customerLongitude:
+                  savedLocation.longitude == null ? undefined : Number(savedLocation.longitude),
+              }),
           // Mobile is sent exactly as typed (trimmed only). The API normalizes
           // recognisable UAE forms; it is not forced to a canonical shape here.
           ...(customerName.trim() === "" ? {} : { customerName: customerName.trim() }),
@@ -852,7 +870,9 @@ export function CreateOrderDialog({
           traderId: trader.id,
           // No existing Customer selected: create one atomically from the typed
           // Order details in the same transaction (no separate modal, no orphan).
-          ...(customer !== undefined || customerName.trim() === "" || mobile.trim() === ""
+          ...((customer !== undefined && !sendLinkedAsTyped) ||
+          customerName.trim() === "" ||
+          mobile.trim() === ""
             ? {}
             : {
                 inlineCustomer: {
@@ -1316,7 +1336,10 @@ export function CreateOrderDialog({
                       // server already accepts (a directly selected Area wins
                       // over the Customer's own when the Customer itself did
                       // not change).
-                      disabled={customer !== undefined && !isEdit}
+                      // Lahthza (Aiman, 26 Oct 2026): a Customer found by his
+                      // mobile only pre-fills the form -- the Area, address
+                      // and name can still be changed for this Order.
+                      disabled={customer !== undefined && !isEdit && linkedByMobile === undefined}
                       onChange={(selected) => {
                         setArea(selected);
                         setOverrideEnabled(false);
@@ -2028,4 +2051,10 @@ export function CreateOrderDialog({
       ) : null}
     </>
   );
+}
+
+/** Address text compared the way people see it: spaces and capital letters ignored. */
+function sameAddressText(left: string, right: string): boolean {
+  const key = (value: string) => value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLowerCase();
+  return key(left) === key(right);
 }
