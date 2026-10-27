@@ -176,6 +176,7 @@ import {
 import { OrderMaintenanceService, type TraderReceivableResetPreview } from "./order-maintenance.service.js";
 import { DriverCollectionPdfService } from "./driver-collection-pdf.service.js";
 import { FastEntrySheetService, type FastEntrySheetResult } from "./fast-entry-sheet.service.js";
+import { ordersReportLabels, ordersReportStatusLabels } from "./orders-report-labels.js";
 
 @ApiTags("operations")
 @ApiBearerAuth()
@@ -532,10 +533,11 @@ export class OperationsController {
     @Query("traderId") traderId: string | undefined,
     @Query("statuses") statuses: string | undefined,
     @Query("references") references: string | undefined,
+    @Query("language") language: string | undefined,
     @Query() query: Readonly<Record<string, unknown>>,
     @Res() response: Response,
   ): Promise<void> {
-    const report: OrdersReportExcelFile = await this.operations.ordersReportExcel({
+    const report: OrdersReportExcelFile = await this.operations.ordersReportExcel(language === "ar" ? "ar" : "en", {
       ...(dateFrom === undefined ? {} : { dateFrom }),
       ...(dateTo === undefined ? {} : { dateTo }),
       ...(traderId === undefined ? {} : { traderId }),
@@ -591,12 +593,8 @@ export class OperationsController {
     }
     const arabic = reportLanguage === "ar";
     const VOID = "--";
-    const labels = arabic
-      ? { serial: "م", referenceNumber: "رقم المرجع", orderDate: "تاريخ الطلب", deliveryDate: "تاريخ التسليم", traderName: "اسم التاجر", customer: "العميل", customerMobile: "جوال العميل", emirates: "الإمارة", area: "المنطقة", cod: "الدفع عند الاستلام", amountToCollect: "المطلوب من العميل", fee: "الرسوم", additionalFees: "رسوم إضافية", traderAmount: "مبلغ التاجر", paidToTrader: "مدفوع للتاجر", collectedFromTrader: "محصّل من التاجر", balance: "الرصيد", status: "الحالة" }
-      : { serial: "No.", referenceNumber: "Reference Number", orderDate: "Order Date", deliveryDate: "Delivery Date", traderName: "Trader Name", customer: "Customer", customerMobile: "Customer Mobile", emirates: "Emirates", area: "Area", cod: "COD", amountToCollect: "Amount to Collect", fee: "Fee", additionalFees: "Additional Fees", traderAmount: "Trader Amount", paidToTrader: "Paid to Trader", collectedFromTrader: "Collected from Trader", balance: "Balance", status: "Status" };
-    const statusLabels: Record<string, string> = arabic
-      ? { new: "جديد", in_branch: "الصنف في الفرع", assigned_to_driver: "معين للمندوب", out_for_delivery: "خرج للتوصيل", hold: "معلّق", delivered: "تم التسليم", returned_to_branch: "عاد إلى الفرع", returned_to_trader: "عاد إلى التاجر", cancelled: "ملغى", closed: "مغلق", collect_order: "احضار طلب" }
-      : { new: "New", in_branch: "Item in branch", assigned_to_driver: "Assigned to driver", out_for_delivery: "Out for delivery", hold: "Hold", delivered: "Delivered", returned_to_branch: "Returned to branch", returned_to_trader: "Returned to trader", cancelled: "Cancelled", closed: "Closed", collect_order: "Collect Order" };
+    const labels = ordersReportLabels(arabic);
+    const statusLabels = ordersReportStatusLabels(arabic);
     const formatDateTime = (value: Date): string => new Intl.DateTimeFormat(arabic ? "ar-AE" : "en-AE", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Dubai" }).format(value);
     const filterLabels = arabic
       ? { from: "من تاريخ الطلب", to: "إلى تاريخ الطلب", trader: "التاجر", statuses: "الحالات", references: "أرقام المرجع", total: "الإجمالي", deliveryFrom: "التسليم من", deliveryTo: "التسليم إلى", emirate: "الإمارة", area: "المنطقة", driver: "المندوب", customer: "العميل", balance: "الرصيد", settlement: "التسوية" }
@@ -638,6 +636,8 @@ export class OperationsController {
       // Amounts never break mid-number (e.g. a "198.00" total split as "198.0 / 0").
       // Cancelled Orders: COD, Trader Amount and Balance show "--" in red (not in totals).
       voidMarker: VOID,
+      // What the Trader owes is shown with a minus sign, in red (27 Oct 2026).
+      negativeColumns: [labels.traderAmount, labels.balance],
       noWrapColumns: [labels.serial, labels.referenceNumber, labels.orderDate, labels.deliveryDate, labels.customerMobile, labels.cod, labels.amountToCollect, labels.fee, labels.additionalFees, labels.traderAmount, labels.paidToTrader, labels.collectedFromTrader, labels.balance],
       ...(singleTrader ? { highlight: { label: filterLabels.trader, value: selectedTraderName } } : {}),
       filters: filtersForDocument,

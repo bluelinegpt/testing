@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ApiClient } from "../../api/api-client.js";
@@ -187,5 +187,26 @@ describe("Orders Report drill-down", () => {
     // Additional fees and the amount the customer pays have their own columns.
     expect(screen.getByRole("columnheader", { name: "Additional Fees" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Amount to Collect" })).toBeInTheDocument();
+  });
+});
+
+describe("Orders Report signed amounts", () => {
+  it("shows what the Trader owes with a minus sign, in red, and exports Excel in the screen language", async () => {
+    await i18nInstance.changeLanguage("en");
+    const row = { orderNumber: "ORD-351", referenceNumber: "2109", orderDate: "2026-10-26", deliveryDate: null, traderName: "T", customer: "C", customerMobile: "0504764146", emirates: "Abu Dhabi", area: "MBZ", cod: "0.00", amountToCollect: "0.00", fee: "20.00", additionalFees: "5.00", traderAmount: "-25.00", paidToTrader: "0.00", collectedFromTrader: "0.00", balance: "-25.00", status: "assigned_to_driver" };
+    const get = vi.fn((path: string) => path.startsWith("operations/reports/orders?")
+      ? Promise.resolve({ items: [row], page: 1, pageSize: 25, totalCount: 1, totals: { cod: "0.00", amountToCollect: "0.00", fee: "20.00", additionalFees: "5.00", traderAmount: "-25.00", paidToTrader: "0.00", collectedFromTrader: "0.00", balance: "-25.00" } })
+      : Promise.resolve([]));
+    const getBinary = vi.fn((path: string) => Promise.resolve(new Blob([path])));
+    const createObjectURL = vi.fn(() => "blob:x");
+    Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() });
+    render(<OrdersReport api={{ get, getBinary } as unknown as ApiClient} />);
+    const negatives = await screen.findAllByTestId("orders-report-negative");
+    expect(negatives.length).toBeGreaterThanOrEqual(2);
+    expect(negatives[0]).toHaveTextContent("-25.00");
+    expect(negatives[0]).toHaveStyle({ color: "#c62828" });
+    fireEvent.click(screen.getByRole("button", { name: "Export Excel" }));
+    await waitFor(() => expect(getBinary).toHaveBeenCalled());
+    expect(String(getBinary.mock.calls[0]?.[0])).toContain("language=en");
   });
 });

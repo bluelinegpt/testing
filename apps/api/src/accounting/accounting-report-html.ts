@@ -17,6 +17,8 @@ export interface AccountingReportDocument {
   readonly noWrapColumns?: readonly string[];
   /** A cell whose value is exactly this text is shown in red (e.g. "--" for a void amount). */
   readonly voidMarker?: string;
+  /** Amount columns where a negative value (e.g. "-25.00") is shown in red, minus sign first. */
+  readonly negativeColumns?: readonly string[];
 }
 
 /** Row key: when a number > 1, the first column's value is a label spanning that many columns. */
@@ -56,10 +58,19 @@ export function accountingReportHtml(input: {
     .map(([key, value]) => `<span><b>${escape(key)}:</b> <bdi>${escape(value)}</bdi></span>`)
     .join("");
   const noWrap = new Set(input.document.noWrapColumns ?? []);
+  const negativeColumns = new Set(input.document.negativeColumns ?? []);
+  const isNegative = (column: string, value?: unknown): boolean =>
+    negativeColumns.has(column) && typeof value === "string" && /^-\d/u.test(value.trim());
   const cellClass = (column: string, value?: unknown): string => {
-    const classes = [noWrap.has(column) ? "nowrap" : "", input.document.voidMarker !== undefined && value === input.document.voidMarker ? "void" : ""].filter(Boolean);
+    const classes = [
+      noWrap.has(column) ? "nowrap" : "",
+      (input.document.voidMarker !== undefined && value === input.document.voidMarker) || isNegative(column, value) ? "void" : "",
+    ].filter(Boolean);
     return classes.length === 0 ? "" : ` class="${classes.join(" ")}"`;
   };
+  // A negative amount keeps its minus sign in front, also in an Arabic page.
+  const cellText = (column: string, value: unknown): string =>
+    isNegative(column, value) ? `<bdi dir="ltr">${escape(value)}</bdi>` : `<bdi>${escape(value)}</bdi>`;
   const rows = input.document.rows
     .map((row) => {
       // Optional summary-row label spanning the first N columns (`__labelSpan`).
@@ -68,11 +79,11 @@ export function accountingReportHtml(input: {
       if (span > 1 && first !== undefined) {
         return `<tr class="summary"><th colspan="${span}" scope="row"><bdi>${escape(row[first])}</bdi></th>${rest
           .slice(span - 1)
-          .map((column) => `<td${cellClass(column, row[column])}><bdi>${escape(row[column])}</bdi></td>`)
+          .map((column) => `<td${cellClass(column, row[column])}>${cellText(column, row[column])}</td>`)
           .join("")}</tr>`;
       }
       return `<tr>${input.document.columns
-        .map((column) => `<td${cellClass(column, row[column])}><bdi>${escape(row[column])}</bdi></td>`)
+        .map((column) => `<td${cellClass(column, row[column])}>${cellText(column, row[column])}</td>`)
         .join("")}</tr>`;
     })
     .join("");

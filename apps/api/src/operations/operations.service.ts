@@ -43,6 +43,7 @@ import {
   validateOrderViews,
 } from "../company-configuration/order-views.js";
 import { deliveryStatusFilterPredicate } from "./delivery-status-filter.js";
+import { ordersReportLabels, ordersReportStatusLabels } from "./orders-report-labels.js";
 import {
   activeStatusPredicate,
   customOrderViewPredicate,
@@ -284,8 +285,9 @@ export interface OrdersReportRow {
    * Null for a cancelled Order (shown as "--", not in the total).
    * The Order's signed position with the Trader: what it owes the Trader
    * (`trader_net_payable`) minus the fees the Trader owes for it (its
-   * service-charge Trader Receivables), always shown as a positive number
-   * (business decision 2026-10-08: no minus signs on this report).
+   * service-charge Trader Receivables). Negative when the Trader owes
+   * (Aiman, 27 Oct 2026 -- the 8 Oct "no minus signs" rule added such an
+   * amount to the total as if it were owed to him).
    */
   readonly traderAmount: string | null;
   /** Paid to the Trader for this Order through Trader Settlements. */
@@ -295,7 +297,7 @@ export interface OrdersReportRow {
   readonly settlementNumber: string | null;
   /** Recovered from the Trader against this Order's receivables (collected or offset). */
   readonly collectedFromTrader: string;
-  /** |traderAmount - paidToTrader + collectedFromTrader|, always positive; null for a cancelled Order. */
+  /** traderAmount - paidToTrader + collectedFromTrader: + due to the Trader, - due from him; null for a cancelled Order. */
   readonly balance: string | null;
   readonly status: string;
 }
@@ -2131,7 +2133,7 @@ export class OperationsService {
     // ORD-000155 (returned, then closed) showed Trader Amount and Balance 80.
     const cancelled = sql`(o.delivery_status in ('cancelled', 'returned_to_trader') or o.return_status = 'returned_to_trader')`;
     const signedBalance = sql`(case when ${cancelled} then null else (${traderAmount} - ${paidToTrader} + trader_owes.collected) end)`;
-    const shownTraderAmount = sql`(case when ${cancelled} then null else abs(${traderAmount}) end)`;
+    const shownTraderAmount = sql`(case when ${cancelled} then null else ${traderAmount} end)`;
     const shownCod = sql`(case when ${cancelled} then null else o.cod_amount end)`;
     // A fee is shown on an undelivered Order only if a fee charge actually
     // exists for it; otherwise "--" and outside the Fee total.
@@ -2200,10 +2202,9 @@ export class OperationsService {
              coalesce(sum(${shownTraderAmount}), 0)::numeric(18,2)::text as "traderAmount",
              coalesce(sum(${paidToTrader}), 0)::numeric(18,2)::text as "paidToTrader",
              coalesce(sum(trader_owes.collected), 0)::numeric(18,2)::text as "collectedFromTrader",
-             -- No minus signs on this report (business decision 2026-10-08): every
-             -- Trader Amount and Balance is shown as a positive number and the
-             -- single total is the plain sum of what is shown.
-             coalesce(sum(abs(${signedBalance})), 0)::numeric(18,2)::text as balance
+             -- Signed (27 Oct 2026): what the Trader owes is negative, so the
+             -- total is the net position with him.
+             coalesce(sum(${signedBalance}), 0)::numeric(18,2)::text as balance
       ${base}
     `.execute(this.database);
     const rows = await sql<OrdersReportRow>`
@@ -2239,7 +2240,7 @@ export class OperationsService {
                                   where r.company_id = s.company_id and r.reversal_of_id = s.id)
                order by s.created_at desc limit 1) as "settlementNumber",
              trader_owes.collected::numeric(18,2)::text as "collectedFromTrader",
-             abs(${signedBalance})::numeric(18,2)::text as balance,
+             ${signedBalance}::numeric(18,2)::text as balance,
              ${shownStatus} as status
       ${base}
       order by ${orderDate} asc, o.created_at asc, o.id asc
@@ -2264,27 +2265,38 @@ export class OperationsService {
     };
   }
 
-  public async ordersReportExcel(filters: OrdersReportFilters = {}): Promise<OrdersReportExcelFile> {
+  public async ordersReportExcel(
+    language: "ar" | "en",
+    filters: OrdersReportFilters = {},
+  ): Promise<OrdersReportExcelFile> {
     const report = await this.ordersReport({ ...filters, page: 1, pageSize: 200 });
     const all: OrdersReportRow[] = [...report.items];
     for (let page = 2; page <= Math.ceil(report.totalCount / report.pageSize); page += 1) {
       all.push(...(await this.ordersReport({ ...filters, page, pageSize: 200 })).items);
     }
-    const columns = ["No.", "Reference Number", "Order Date", "Delivery Date", "Trader Name", "Customer", "Customer Mobile", "Emirates", "Area", "COD", "Amount to Collect", "Fee", "Additional Fees", "Trader Amount", "Paid to Trader", "Collected from Trader", "Balance", "Status"] as const;
+    // The screen's language (27 Oct 2026): headings, status names and
+    // Arabic Emirate / Area / Trader names, as in the PDF.
+    const arabic = language === "ar";
+    const l = ordersReportLabels(arabic);
+    const statusNames = ordersReportStatusLabels(arabic);
+    const columns = [l.serial, l.referenceNumber, l.orderDate, l.deliveryDate, l.traderName, l.customer, l.customerMobile, l.emirates, l.area, l.cod, l.amountToCollect, l.fee, l.additionalFees, l.traderAmount, l.paidToTrader, l.collectedFromTrader, l.balance, l.status];
     const rows: Record<string, string>[] = all.map((row, index) => ({
-      "No.": String(index + 1), "Reference Number": row.referenceNumber ?? "", "Order Date": row.orderDate, "Delivery Date": row.deliveryDate ?? "", "Trader Name": row.traderName,
-      Customer: row.customer, "Customer Mobile": row.customerMobile, Emirates: row.emirates,
-      Area: row.area, COD: row.cod ?? "--", "Amount to Collect": row.amountToCollect ?? "--",
-      Fee: row.fee ?? "--", "Additional Fees": row.additionalFees ?? "--", "Trader Amount": row.traderAmount ?? "--",
-      "Paid to Trader": row.paidToTrader, "Collected from Trader": row.collectedFromTrader, Balance: row.balance ?? "--",
-      Status: row.status,
+      [l.serial]: String(index + 1), [l.referenceNumber]: row.referenceNumber ?? "", [l.orderDate]: row.orderDate, [l.deliveryDate]: row.deliveryDate ?? "",
+      [l.traderName]: arabic ? row.traderNameAr || row.traderName : row.traderName,
+      [l.customer]: row.customer, [l.customerMobile]: row.customerMobile,
+      [l.emirates]: arabic ? row.emiratesAr || row.emirates : row.emirates,
+      [l.area]: arabic ? row.areaAr || row.area : row.area,
+      [l.cod]: row.cod ?? "--", [l.amountToCollect]: row.amountToCollect ?? "--",
+      [l.fee]: row.fee ?? "--", [l.additionalFees]: row.additionalFees ?? "--", [l.traderAmount]: row.traderAmount ?? "--",
+      [l.paidToTrader]: row.paidToTrader, [l.collectedFromTrader]: row.collectedFromTrader, [l.balance]: row.balance ?? "--",
+      [l.status]: statusNames[row.status] ?? row.status,
     }));
     // Totals of the whole filtered report, as the last row.
     rows.push({
-      "No.": "Total", COD: report.totals.cod, "Amount to Collect": report.totals.amountToCollect,
-      Fee: report.totals.fee, "Additional Fees": report.totals.additionalFees,
-      "Trader Amount": report.totals.traderAmount, "Paid to Trader": report.totals.paidToTrader,
-      "Collected from Trader": report.totals.collectedFromTrader, Balance: report.totals.balance,
+      [l.serial]: arabic ? "الإجمالي" : "Total", [l.cod]: report.totals.cod, [l.amountToCollect]: report.totals.amountToCollect,
+      [l.fee]: report.totals.fee, [l.additionalFees]: report.totals.additionalFees,
+      [l.traderAmount]: report.totals.traderAmount, [l.paidToTrader]: report.totals.paidToTrader,
+      [l.collectedFromTrader]: report.totals.collectedFromTrader, [l.balance]: report.totals.balance,
     });
     return { bytes: accountingXlsx(columns, rows), filename: `orders-report-${new Date().toISOString().slice(0, 10)}.xlsx` };
   }

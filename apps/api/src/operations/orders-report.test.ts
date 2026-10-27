@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 describe("Orders Report contract", () => {
   const service = readFileSync(resolve(process.cwd(), "src/operations/operations.service.ts"), "utf8");
   const controller = readFileSync(resolve(process.cwd(), "src/operations/operations.controller.ts"), "utf8");
+  // Headings and status names shared by the PDF and the Excel (27 Oct 2026).
+  const labels = readFileSync(resolve(process.cwd(), "src/operations/orders-report-labels.ts"), "utf8");
 
   it("filters on inclusive Order Date boundaries, validated statuses, trader filtering, and stable pagination", () => {
     expect(service).toContain("coalesce(o.order_date, (o.created_at at time zone ${timezone})::date)");
@@ -21,25 +23,25 @@ describe("Orders Report contract", () => {
     expect(service).toContain("o.company_id = ${identity.companyId}::uuid");
     expect(service).toContain("public async ordersReportExcel");
     expect(service).toContain("this.ordersReport({ ...filters, page, pageSize: 200 })");
-    expect(service).toContain('"Order Date"');
+    expect(labels).toContain('orderDate: "Order Date"');
     expect(service).toContain('o.reference_number as "referenceNumber"');
-    expect(service).toContain('"Reference Number": row.referenceNumber ?? ""');
-    expect(service).toContain('"No.": String(index + 1)');
+    expect(service).toContain('[l.referenceNumber]: row.referenceNumber ?? ""');
+    expect(service).toContain("[l.serial]: String(index + 1)");
     expect(controller).toContain("[labels.serial]: String(index + 1)");
-    expect(service).toContain('"Delivery Date"');
-    expect(service).not.toContain('"Order Number"');
-    expect(service).toContain('"Customer Mobile"');
+    expect(labels).toContain('deliveryDate: "Delivery Date"');
+    expect(labels).not.toContain('"Order Number"');
+    expect(labels).toContain('customerMobile: "Customer Mobile"');
     expect(controller).toContain('@Get("reports/orders")');
     expect(controller).toContain('@Get("reports/orders.xlsx")');
     expect(controller).toContain('@Get("reports/orders.pdf")');
     expect(controller).toContain('@Query("language") language: string | undefined');
     expect(controller).toContain('language: reportLanguage');
-    expect(controller).toContain("تاريخ الطلب");
-    expect(controller).toContain("تاريخ التسليم");
-    expect(controller).not.toContain("رقم الطلب");
+    expect(labels).toContain("تاريخ الطلب");
+    expect(labels).toContain("تاريخ التسليم");
+    expect(labels).not.toContain("رقم الطلب");
     expect(controller).toContain("highlight: { label: filterLabels.trader, value: selectedTraderName }");
     expect(controller).toContain("...(singleTrader ? [] : [labels.traderName])");
-    expect(controller).toContain("جديد");
+    expect(labels).toContain("جديد");
     expect(controller).toContain("جميع التجار");
     expect(controller).toContain("showTelephone: false");
   });
@@ -48,15 +50,15 @@ describe("Orders Report contract", () => {
     expect(service).toContain("(coalesce(o.trader_net_payable, 0) - trader_owes.due)");
     expect(service).toContain("r.source_type = 'service_charge' and r.source_reference = o.order_number");
     expect(service).toContain("r.status not in ('cancelled', 'reversed')");
-    expect(service).toContain('"Paid to Trader"');
-    expect(service).toContain('"Collected from Trader"');
-    expect(controller).toContain("محصّل من التاجر");
+    expect(labels).toContain('paidToTrader: "Paid to Trader"');
+    expect(labels).toContain('collectedFromTrader: "Collected from Trader"');
+    expect(labels).toContain("محصّل من التاجر");
     expect(service).toContain("coalesce(sum(o.cod_amount), 0)");
     expect(service).toContain("coalesce(sum(${shownFee}), 0)::numeric(18,2)::text as fee");
     expect(service).toContain("coalesce(sum(${shownTraderAmount}), 0)");
-    expect(service).toContain('"Trader Amount"');
+    expect(labels).toContain('traderAmount: "Trader Amount"');
     expect(service).toContain("report.totals.traderAmount");
-    expect(controller).toContain("مبلغ التاجر");
+    expect(labels).toContain("مبلغ التاجر");
     expect(controller).toContain("first.totals.traderAmount");
   });
 
@@ -67,13 +69,21 @@ describe("Orders Report contract", () => {
     expect(controller.match(/referenceNumbers: splitReferenceNumbers\(references\)/g)?.length).toBe(3);
   });
 
-  it("shows Trader Amount and Balance without minus signs, with one plain-sum total", () => {
-    expect(service).toContain("const shownTraderAmount = sql`(case when ${cancelled} then null else abs(${traderAmount}) end)`");
-    expect(service).toContain("abs(${signedBalance})::numeric(18,2)::text as balance,");
+  it("shows what the Trader owes with a minus sign, in red, so the totals are the net position (27 Oct 2026)", () => {
+    expect(service).toContain("const shownTraderAmount = sql`(case when ${cancelled} then null else ${traderAmount} end)`");
+    expect(service).toContain("${signedBalance}::numeric(18,2)::text as balance,");
     expect(service).toContain('coalesce(sum(${shownTraderAmount}), 0)::numeric(18,2)::text as "traderAmount"');
-    expect(service).toContain("coalesce(sum(abs(${signedBalance})), 0)::numeric(18,2)::text as balance");
-    expect(service).not.toContain("balancePositive");
-    expect(controller).not.toContain("balanceNegative");
+    expect(service).toContain("coalesce(sum(${signedBalance}), 0)::numeric(18,2)::text as balance");
+    expect(service).not.toContain("abs(${traderAmount})");
+    expect(service).not.toContain("abs(${signedBalance})");
+    expect(controller).toContain("negativeColumns: [labels.traderAmount, labels.balance]");
+  });
+
+  it("exports the Excel in the screen's language, with status names and Arabic place names", () => {
+    expect(controller).toContain('this.operations.ordersReportExcel(language === "ar" ? "ar" : "en", {');
+    expect(service).toContain("[l.status]: statusNames[row.status] ?? row.status");
+    expect(service).toContain("[l.area]: arabic ? row.areaAr || row.area : row.area");
+    expect(labels).toContain('assigned_to_driver: "معين للمندوب"');
   });
 
   it("supports delivery date, emirate, area, driver, customer, balance and settlement filters on all exports", () => {
@@ -93,12 +103,12 @@ describe("Orders Report contract", () => {
     expect(service).toContain("const cancelled = sql`(o.delivery_status in ('cancelled', 'returned_to_trader') or o.return_status = 'returned_to_trader')`");
     // No fee on an undelivered Order unless a fee charge exists (9 Oct 2026).
     expect(service).toContain("(case when ${cancelled} and trader_owes.due = 0 then null else o.service_fee end)");
-    expect(service).toContain('Fee: row.fee ?? "--"');
+    expect(service).toContain('[l.fee]: row.fee ?? "--"');
     expect(controller).toContain("[labels.fee]: row.fee ?? VOID");
     expect(service).toContain("coalesce(sum(${shownCod}), 0)::numeric(18,2)::text as cod");
     expect(service).toContain("coalesce(sum(${shownTraderAmount}), 0)");
     expect(service).toContain("(case when ${cancelled} then null else (${traderAmount} - ${paidToTrader} + trader_owes.collected) end)");
-    expect(service).toContain('Balance: row.balance ?? "--"');
+    expect(service).toContain('[l.balance]: row.balance ?? "--"');
     expect(controller).toContain("voidMarker: VOID");
   });
 
