@@ -592,8 +592,8 @@ export class OperationsController {
     const arabic = reportLanguage === "ar";
     const VOID = "--";
     const labels = arabic
-      ? { serial: "م", referenceNumber: "رقم المرجع", orderDate: "تاريخ الطلب", deliveryDate: "تاريخ التسليم", traderName: "اسم التاجر", customer: "العميل", customerMobile: "جوال العميل", emirates: "الإمارة", area: "المنطقة", cod: "الدفع عند الاستلام", fee: "الرسوم", traderAmount: "مبلغ التاجر", paidToTrader: "مدفوع للتاجر", collectedFromTrader: "محصّل من التاجر", balance: "الرصيد", status: "الحالة" }
-      : { serial: "No.", referenceNumber: "Reference Number", orderDate: "Order Date", deliveryDate: "Delivery Date", traderName: "Trader Name", customer: "Customer", customerMobile: "Customer Mobile", emirates: "Emirates", area: "Area", cod: "COD", fee: "Fee", traderAmount: "Trader Amount", paidToTrader: "Paid to Trader", collectedFromTrader: "Collected from Trader", balance: "Balance", status: "Status" };
+      ? { serial: "م", referenceNumber: "رقم المرجع", orderDate: "تاريخ الطلب", deliveryDate: "تاريخ التسليم", traderName: "اسم التاجر", customer: "العميل", customerMobile: "جوال العميل", emirates: "الإمارة", area: "المنطقة", cod: "الدفع عند الاستلام", amountToCollect: "المطلوب من العميل", fee: "الرسوم", additionalFees: "رسوم إضافية", traderAmount: "مبلغ التاجر", paidToTrader: "مدفوع للتاجر", collectedFromTrader: "محصّل من التاجر", balance: "الرصيد", status: "الحالة" }
+      : { serial: "No.", referenceNumber: "Reference Number", orderDate: "Order Date", deliveryDate: "Delivery Date", traderName: "Trader Name", customer: "Customer", customerMobile: "Customer Mobile", emirates: "Emirates", area: "Area", cod: "COD", amountToCollect: "Amount to Collect", fee: "Fee", additionalFees: "Additional Fees", traderAmount: "Trader Amount", paidToTrader: "Paid to Trader", collectedFromTrader: "Collected from Trader", balance: "Balance", status: "Status" };
     const statusLabels: Record<string, string> = arabic
       ? { new: "جديد", in_branch: "الصنف في الفرع", assigned_to_driver: "معين للمندوب", out_for_delivery: "خرج للتوصيل", hold: "معلّق", delivered: "تم التسليم", returned_to_branch: "عاد إلى الفرع", returned_to_trader: "عاد إلى التاجر", cancelled: "ملغى", closed: "مغلق", collect_order: "احضار طلب" }
       : { new: "New", in_branch: "Item in branch", assigned_to_driver: "Assigned to driver", out_for_delivery: "Out for delivery", hold: "Hold", delivered: "Delivered", returned_to_branch: "Returned to branch", returned_to_trader: "Returned to trader", cancelled: "Cancelled", closed: "Closed", collect_order: "Collect Order" };
@@ -611,13 +611,13 @@ export class OperationsController {
     const singleTrader = selectedTraderName !== undefined;
     const columns: readonly string[] = [
       labels.serial, labels.referenceNumber, labels.orderDate, labels.deliveryDate, ...(singleTrader ? [] : [labels.traderName]),
-      labels.customer, labels.customerMobile, labels.emirates, labels.area, labels.cod, labels.fee,
-      labels.traderAmount, labels.paidToTrader, labels.collectedFromTrader, labels.balance, labels.status,
+      labels.customer, labels.customerMobile, labels.emirates, labels.area, labels.cod, labels.amountToCollect,
+      labels.fee, labels.additionalFees, labels.traderAmount, labels.paidToTrader, labels.collectedFromTrader, labels.balance, labels.status,
     ];
     const columnWidths: Record<string, number> = {
-      [labels.serial]: 3, [labels.referenceNumber]: 7, [labels.orderDate]: 7, [labels.deliveryDate]: 7, [labels.traderName]: 9, [labels.customer]: 9.5,
-      [labels.customerMobile]: 8.5, [labels.emirates]: 8, [labels.area]: 11, [labels.cod]: 6, [labels.fee]: 5.5,
-      [labels.traderAmount]: 6.5, [labels.paidToTrader]: 6, [labels.collectedFromTrader]: 7, [labels.balance]: 6, [labels.status]: 8,
+      [labels.serial]: 3, [labels.referenceNumber]: 6.5, [labels.orderDate]: 6.5, [labels.deliveryDate]: 6.5, [labels.traderName]: 8, [labels.customer]: 8,
+      [labels.customerMobile]: 8, [labels.emirates]: 6.5, [labels.area]: 9, [labels.cod]: 6, [labels.amountToCollect]: 6, [labels.fee]: 5,
+      [labels.additionalFees]: 5.5, [labels.traderAmount]: 6, [labels.paidToTrader]: 5.5, [labels.collectedFromTrader]: 6, [labels.balance]: 5.5, [labels.status]: 7,
     };
     // Summary rows: their label spans every column before COD.
     const summaryLabelSpan = columns.indexOf(labels.cod);
@@ -638,7 +638,7 @@ export class OperationsController {
       // Amounts never break mid-number (e.g. a "198.00" total split as "198.0 / 0").
       // Cancelled Orders: COD, Trader Amount and Balance show "--" in red (not in totals).
       voidMarker: VOID,
-      noWrapColumns: [labels.serial, labels.referenceNumber, labels.orderDate, labels.deliveryDate, labels.customerMobile, labels.cod, labels.fee, labels.traderAmount, labels.paidToTrader, labels.collectedFromTrader, labels.balance],
+      noWrapColumns: [labels.serial, labels.referenceNumber, labels.orderDate, labels.deliveryDate, labels.customerMobile, labels.cod, labels.amountToCollect, labels.fee, labels.additionalFees, labels.traderAmount, labels.paidToTrader, labels.collectedFromTrader, labels.balance],
       ...(singleTrader ? { highlight: { label: filterLabels.trader, value: selectedTraderName } } : {}),
       filters: filtersForDocument,
       generatedAt: formatDateTime(new Date()),
@@ -651,13 +651,16 @@ export class OperationsController {
         ...(singleTrader ? {} : { [labels.traderName]: arabic ? row.traderNameAr || row.traderName : row.traderName }),
         [labels.customer]: row.customer, [labels.customerMobile]: row.customerMobile,
         [labels.emirates]: arabic ? row.emiratesAr || row.emirates : row.emirates,
-        [labels.area]: arabic ? row.areaAr || row.area : row.area, [labels.cod]: row.cod ?? VOID, [labels.fee]: row.fee ?? VOID,
+        [labels.area]: arabic ? row.areaAr || row.area : row.area, [labels.cod]: row.cod ?? VOID, [labels.amountToCollect]: row.amountToCollect ?? VOID,
+        [labels.fee]: row.fee ?? VOID, [labels.additionalFees]: row.additionalFees ?? VOID,
         [labels.traderAmount]: row.traderAmount ?? VOID, [labels.paidToTrader]: row.paidToTrader, [labels.collectedFromTrader]: row.collectedFromTrader,
         [labels.balance]: row.balance ?? VOID, [labels.status]: statusLabels[row.status] ?? row.status,
       })).concat([{
         // Totals of the whole filtered report, as the last row.
         [LABEL_SPAN]: summaryLabelSpan,
-        [labels.serial]: filterLabels.total, [labels.cod]: first.totals.cod, [labels.fee]: first.totals.fee,
+        [labels.serial]: filterLabels.total, [labels.cod]: first.totals.cod,
+        [labels.amountToCollect]: first.totals.amountToCollect, [labels.fee]: first.totals.fee,
+        [labels.additionalFees]: first.totals.additionalFees,
         [labels.traderAmount]: first.totals.traderAmount, [labels.paidToTrader]: first.totals.paidToTrader,
         [labels.collectedFromTrader]: first.totals.collectedFromTrader, [labels.balance]: first.totals.balance,
       }]),

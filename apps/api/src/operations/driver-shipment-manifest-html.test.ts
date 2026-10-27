@@ -24,7 +24,7 @@ const sample: ManifestData = {
   orders: [
     {
       areaName: "Deira",
-      codAmount: "150.00",
+      amountToCollect: "150.00",
       customerMobileNumber: "971500000002",
       customerName: "Test Customer",
       customerSecondMobileNumber: "971500000003",
@@ -47,7 +47,7 @@ const sample: ManifestData = {
     countNew: 0,
     countOutForDelivery: 0,
     countReturned: 0,
-    totalCod: "150.00",
+    totalToCollect: "150.00",
     totalOrders: 1,
   },
 };
@@ -154,10 +154,10 @@ describe("buildDriverShipmentManifestHtml", () => {
    * Total COD are the two figures the Driver and the person handing over
    * actually check against the parcels in hand.
    */
-  it("renders Total Orders and Total COD as the only summary figures", () => {
+  it("renders Total Orders and Total to Collect as the only summary figures", () => {
     const html = buildDriverShipmentManifestHtml(sample, "en", "now");
     expect(html).toContain("Total Orders");
-    expect(html).toContain("Total COD");
+    expect(html).toContain("Total to Collect");
     expect(html).toContain("150.00");
     expect(html).not.toContain("AED 150.00");
     /* Matched as the rendered summary label rather than as loose text: the word
@@ -211,7 +211,7 @@ describe("buildDriverShipmentManifestHtml", () => {
     expect(widths.reduce((sum, entry) => sum + entry.width, 0)).toBe(100);
   });
 
-  it("gives Customer Mobile at least as much width as COD Amount", () => {
+  it("gives Customer Mobile at least as much width as Amount to Collect", () => {
     // A 10-digit mobile is longer than "AED 9999.00", so the relative order of
     // these two is the point -- it was inverted, and badly.
     const html = buildDriverShipmentManifestHtml(sample, "en", "now");
@@ -221,7 +221,7 @@ describe("buildDriverShipmentManifestHtml", () => {
       );
     const headers = [...html.matchAll(/<th>([^<]*)<\/th>/g)].map((match) => match[1]);
     const mobileColumn = headers.indexOf("Customer Mobile") + 1;
-    const codColumn = headers.indexOf("COD Amount") + 1;
+    const codColumn = headers.indexOf("Amount to Collect") + 1;
 
     expect(mobileColumn).toBeGreaterThan(0);
     expect(codColumn).toBeGreaterThan(0);

@@ -42,7 +42,12 @@ export interface ManifestOrderRow {
   readonly emirateOrder: number | null;
   readonly traderNameAr: string | null;
   readonly assignedDriverId: string | null;
-  readonly codAmount: string;
+  /**
+   * What the Driver collects from the customer (`customer_amount_due`): the
+   * COD, plus the fees when the customer pays them (Aiman, 27 Oct 2026 --
+   * the sheet printed COD only, so COD 0 + fees 75 showed 0).
+   */
+  readonly amountToCollect: string;
   readonly customerMobileNumber: string;
   readonly customerName: string;
   readonly customerSecondMobileNumber: string | null;
@@ -162,7 +167,7 @@ export class DriverShipmentManifestService {
              e.name_en as "emirateName", e.name_ar as "emirateNameAr",
              e.display_order as "emirateOrder", a.id as "areaId",
              coalesce(a.name_en, '') as "areaName", a.name_ar as "areaNameAr",
-             o.cod_amount::text as "codAmount",
+             o.customer_amount_due::text as "amountToCollect",
              o.service_fee::text as "serviceFee",
              o.customer_delivery_notes_snapshot as "deliveryInstructions", o.notes,
              o.delivery_status as "deliveryStatus"
@@ -207,7 +212,7 @@ export class DriverShipmentManifestService {
              e.name_en as "emirateName", e.name_ar as "emirateNameAr",
              e.display_order as "emirateOrder", a.id as "areaId",
              coalesce(a.name_en, '') as "areaName", a.name_ar as "areaNameAr",
-             o.cod_amount::text as "codAmount",
+             o.customer_amount_due::text as "amountToCollect",
              o.service_fee::text as "serviceFee",
              o.customer_delivery_notes_snapshot as "deliveryInstructions", o.notes,
              o.delivery_status as "deliveryStatus"
@@ -291,7 +296,7 @@ export class DriverShipmentManifestService {
           .then((logo) => `data:${logo.mediaType};base64,${logo.bytes.toString("base64")}`)
           .catch(() => null)
       : null;
-    const totalCod = orders.reduce((sum, row) => sum.plus(row.codAmount), new Decimal(0));
+    const totalToCollect = orders.reduce((sum, row) => sum.plus(row.amountToCollect), new Decimal(0));
     const countBy = (status: string) =>
       orders.filter((row) => row.deliveryStatus === status).length;
     // A short, non-persisted reference for display only — the Manifest is
@@ -321,7 +326,7 @@ export class DriverShipmentManifestService {
         areaNameAr: row.areaNameAr,
         emirateNameAr: row.emirateNameAr,
         traderNameAr: row.traderNameAr,
-        codAmount: new Decimal(row.codAmount).toFixed(2),
+        amountToCollect: new Decimal(row.amountToCollect).toFixed(2),
         customerMobileNumber: row.customerMobileNumber,
         customerName: row.customerName,
         customerSecondMobileNumber: row.customerSecondMobileNumber,
@@ -343,7 +348,7 @@ export class DriverShipmentManifestService {
         countNew: countBy("new"),
         countOutForDelivery: countBy("out_for_delivery"),
         countReturned: countBy("returned_to_branch") + countBy("returned_to_trader"),
-        totalCod: totalCod.toFixed(2),
+        totalToCollect: totalToCollect.toFixed(2),
         totalOrders: orders.length,
       },
     };
@@ -400,8 +405,8 @@ export class DriverShipmentManifestService {
     }).format(new Date());
     const columns =
       language === "ar"
-        ? ["الرقم", "الرقم المرجعي الخارجي", "التاجر", "العميل", "هاتف العميل", "المنطقة", "مبلغ التحصيل", "ملاحظات"]
-        : ["No", "External Reference Number", "Trader", "Customer", "Customer Mobile", "Area", "COD Amount", "Notes"];
+        ? ["الرقم", "الرقم المرجعي الخارجي", "التاجر", "العميل", "هاتف العميل", "المنطقة", "المبلغ المطلوب تحصيله", "ملاحظات"]
+        : ["No", "External Reference Number", "Trader", "Customer", "Customer Mobile", "Area", "Amount to Collect", "Notes"];
     const rows = data.orders.map((row) =>
       Object.fromEntries(
         [
@@ -411,7 +416,7 @@ export class DriverShipmentManifestService {
           row.customerName,
           row.customerMobileNumber,
           language === "ar" ? (row.areaNameAr ?? row.areaName) : row.areaName,
-          row.codAmount,
+          row.amountToCollect,
           row.notes ?? "",
         ].map((value, index) => [columns[index]!, value]),
       ),

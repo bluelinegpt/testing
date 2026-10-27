@@ -1653,6 +1653,8 @@ export const arabicTranslations = {
       total: "{{count}} طلب مطابق",
       totalCod: "إجمالي الدفع عند الاستلام",
       totalFee: "إجمالي الرسوم",
+      totalAdditionalFees: "إجمالي الرسوم الإضافية",
+      totalAmountToCollect: "إجمالي المطلوب من العميل",
       totalTraderAmount: "إجمالي مبلغ التاجر",
       totalPaidToTrader: "إجمالي المدفوع للتاجر",
       totalCollectedFromTrader: "إجمالي المحصّل من التاجر",
@@ -1678,7 +1680,7 @@ export const arabicTranslations = {
       },
       references: "أرقام المرجع",
       referencesPlaceholder: "مثال: 1001, 1002, 1003",
-      columns: { serial: "م", referenceNumber: "رقم المرجع", orderDate: "تاريخ الطلب", deliveryDate: "تاريخ التسليم", traderName: "اسم التاجر", customer: "العميل", customerMobile: "هاتف العميل", emirates: "الإمارة", area: "المنطقة", cod: "الدفع عند الاستلام", fee: "الرسوم", traderAmount: "مبلغ التاجر", paidToTrader: "مدفوع للتاجر", collectedFromTrader: "محصّل من التاجر", balance: "الرصيد", status: "الحالة" },
+      columns: { serial: "م", referenceNumber: "رقم المرجع", orderDate: "تاريخ الطلب", deliveryDate: "تاريخ التسليم", traderName: "اسم التاجر", customer: "العميل", customerMobile: "هاتف العميل", emirates: "الإمارة", area: "المنطقة", cod: "الدفع عند الاستلام", amountToCollect: "المطلوب من العميل", fee: "الرسوم", additionalFees: "رسوم إضافية", traderAmount: "مبلغ التاجر", paidToTrader: "مدفوع للتاجر", collectedFromTrader: "محصّل من التاجر", balance: "الرصيد", status: "الحالة" },
     },
     dailyOperationsSummary: {
       breakEven: "تعادل / صفر",

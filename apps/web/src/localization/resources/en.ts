@@ -1677,6 +1677,8 @@ export const englishTranslations = {
       total: "{{count}} matching orders",
       totalCod: "Total COD",
       totalFee: "Total Fee",
+      totalAdditionalFees: "Total Additional Fees",
+      totalAmountToCollect: "Total to Collect",
       totalTraderAmount: "Total Trader",
       totalPaidToTrader: "Total Paid to Trader",
       totalCollectedFromTrader: "Total Collected from Trader",
@@ -1702,7 +1704,7 @@ export const englishTranslations = {
       },
       references: "Reference numbers",
       referencesPlaceholder: "e.g. 1001, 1002, 1003",
-      columns: { serial: "No.", referenceNumber: "Reference Number", orderDate: "Order Date", deliveryDate: "Delivery Date", traderName: "Trader Name", customer: "Customer", customerMobile: "Customer Mobile", emirates: "Emirates", area: "Area", cod: "COD", fee: "Fee", traderAmount: "Trader Amount", paidToTrader: "Paid to Trader", collectedFromTrader: "Collected from Trader", balance: "Balance", status: "Status" },
+      columns: { serial: "No.", referenceNumber: "Reference Number", orderDate: "Order Date", deliveryDate: "Delivery Date", traderName: "Trader Name", customer: "Customer", customerMobile: "Customer Mobile", emirates: "Emirates", area: "Area", cod: "COD", amountToCollect: "Amount to Collect", fee: "Fee", additionalFees: "Additional Fees", traderAmount: "Trader Amount", paidToTrader: "Paid to Trader", collectedFromTrader: "Collected from Trader", balance: "Balance", status: "Status" },
     },
     dailyOperationsSummary: {
       breakEven: "Break-even / Zero",

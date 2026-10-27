@@ -7,7 +7,7 @@ const row = (referenceNumber: string, areaName: string, emirateOrder: number): M
   areaName,
   areaNameAr: null,
   assignedDriverId: "d",
-  codAmount: "0.00",
+  amountToCollect: "0.00",
   customerMobileNumber: "",
   customerName: "",
   customerSecondMobileNumber: null,

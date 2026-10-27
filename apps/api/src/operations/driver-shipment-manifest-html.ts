@@ -16,7 +16,7 @@ export interface ManifestOrder {
   readonly areaNameAr?: string | null;
   readonly emirateNameAr?: string | null;
   readonly traderNameAr?: string | null;
-  readonly codAmount: string;
+  readonly amountToCollect: string;
   readonly customerMobileNumber: string;
   readonly customerName: string;
   readonly customerSecondMobileNumber: string | null;
@@ -59,7 +59,7 @@ export interface ManifestData {
     readonly countNew: number;
     readonly countOutForDelivery: number;
     readonly countReturned: number;
-    readonly totalCod: string;
+    readonly totalToCollect: string;
     readonly totalOrders: number;
   };
 }
@@ -98,7 +98,7 @@ interface Labels {
   readonly secondMobile: string;
   readonly serviceFee: string;
   readonly title: string;
-  readonly totalCod: string;
+  readonly totalToCollect: string;
   readonly totalOrders: string;
   readonly trader: string;
 }
@@ -107,7 +107,7 @@ const LABELS: Record<ReportLanguage, Labels> = {
   ar: {
     area: "المنطقة",
     cancelled: "ملغى",
-    cod: "الدفع عند الاستلام",
+    cod: "المبلغ المطلوب تحصيله",
     customer: "العميل",
     delivered: "تم التسليم",
     deliveryInstructions: "تعليمات التوصيل",
@@ -138,14 +138,14 @@ const LABELS: Record<ReportLanguage, Labels> = {
     secondMobile: "جوال إضافي",
     serviceFee: "رسوم الخدمة",
     title: "كشف شحنات السائق",
-    totalCod: "إجمالي الدفع عند الاستلام",
+    totalToCollect: "إجمالي المبلغ المطلوب تحصيله",
     totalOrders: "إجمالي الطلبات",
     trader: "التاجر",
   },
   en: {
     area: "Area",
     cancelled: "Cancelled",
-    cod: "COD Amount",
+    cod: "Amount to Collect",
     customer: "Customer",
     delivered: "Delivered",
     deliveryInstructions: "Delivery Instructions",
@@ -176,7 +176,7 @@ const LABELS: Record<ReportLanguage, Labels> = {
     secondMobile: "Second Mobile",
     serviceFee: "Service Fee",
     title: "Driver Shipment Manifest",
-    totalCod: "Total COD",
+    totalToCollect: "Total to Collect",
     totalOrders: "Total Orders",
     trader: "Trader",
   },
@@ -238,7 +238,7 @@ export function buildDriverShipmentManifestHtml(
         `<td>${escapeHtml(order.customerName)}</td>` +
         `<td class="mono">${escapeHtml(order.customerMobileNumber)}</td>` +
         `<td class="area">${escapeHtml(areaOf(order))}</td>` +
-        `<td class="num">${money(order.codAmount)}</td>` +
+        `<td class="num">${money(order.amountToCollect)}</td>` +
         /* Notes, not Delivery Status. A manifest is signed at handover, when
            every Order on it is going out, so the status column read the same on
            every line. A free-text note is what the Driver actually needs in
@@ -305,7 +305,7 @@ export function buildDriverShipmentManifestHtml(
     `<h2 class="section-title">${escapeHtml(labels.numberOfOrders)}</h2>` +
     `<div class="summary-row">` +
     summaryLine(labels.totalOrders, String(data.summary.totalOrders)) +
-    summaryLine(labels.totalCod, money(data.summary.totalCod)) +
+    summaryLine(labels.totalToCollect, money(data.summary.totalToCollect)) +
     `</div>` +
     `</section>`;
 

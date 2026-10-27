@@ -153,15 +153,15 @@ describe("Orders Report status groups", () => {
 });
 
 describe("Orders Report cancelled orders", () => {
-  it("shows a red -- instead of COD, Trader Amount and Balance for a cancelled order", async () => {
+  it("shows a red -- instead of COD, Amount to Collect, Trader Amount and Balance for a cancelled order", async () => {
     await i18nInstance.changeLanguage("en");
-    const row = { orderNumber: "ORD-9", referenceNumber: "1475", orderDate: "2026-10-07", deliveryDate: null, traderName: "T", customer: "C", customerMobile: "0500000000", emirates: "Sharjah", area: "Al Nabba", cod: null, fee: "18.00", traderAmount: null, paidToTrader: "0.00", collectedFromTrader: "0.00", balance: null, status: "cancelled" };
+    const row = { orderNumber: "ORD-9", referenceNumber: "1475", orderDate: "2026-10-07", deliveryDate: null, traderName: "T", customer: "C", customerMobile: "0500000000", emirates: "Sharjah", area: "Al Nabba", cod: null, amountToCollect: null, fee: "18.00", additionalFees: "0.00", traderAmount: null, paidToTrader: "0.00", collectedFromTrader: "0.00", balance: null, status: "cancelled" };
     const get = vi.fn((path: string) => path.startsWith("operations/reports/orders?")
       ? Promise.resolve({ items: [row], page: 1, pageSize: 25, totalCount: 1, totals: { cod: "0.00", fee: "18.00", traderAmount: "0.00", paidToTrader: "0.00", collectedFromTrader: "0.00", balance: "0.00" } })
       : Promise.resolve([]));
     render(<OrdersReport api={{ get, getBinary: vi.fn() } as unknown as ApiClient} />);
     const marks = await screen.findAllByTestId("orders-report-void");
-    expect(marks).toHaveLength(3);
+    expect(marks).toHaveLength(4);
     expect(marks[0]).toHaveStyle({ color: "#c62828" });
     expect(within(screen.getByTestId("orders-report-open-statuses")).getByLabelText("Collect Order")).not.toBeChecked();
   });
@@ -170,9 +170,9 @@ describe("Orders Report cancelled orders", () => {
 describe("Orders Report drill-down", () => {
   it("opens the order from the reference and the payment from Paid to Trader", async () => {
     await i18nInstance.changeLanguage("en");
-    const row = { orderNumber: "ORD-000165", referenceNumber: "1112", orderDate: "2026-09-27", deliveryDate: "2026-09-29", traderName: "T", customer: "C", customerMobile: "0500000000", emirates: "Ajman", area: "Al Rashidiya 1", cod: "535.00", fee: "18.00", traderAmount: "517.00", paidToTrader: "517.00", settlementId: "s-1", settlementNumber: "SET-000032", collectedFromTrader: "0.00", balance: "0.00", status: "closed" };
+    const row = { orderNumber: "ORD-000165", referenceNumber: "1112", orderDate: "2026-09-27", deliveryDate: "2026-09-29", traderName: "T", customer: "C", customerMobile: "0500000000", emirates: "Ajman", area: "Al Rashidiya 1", cod: "535.00", amountToCollect: "535.00", fee: "18.00", additionalFees: "0.00", traderAmount: "517.00", paidToTrader: "517.00", settlementId: "s-1", settlementNumber: "SET-000032", collectedFromTrader: "0.00", balance: "0.00", status: "closed" };
     const get = vi.fn((path: string) => path.startsWith("operations/reports/orders?")
-      ? Promise.resolve({ items: [row], page: 1, pageSize: 25, totalCount: 1, totals: { cod: "535.00", fee: "18.00", traderAmount: "517.00", paidToTrader: "517.00", collectedFromTrader: "0.00", balance: "0.00" } })
+      ? Promise.resolve({ items: [row], page: 1, pageSize: 25, totalCount: 1, totals: { cod: "535.00", amountToCollect: "535.00", fee: "18.00", additionalFees: "0.00", traderAmount: "517.00", paidToTrader: "517.00", collectedFromTrader: "0.00", balance: "0.00" } })
       : Promise.resolve([]));
     const onNavigate = vi.fn();
     render(<OrdersReport api={{ get, getBinary: vi.fn() } as unknown as ApiClient} onNavigate={onNavigate} />);
@@ -184,5 +184,8 @@ describe("Orders Report drill-down", () => {
     expect(payment).toHaveAttribute("href", "/trader-settlements/s-1");
     fireEvent.click(payment);
     expect(onNavigate).toHaveBeenCalledWith("/trader-settlements/s-1");
+    // Additional fees and the amount the customer pays have their own columns.
+    expect(screen.getByRole("columnheader", { name: "Additional Fees" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Amount to Collect" })).toBeInTheDocument();
   });
 });

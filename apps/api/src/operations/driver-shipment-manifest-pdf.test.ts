@@ -16,7 +16,7 @@ const footerAr = `<div style="font-size:9px;width:100%;text-align:center;directi
 function manyOrders(count: number): readonly ManifestOrder[] {
   return Array.from({ length: count }, (_unused, index) => ({
     areaName: `Area ${index}`,
-    codAmount: "50.00",
+    amountToCollect: "50.00",
     customerMobileNumber: `97150000${String(index).padStart(4, "0")}`,
     customerName: `Customer ${index}`,
     customerSecondMobileNumber: null,
@@ -59,7 +59,7 @@ const baseData: ManifestData = {
     countNew: 0,
     countOutForDelivery: 0,
     countReturned: 0,
-    totalCod: "150.00",
+    totalToCollect: "150.00",
     totalOrders: 3,
   },
 };
