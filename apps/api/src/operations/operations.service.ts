@@ -273,14 +273,19 @@ export interface OrdersReportRow {
   readonly emiratesAr?: string | null;
   readonly area: string;
   readonly areaAr?: string | null;
-  /** Null for a cancelled Order: shown as "--" and left out of the total. */
+  /**
+   * COD: the cash the Driver collects from the customer (`customer_amount_due`)
+   * -- the COD, or the fees when the customer pays them on an Order with no
+   * COD (Aiman, 27 Oct 2026: COD 0 + fees 75 read as "collect nothing").
+   * Null for a cancelled Order: shown as "--" and left out of the total.
+   */
   readonly cod: string | null;
+  /** Number of packages (boxes) on the Order (Aiman, 28 Oct 2026). */
+  readonly packages: number;
   /** Null for an undelivered Order with no fee charge: shown as "--". */
   readonly fee: string | null;
   /** Additional fees on top of the service fee; "--" exactly when the fee is. */
   readonly additionalFees: string | null;
-  /** What the customer pays the Driver (COD, plus the fees when he pays them); "--" when cancelled. */
-  readonly amountToCollect: string | null;
   /**
    * Null for a cancelled Order (shown as "--", not in the total).
    * The Order's signed position with the Trader: what it owes the Trader
@@ -304,10 +309,10 @@ export interface OrdersReportRow {
 
 /** Sums over EVERY order matching the filters, not just the returned page. */
 export interface OrdersReportTotals {
+  readonly packages: number;
   readonly cod: string;
   readonly fee: string;
   readonly additionalFees: string;
-  readonly amountToCollect: string;
   readonly traderAmount: string;
   readonly paidToTrader: string;
   readonly collectedFromTrader: string;
@@ -2134,15 +2139,14 @@ export class OperationsService {
     const cancelled = sql`(o.delivery_status in ('cancelled', 'returned_to_trader') or o.return_status = 'returned_to_trader')`;
     const signedBalance = sql`(case when ${cancelled} then null else (${traderAmount} - ${paidToTrader} + trader_owes.collected) end)`;
     const shownTraderAmount = sql`(case when ${cancelled} then null else ${traderAmount} end)`;
-    const shownCod = sql`(case when ${cancelled} then null else o.cod_amount end)`;
+    const shownCod = sql`(case when ${cancelled} then null else o.customer_amount_due end)`;
     // A fee is shown on an undelivered Order only if a fee charge actually
     // exists for it; otherwise "--" and outside the Fee total.
     const shownFee = sql`(case when ${cancelled} and trader_owes.due = 0 then null else o.service_fee end)`;
     // Additional fees follow the service fee's rule (Aiman, 27 Oct 2026: the
     // report showed only the service fee, so COD - Fee did not give the
-    // Trader Amount). Amount to collect is what the customer pays the Driver.
+    // Trader Amount).
     const shownAdditionalFees = sql`(case when ${cancelled} and trader_owes.due = 0 then null else o.additional_fees end)`;
-    const shownAmountToCollect = sql`(case when ${cancelled} then null else o.customer_amount_due end)`;
     // A returned Order that was later closed reads "Returned to Trader", not
     // "Closed", so the report does not suggest a completed delivery.
     const shownStatus = sql`(case when o.delivery_status = 'closed' and o.return_status = 'returned_to_trader' then 'returned_to_trader' else o.delivery_status end)`;
@@ -2195,10 +2199,10 @@ export class OperationsService {
     // paging, so the totals always describe the whole report.
     const summary = await sql<{ count: number } & OrdersReportTotals>`
       select count(*)::int as count,
+             coalesce(sum(o.package_count), 0)::int as packages,
              coalesce(sum(${shownCod}), 0)::numeric(18,2)::text as cod,
              coalesce(sum(${shownFee}), 0)::numeric(18,2)::text as fee,
              coalesce(sum(${shownAdditionalFees}), 0)::numeric(18,2)::text as "additionalFees",
-             coalesce(sum(${shownAmountToCollect}), 0)::numeric(18,2)::text as "amountToCollect",
              coalesce(sum(${shownTraderAmount}), 0)::numeric(18,2)::text as "traderAmount",
              coalesce(sum(${paidToTrader}), 0)::numeric(18,2)::text as "paidToTrader",
              coalesce(sum(trader_owes.collected), 0)::numeric(18,2)::text as "collectedFromTrader",
@@ -2216,9 +2220,9 @@ export class OperationsService {
              o.customer_mobile_number as "customerMobile",
              coalesce(e.name_en, '—') as emirates, e.name_ar as "emiratesAr",
              coalesce(a.name_en, '—') as area, a.name_ar as "areaAr",
+             coalesce(o.package_count, 0)::int as packages,
              ${shownCod}::numeric(18,2)::text as cod, ${shownFee}::numeric(18,2)::text as fee,
              ${shownAdditionalFees}::numeric(18,2)::text as "additionalFees",
-             ${shownAmountToCollect}::numeric(18,2)::text as "amountToCollect",
              ${shownTraderAmount}::numeric(18,2)::text as "traderAmount",
              ${paidToTrader}::numeric(18,2)::text as "paidToTrader",
              (select s.id::text
@@ -2253,10 +2257,10 @@ export class OperationsService {
       pageSize,
       totalCount: totalsRow?.count ?? 0,
       totals: {
+        packages: totalsRow?.packages ?? 0,
         cod: totalsRow?.cod ?? "0.00",
         fee: totalsRow?.fee ?? "0.00",
         additionalFees: totalsRow?.additionalFees ?? "0.00",
-        amountToCollect: totalsRow?.amountToCollect ?? "0.00",
         traderAmount: totalsRow?.traderAmount ?? "0.00",
         paidToTrader: totalsRow?.paidToTrader ?? "0.00",
         collectedFromTrader: totalsRow?.collectedFromTrader ?? "0.00",
@@ -2279,21 +2283,21 @@ export class OperationsService {
     const arabic = language === "ar";
     const l = ordersReportLabels(arabic);
     const statusNames = ordersReportStatusLabels(arabic);
-    const columns = [l.serial, l.referenceNumber, l.orderDate, l.deliveryDate, l.traderName, l.customer, l.customerMobile, l.emirates, l.area, l.cod, l.amountToCollect, l.fee, l.additionalFees, l.traderAmount, l.paidToTrader, l.collectedFromTrader, l.balance, l.status];
+    const columns = [l.serial, l.referenceNumber, l.orderDate, l.deliveryDate, l.traderName, l.customer, l.customerMobile, l.emirates, l.area, l.packages, l.cod, l.fee, l.additionalFees, l.traderAmount, l.paidToTrader, l.collectedFromTrader, l.balance, l.status];
     const rows: Record<string, string>[] = all.map((row, index) => ({
       [l.serial]: String(index + 1), [l.referenceNumber]: row.referenceNumber ?? "", [l.orderDate]: row.orderDate, [l.deliveryDate]: row.deliveryDate ?? "",
       [l.traderName]: arabic ? row.traderNameAr || row.traderName : row.traderName,
       [l.customer]: row.customer, [l.customerMobile]: row.customerMobile,
       [l.emirates]: arabic ? row.emiratesAr || row.emirates : row.emirates,
       [l.area]: arabic ? row.areaAr || row.area : row.area,
-      [l.cod]: row.cod ?? "--", [l.amountToCollect]: row.amountToCollect ?? "--",
+      [l.packages]: String(row.packages), [l.cod]: row.cod ?? "--",
       [l.fee]: row.fee ?? "--", [l.additionalFees]: row.additionalFees ?? "--", [l.traderAmount]: row.traderAmount ?? "--",
       [l.paidToTrader]: row.paidToTrader, [l.collectedFromTrader]: row.collectedFromTrader, [l.balance]: row.balance ?? "--",
       [l.status]: statusNames[row.status] ?? row.status,
     }));
     // Totals of the whole filtered report, as the last row.
     rows.push({
-      [l.serial]: arabic ? "الإجمالي" : "Total", [l.cod]: report.totals.cod, [l.amountToCollect]: report.totals.amountToCollect,
+      [l.serial]: arabic ? "الإجمالي" : "Total", [l.packages]: String(report.totals.packages), [l.cod]: report.totals.cod,
       [l.fee]: report.totals.fee, [l.additionalFees]: report.totals.additionalFees,
       [l.traderAmount]: report.totals.traderAmount, [l.paidToTrader]: report.totals.paidToTrader,
       [l.collectedFromTrader]: report.totals.collectedFromTrader, [l.balance]: report.totals.balance,

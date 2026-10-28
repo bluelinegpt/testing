@@ -609,16 +609,16 @@ export class OperationsController {
     const singleTrader = selectedTraderName !== undefined;
     const columns: readonly string[] = [
       labels.serial, labels.referenceNumber, labels.orderDate, labels.deliveryDate, ...(singleTrader ? [] : [labels.traderName]),
-      labels.customer, labels.customerMobile, labels.emirates, labels.area, labels.cod, labels.amountToCollect,
+      labels.customer, labels.customerMobile, labels.emirates, labels.area, labels.packages, labels.cod,
       labels.fee, labels.additionalFees, labels.traderAmount, labels.paidToTrader, labels.collectedFromTrader, labels.balance, labels.status,
     ];
     const columnWidths: Record<string, number> = {
       [labels.serial]: 3, [labels.referenceNumber]: 6.5, [labels.orderDate]: 6.5, [labels.deliveryDate]: 6.5, [labels.traderName]: 8, [labels.customer]: 8,
-      [labels.customerMobile]: 8, [labels.emirates]: 6.5, [labels.area]: 9, [labels.cod]: 6, [labels.amountToCollect]: 6, [labels.fee]: 5,
+      [labels.customerMobile]: 8, [labels.emirates]: 6.5, [labels.area]: 8.5, [labels.packages]: 4, [labels.cod]: 6, [labels.fee]: 5,
       [labels.additionalFees]: 5.5, [labels.traderAmount]: 6, [labels.paidToTrader]: 5.5, [labels.collectedFromTrader]: 6, [labels.balance]: 5.5, [labels.status]: 7,
     };
-    // Summary rows: their label spans every column before COD.
-    const summaryLabelSpan = columns.indexOf(labels.cod);
+    // Summary rows: their label spans every column before Packages.
+    const summaryLabelSpan = columns.indexOf(labels.packages);
     const filtersForDocument = {
       [filterLabels.from]: dateFrom ?? (arabic ? "الكل" : "All"),
       [filterLabels.to]: dateTo ?? (arabic ? "الكل" : "All"),
@@ -638,7 +638,7 @@ export class OperationsController {
       voidMarker: VOID,
       // What the Trader owes is shown with a minus sign, in red (27 Oct 2026).
       negativeColumns: [labels.traderAmount, labels.balance],
-      noWrapColumns: [labels.serial, labels.referenceNumber, labels.orderDate, labels.deliveryDate, labels.customerMobile, labels.cod, labels.amountToCollect, labels.fee, labels.additionalFees, labels.traderAmount, labels.paidToTrader, labels.collectedFromTrader, labels.balance],
+      noWrapColumns: [labels.serial, labels.referenceNumber, labels.orderDate, labels.deliveryDate, labels.customerMobile, labels.packages, labels.cod, labels.fee, labels.additionalFees, labels.traderAmount, labels.paidToTrader, labels.collectedFromTrader, labels.balance],
       ...(singleTrader ? { highlight: { label: filterLabels.trader, value: selectedTraderName } } : {}),
       filters: filtersForDocument,
       generatedAt: formatDateTime(new Date()),
@@ -651,15 +651,15 @@ export class OperationsController {
         ...(singleTrader ? {} : { [labels.traderName]: arabic ? row.traderNameAr || row.traderName : row.traderName }),
         [labels.customer]: row.customer, [labels.customerMobile]: row.customerMobile,
         [labels.emirates]: arabic ? row.emiratesAr || row.emirates : row.emirates,
-        [labels.area]: arabic ? row.areaAr || row.area : row.area, [labels.cod]: row.cod ?? VOID, [labels.amountToCollect]: row.amountToCollect ?? VOID,
+        [labels.area]: arabic ? row.areaAr || row.area : row.area, [labels.packages]: String(row.packages), [labels.cod]: row.cod ?? VOID,
         [labels.fee]: row.fee ?? VOID, [labels.additionalFees]: row.additionalFees ?? VOID,
         [labels.traderAmount]: row.traderAmount ?? VOID, [labels.paidToTrader]: row.paidToTrader, [labels.collectedFromTrader]: row.collectedFromTrader,
         [labels.balance]: row.balance ?? VOID, [labels.status]: statusLabels[row.status] ?? row.status,
       })).concat([{
         // Totals of the whole filtered report, as the last row.
         [LABEL_SPAN]: summaryLabelSpan,
-        [labels.serial]: filterLabels.total, [labels.cod]: first.totals.cod,
-        [labels.amountToCollect]: first.totals.amountToCollect, [labels.fee]: first.totals.fee,
+        [labels.serial]: filterLabels.total, [labels.packages]: String(first.totals.packages), [labels.cod]: first.totals.cod,
+        [labels.fee]: first.totals.fee,
         [labels.additionalFees]: first.totals.additionalFees,
         [labels.traderAmount]: first.totals.traderAmount, [labels.paidToTrader]: first.totals.paidToTrader,
         [labels.collectedFromTrader]: first.totals.collectedFromTrader, [labels.balance]: first.totals.balance,

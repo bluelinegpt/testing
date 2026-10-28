@@ -79,6 +79,21 @@ describe("Orders Report contract", () => {
     expect(controller).toContain("negativeColumns: [labels.traderAmount, labels.balance]");
   });
 
+  it("shows as COD the cash the Driver collects from the customer, in both languages (27 Oct 2026)", () => {
+    expect(service).toContain("const shownCod = sql`(case when ${cancelled} then null else o.customer_amount_due end)`");
+    expect(service).not.toContain("shownAmountToCollect");
+    expect(labels).not.toContain("amountToCollect");
+    expect(labels.match(/cod: "COD"/g)?.length).toBe(2);
+  });
+
+  it("shows the number of packages, with a total, on the screen, Excel and PDF (28 Oct 2026)", () => {
+    expect(service).toContain("coalesce(o.package_count, 0)::int as packages,");
+    expect(service).toContain("coalesce(sum(o.package_count), 0)::int as packages,");
+    expect(service).toContain("[l.packages]: String(row.packages)");
+    expect(controller).toContain("[labels.packages]: String(row.packages)");
+    expect(labels).toContain('packages: "عدد الطرود"');
+  });
+
   it("exports the Excel in the screen's language, with status names and Arabic place names", () => {
     expect(controller).toContain('this.operations.ordersReportExcel(language === "ar" ? "ar" : "en", {');
     expect(service).toContain("[l.status]: statusNames[row.status] ?? row.status");
