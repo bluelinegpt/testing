@@ -17,6 +17,7 @@ function manyOrders(count: number): readonly ManifestOrder[] {
   return Array.from({ length: count }, (_unused, index) => ({
     areaName: `Area ${index}`,
     amountToCollect: "50.00",
+    packageCount: 3,
     customerMobileNumber: `97150000${String(index).padStart(4, "0")}`,
     customerName: `Customer ${index}`,
     customerSecondMobileNumber: null,
@@ -60,6 +61,7 @@ const baseData: ManifestData = {
     countOutForDelivery: 0,
     countReturned: 0,
     totalToCollect: "150.00",
+    totalPackages: 3,
     totalOrders: 3,
   },
 };

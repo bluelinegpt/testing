@@ -48,6 +48,7 @@ export interface ManifestOrderRow {
    * the sheet printed COD only, so COD 0 + fees 75 showed 0).
    */
   readonly amountToCollect: string;
+  readonly packageCount: number;
   readonly customerMobileNumber: string;
   readonly customerName: string;
   readonly customerSecondMobileNumber: string | null;
@@ -168,6 +169,7 @@ export class DriverShipmentManifestService {
              e.display_order as "emirateOrder", a.id as "areaId",
              coalesce(a.name_en, '') as "areaName", a.name_ar as "areaNameAr",
              o.customer_amount_due::text as "amountToCollect",
+             coalesce(o.package_count, 0)::int as "packageCount",
              o.service_fee::text as "serviceFee",
              o.customer_delivery_notes_snapshot as "deliveryInstructions", o.notes,
              o.delivery_status as "deliveryStatus"
@@ -213,6 +215,7 @@ export class DriverShipmentManifestService {
              e.display_order as "emirateOrder", a.id as "areaId",
              coalesce(a.name_en, '') as "areaName", a.name_ar as "areaNameAr",
              o.customer_amount_due::text as "amountToCollect",
+             coalesce(o.package_count, 0)::int as "packageCount",
              o.service_fee::text as "serviceFee",
              o.customer_delivery_notes_snapshot as "deliveryInstructions", o.notes,
              o.delivery_status as "deliveryStatus"
@@ -327,6 +330,7 @@ export class DriverShipmentManifestService {
         emirateNameAr: row.emirateNameAr,
         traderNameAr: row.traderNameAr,
         amountToCollect: new Decimal(row.amountToCollect).toFixed(2),
+        packageCount: row.packageCount,
         customerMobileNumber: row.customerMobileNumber,
         customerName: row.customerName,
         customerSecondMobileNumber: row.customerSecondMobileNumber,
@@ -349,6 +353,7 @@ export class DriverShipmentManifestService {
         countOutForDelivery: countBy("out_for_delivery"),
         countReturned: countBy("returned_to_branch") + countBy("returned_to_trader"),
         totalToCollect: totalToCollect.toFixed(2),
+        totalPackages: orders.reduce((sum, row) => sum + row.packageCount, 0),
         totalOrders: orders.length,
       },
     };
@@ -405,8 +410,8 @@ export class DriverShipmentManifestService {
     }).format(new Date());
     const columns =
       language === "ar"
-        ? ["الرقم", "الرقم المرجعي الخارجي", "التاجر", "العميل", "هاتف العميل", "المنطقة", "المبلغ المطلوب تحصيله", "ملاحظات"]
-        : ["No", "External Reference Number", "Trader", "Customer", "Customer Mobile", "Area", "Amount to Collect", "Notes"];
+        ? ["الرقم", "الرقم المرجعي الخارجي", "التاجر", "العميل", "هاتف العميل", "المنطقة", "عدد الطرود", "المبلغ المطلوب تحصيله", "ملاحظات"]
+        : ["No", "External Reference Number", "Trader", "Customer", "Customer Mobile", "Area", "Packages", "Amount to Collect", "Notes"];
     const rows = data.orders.map((row) =>
       Object.fromEntries(
         [
@@ -416,6 +421,7 @@ export class DriverShipmentManifestService {
           row.customerName,
           row.customerMobileNumber,
           language === "ar" ? (row.areaNameAr ?? row.areaName) : row.areaName,
+          String(row.packageCount),
           row.amountToCollect,
           row.notes ?? "",
         ].map((value, index) => [columns[index]!, value]),
@@ -428,6 +434,7 @@ export class DriverShipmentManifestService {
         language === "ar" ? (data.header.driverNameAr ?? data.header.driverName) : data.header.driverName,
       ],
       [language === "ar" ? "عدد الطلبات" : "Orders", data.header.orderCount],
+      [language === "ar" ? "إجمالي الطرود" : "Total Packages", data.summary.totalPackages],
     ]);
     const safe = data.header.driverName.replaceAll(/[^A-Za-z0-9]+/g, "-");
     const date = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dubai" }).format(new Date());

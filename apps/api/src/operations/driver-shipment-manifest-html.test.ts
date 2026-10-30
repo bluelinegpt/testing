@@ -25,6 +25,7 @@ const sample: ManifestData = {
     {
       areaName: "Deira",
       amountToCollect: "150.00",
+      packageCount: 3,
       customerMobileNumber: "971500000002",
       customerName: "Test Customer",
       customerSecondMobileNumber: "971500000003",
@@ -48,6 +49,7 @@ const sample: ManifestData = {
     countOutForDelivery: 0,
     countReturned: 0,
     totalToCollect: "150.00",
+    totalPackages: 3,
     totalOrders: 1,
   },
 };
@@ -76,7 +78,7 @@ describe("buildDriverShipmentManifestHtml", () => {
     expect(html).not.toContain("Outsourced");
     expect(html).not.toContain("<th>Customer Address</th>");
     expect(html).not.toContain("Villa 12, Street 4");
-    expect(html).not.toContain("<th>Packages</th>");
+    expect(html).toContain("<th>Packages</th>");
     expect(html).toContain("<th>Trader</th>");
     expect(html).toContain("Test Trader");
     expect(html).not.toContain("<th>Second Mobile</th>");
@@ -85,7 +87,7 @@ describe("buildDriverShipmentManifestHtml", () => {
     expect(html).not.toContain("<th>Emirate</th>");
     expect(html).not.toContain("<th>Order Number</th>");
     expect(html).not.toContain("<th>Service Fee</th>");
-    expect(html).not.toContain("Total Packages");
+    expect(html).toContain("<span>Total Packages</span><span>3</span>");
     expect(html).toContain("@page { size: A4 portrait;");
     expect(html).toContain("font-size: 12px");
     expect(html).not.toContain("<span class=\"meta-label\">Driver Mobile</span>");
@@ -154,7 +156,7 @@ describe("buildDriverShipmentManifestHtml", () => {
    * Total COD are the two figures the Driver and the person handing over
    * actually check against the parcels in hand.
    */
-  it("renders Total Orders and Total to Collect as the only summary figures", () => {
+  it("renders Total Orders, Total Packages and Total to Collect as the summary figures", () => {
     const html = buildDriverShipmentManifestHtml(sample, "en", "now");
     expect(html).toContain("Total Orders");
     expect(html).toContain("Total to Collect");
@@ -164,7 +166,6 @@ describe("buildDriverShipmentManifestHtml", () => {
        "Returned" still belongs on the page, in the "Returned/Received By"
        signature line, and a bare substring check would forbid that too. */
     for (const removed of [
-      "Total Packages",
       "Cancelled",
       "Returned",
       "Delivered",
@@ -177,7 +178,7 @@ describe("buildDriverShipmentManifestHtml", () => {
     }
   });
 
-  it("puts the two summary figures on one line", () => {
+  it("puts the summary figures on one line", () => {
     const html = buildDriverShipmentManifestHtml(sample, "en", "now");
     // Side by side rather than stacked, which is what the flex row provides.
     expect(html).toContain(`<div class="summary-row">`);

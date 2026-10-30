@@ -17,6 +17,8 @@ export interface ManifestOrder {
   readonly emirateNameAr?: string | null;
   readonly traderNameAr?: string | null;
   readonly amountToCollect: string;
+  /** Number of packages (boxes) on the Order (Aiman, 30 Oct 2026). */
+  readonly packageCount: number;
   readonly customerMobileNumber: string;
   readonly customerName: string;
   readonly customerSecondMobileNumber: string | null;
@@ -61,11 +63,14 @@ export interface ManifestData {
     readonly countReturned: number;
     readonly totalToCollect: string;
     readonly totalOrders: number;
+    readonly totalPackages: number;
   };
 }
 
 interface Labels {
   readonly area: string;
+  readonly packages: string;
+  readonly totalPackages: string;
   readonly cancelled: string;
   readonly cod: string;
   readonly customer: string;
@@ -106,6 +111,8 @@ interface Labels {
 const LABELS: Record<ReportLanguage, Labels> = {
   ar: {
     area: "المنطقة",
+    packages: "عدد الطرود",
+    totalPackages: "إجمالي الطرود",
     cancelled: "ملغى",
     cod: "المبلغ المطلوب تحصيله",
     customer: "العميل",
@@ -144,6 +151,8 @@ const LABELS: Record<ReportLanguage, Labels> = {
   },
   en: {
     area: "Area",
+    packages: "Packages",
+    totalPackages: "Total Packages",
     cancelled: "Cancelled",
     cod: "Amount to Collect",
     customer: "Customer",
@@ -227,7 +236,7 @@ export function buildDriverShipmentManifestHtml(
       (order) =>
         (showEmirateHeadings && (order.emirateName ?? "") !== currentEmirate
           ? ((currentEmirate = order.emirateName ?? ""),
-            `<tr class="emirate-heading"><td colspan="8">${escapeHtml(labels.emirate)}: ${escapeHtml(emirateOf(order))} (${
+            `<tr class="emirate-heading"><td colspan="9">${escapeHtml(labels.emirate)}: ${escapeHtml(emirateOf(order))} (${
               data.orders.filter((other) => (other.emirateName ?? "") === currentEmirate).length
             })</td></tr>`)
           : "") +
@@ -238,6 +247,7 @@ export function buildDriverShipmentManifestHtml(
         `<td>${escapeHtml(order.customerName)}</td>` +
         `<td class="mono">${escapeHtml(order.customerMobileNumber)}</td>` +
         `<td class="area">${escapeHtml(areaOf(order))}</td>` +
+        `<td class="num">${escapeHtml(String(order.packageCount))}</td>` +
         `<td class="num">${money(order.amountToCollect)}</td>` +
         /* Notes, not Delivery Status. A manifest is signed at handover, when
            every Order on it is going out, so the status column read the same on
@@ -256,6 +266,7 @@ export function buildDriverShipmentManifestHtml(
       labels.customer,
       labels.mobile,
       labels.area,
+      labels.packages,
       labels.cod,
       labels.notes,
     ]
@@ -296,7 +307,8 @@ export function buildDriverShipmentManifestHtml(
 
   const summaryLine = (label: string, value: string) =>
     `<div class="summary-line"><span>${escapeHtml(label)}</span><span>${escapeHtml(value)}</span></div>`;
-  /* Two figures only, side by side. The per-status breakdown (Packages, New,
+  /* Total Orders, Total Packages (brought back 30 Oct 2026: the Driver counts
+     the boxes at handover) and Total to Collect, side by side. The per-status breakdown (Packages, New,
      Out for Delivery, Delivered, Returned, Cancelled) was removed: a manifest is
      handed over at dispatch, when every Order on it is going out, so those
      counts were either all zero or restated the Delivery Status column. */
@@ -305,6 +317,7 @@ export function buildDriverShipmentManifestHtml(
     `<h2 class="section-title">${escapeHtml(labels.numberOfOrders)}</h2>` +
     `<div class="summary-row">` +
     summaryLine(labels.totalOrders, String(data.summary.totalOrders)) +
+    summaryLine(labels.totalPackages, String(data.summary.totalPackages)) +
     summaryLine(labels.totalToCollect, money(data.summary.totalToCollect)) +
     `</div>` +
     `</section>`;
@@ -339,18 +352,19 @@ export function buildDriverShipmentManifestHtml(
      /* Every approved manifest column is explicitly sized. The percentages
         total 100 so PDF pagination cannot assign an unpredictable remainder. */
     table.grid th:nth-child(1), table.grid td:nth-child(1) { width: 5%; }
-    table.grid th:nth-child(2), table.grid td:nth-child(2) { width: 10%; }
-    table.grid th:nth-child(3), table.grid td:nth-child(3) { width: 18%; }
+    table.grid th:nth-child(2), table.grid td:nth-child(2) { width: 9%; }
+    table.grid th:nth-child(3), table.grid td:nth-child(3) { width: 16%; }
     table.grid th:nth-child(4), table.grid td:nth-child(4) { width: 10%; }
     table.grid th:nth-child(5), table.grid td:nth-child(5) { width: 12%; }
     /* Area wider and Notes narrower (Aiman, 20 Oct 2026): "International
        City" was splitting mid-word while Notes stood mostly empty. */
-    table.grid th:nth-child(6), table.grid td:nth-child(6) { width: 17%; }
-    table.grid th:nth-child(7), table.grid td:nth-child(7) { width: 10%; }
-    table.grid th:nth-child(8), table.grid td:nth-child(8) { width: 18%; }
+    table.grid th:nth-child(6), table.grid td:nth-child(6) { width: 15%; }
+    table.grid th:nth-child(7), table.grid td:nth-child(7) { width: 6%; }
+    table.grid th:nth-child(8), table.grid td:nth-child(8) { width: 10%; }
+    table.grid th:nth-child(9), table.grid td:nth-child(9) { width: 17%; }
     table.grid td.area { overflow-wrap: normal; word-break: normal; hyphens: none; }
     table.grid tr.emirate-heading td { background: #e8eef9; font-weight: 700; font-size: 12px; width: auto; }
-    .summary-section { margin-top: 12px; max-width: 460px; }
+    .summary-section { margin-top: 12px; max-width: 680px; }
     /* Side by side rather than stacked. Each keeps its own underline so the
        label still reads as attached to its own figure. */
     .summary-row { display: flex; gap: 24px; }
