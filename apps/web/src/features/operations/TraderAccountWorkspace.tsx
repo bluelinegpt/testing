@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { ApiClient } from "../../api/api-client.js";
+import type { OperationsTrader } from "../../api/contracts.js";
 import { Modal } from "../../components/Modal.js";
 import { PageHeader } from "../../components/PageHeader.js";
 import { formatCurrency } from "../../localization/formatters.js";
@@ -24,6 +25,26 @@ export interface TraderAccountRow {
   readonly lastPaymentDate: string | null;
   readonly lastPaymentNumber: string | null;
   readonly lastPaymentAmount: string | null;
+  readonly paidInPeriod?: string;
+  readonly collectedInPeriod?: string;
+}
+
+export interface TraderReferenceLookupRow {
+  readonly requested: string;
+  readonly found: boolean;
+  readonly orderNumber: string | null;
+  readonly referenceNumber: string | null;
+  readonly traderId: string | null;
+  readonly traderCode: string | null;
+  readonly traderNameEn: string | null;
+  readonly traderNameAr: string | null;
+  readonly orderDate: string | null;
+  readonly deliveryDate: string | null;
+  readonly deliveryStatus: string | null;
+  readonly traderAmount: string | null;
+  readonly traderOutstanding: string | null;
+  readonly settledIn: readonly string[];
+  readonly feeNumbers: readonly string[];
 }
 
 interface TraderAccountList {
@@ -71,6 +92,16 @@ export function TraderAccountWorkspace({
 
   const [search, setSearch] = useState("");
   const [openOnly, setOpenOnly] = useState(true);
+  // Filters as on the settlement screens (Aiman, 31 Oct 2026): Trader,
+  // date range, and the reference lookup.
+  const [traderFilter, setTraderFilter] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [traders, setTraders] = useState<readonly OperationsTrader[]>([]);
+  const [references, setReferences] = useState("");
+  const [lookup, setLookup] = useState<readonly TraderReferenceLookupRow[]>();
+  const [lookupBusy, setLookupBusy] = useState(false);
+  const hasPeriod = from !== "" || to !== "";
   const [list, setList] = useState<TraderAccountList>();
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
@@ -83,7 +114,10 @@ export function TraderAccountWorkspace({
     let active = true;
     const params = new URLSearchParams();
     if (search.trim() !== "") params.set("search", search.trim());
-    if (openOnly) params.set("openOnly", "true");
+    if (openOnly && !hasPeriod) params.set("openOnly", "true");
+    if (traderFilter !== "") params.set("traderId", traderFilter);
+    if (from !== "") params.set("from", from);
+    if (to !== "") params.set("to", to);
     const timer = window.setTimeout(() => {
       void api
         .get<TraderAccountList>(`operations/trader-accounts?${params.toString()}`)
@@ -100,7 +134,33 @@ export function TraderAccountWorkspace({
       active = false;
       window.clearTimeout(timer);
     };
-  }, [api, openOnly, reload, search, t]);
+  }, [api, from, hasPeriod, openOnly, reload, search, t, to, traderFilter]);
+
+  useEffect(() => {
+    void Promise.resolve(api.get<readonly OperationsTrader[]>("operations/traders"))
+      .then((result) => setTraders(Array.isArray(result) ? result : []))
+      .catch(() => setTraders([]));
+  }, [api]);
+
+  const findReferences = async () => {
+    if (references.trim() === "") {
+      setLookup(undefined);
+      return;
+    }
+    setLookupBusy(true);
+    try {
+      setLookup(
+        await api.get<readonly TraderReferenceLookupRow[]>(
+          `operations/trader-accounts/lookup?${new URLSearchParams({ references }).toString()}`,
+        ),
+      );
+      setError(undefined);
+    } catch (requestError) {
+      setError(failure(requestError, t("traderAccount.lookupFailed")));
+    } finally {
+      setLookupBusy(false);
+    }
+  };
 
   const refresh = () => setReload((value) => value + 1);
   const money = (value: string) => formatCurrency(Math.abs(Number(value)).toFixed(2), "AED", locale);
@@ -158,15 +218,145 @@ export function TraderAccountWorkspace({
             value={search}
           />
         </label>
+        <label className="field">
+          <span>{t("traderAccount.trader")}</span>
+          <select onChange={(event) => setTraderFilter(event.target.value)} value={traderFilter}>
+            <option value="">{t("traderAccount.allTraders")}</option>
+            {traders.map((trader) => (
+              <option key={trader.id} value={trader.id}>
+                {trader.name} ({trader.code})
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>{t("traderAccount.dateFrom")}</span>
+          <input onChange={(event) => setFrom(event.target.value)} type="date" value={from} />
+        </label>
+        <label className="field">
+          <span>{t("traderAccount.dateTo")}</span>
+          <input onChange={(event) => setTo(event.target.value)} type="date" value={to} />
+        </label>
         <label className="checkbox-field">
           <input
-            checked={openOnly}
+            checked={openOnly && !hasPeriod}
+            disabled={hasPeriod}
             onChange={(event) => setOpenOnly(event.target.checked)}
             type="checkbox"
           />
           <span>{t("traderAccount.openOnly")}</span>
         </label>
+        {traderFilter !== "" || from !== "" || to !== "" || search !== "" ? (
+          <button
+            onClick={() => {
+              setTraderFilter("");
+              setFrom("");
+              setTo("");
+              setSearch("");
+            }}
+            type="button"
+          >
+            {t("traderAccount.clearFilters")}
+          </button>
+        ) : null}
       </div>
+      {hasPeriod ? <p className="field-hint">{t("traderAccount.periodHint")}</p> : null}
+      <section aria-labelledby="trader-account-lookup-heading" className="card trader-account-lookup">
+        <h3 id="trader-account-lookup-heading">{t("traderAccount.lookupTitle")}</h3>
+        <p className="field-hint">{t("traderAccount.lookupHint")}</p>
+        <div className="compact-filters">
+          <label className="field trader-account-lookup-input">
+            <span>{t("traderAccount.references")}</span>
+            <textarea
+              onChange={(event) => setReferences(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) void findReferences();
+              }}
+              placeholder="4265, 4283"
+              rows={2}
+              value={references}
+            />
+          </label>
+          <button
+            className="button button-primary"
+            disabled={lookupBusy}
+            onClick={() => void findReferences()}
+            type="button"
+          >
+            {lookupBusy ? t("common.loading") : t("traderAccount.find")}
+          </button>
+          {lookup === undefined ? null : (
+            <button
+              onClick={() => {
+                setLookup(undefined);
+                setReferences("");
+              }}
+              type="button"
+            >
+              {t("traderAccount.clearLookup")}
+            </button>
+          )}
+        </div>
+        {lookup === undefined ? null : (
+          <div className="table-scroll-x">
+            <table data-testid="trader-account-lookup">
+              <thead>
+                <tr>
+                  <th>{t("traderAccount.reference")}</th>
+                  <th>{t("traderAccount.trader")}</th>
+                  <th>{t("traderAccount.delivered")}</th>
+                  <th>{t("traderAccount.orderStatus")}</th>
+                  <th>{t("traderAccount.dueToTrader")}</th>
+                  <th>{t("traderAccount.settledIn")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lookup.map((row, index) => (
+                  <tr key={`${row.requested}-${row.orderNumber ?? index}`}>
+                    <td>
+                      <bdi>{row.referenceNumber ?? row.requested}</bdi>
+                      {row.orderNumber === null ? null : <div className="field-hint">{row.orderNumber}</div>}
+                    </td>
+                    {!row.found ? (
+                      <td colSpan={5}>{t("traderAccount.notFound")}</td>
+                    ) : (
+                      <>
+                        <td>
+                          {locale === "ar" ? (row.traderNameAr ?? row.traderNameEn) : row.traderNameEn}
+                          <div className="field-hint">{row.traderCode}</div>
+                        </td>
+                        <td>
+                          <bdi>{row.deliveryDate ?? "—"}</bdi>
+                        </td>
+                        <td>{t(`statuses.${row.deliveryStatus ?? ""}`, row.deliveryStatus ?? "")}</td>
+                        <td>{row.traderAmount ?? "—"}</td>
+                        <td>
+                          {row.settledIn.length > 0 ? (
+                            row.settledIn.map((entry) => (
+                              <div key={entry}>
+                                <bdi>{entry}</bdi>
+                              </div>
+                            ))
+                          ) : row.deliveryDate === null ? (
+                            <span className="field-hint">{t("traderAccount.notDeliveredYet")}</span>
+                          ) : (
+                            <strong className="amount-negative">{t("traderAccount.notSettledYet")}</strong>
+                          )}
+                          {row.feeNumbers.map((fee) => (
+                            <div className="field-hint" key={fee}>
+                              {t("traderAccount.fee")}: <bdi>{fee}</bdi>
+                            </div>
+                          ))}
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
       {list === undefined ? (
         error === undefined ? (
           <div className="loading-row">{t("common.loading")}</div>
@@ -184,6 +374,8 @@ export function TraderAccountWorkspace({
                 <th>{t("traderAccount.ordersWaiting")}</th>
                 <th>{t("traderAccount.awaitingDriverCash")}</th>
                 <th>{t("traderAccount.lastPayment")}</th>
+                {hasPeriod ? <th>{t("traderAccount.paidInPeriod")}</th> : null}
+                {hasPeriod ? <th>{t("traderAccount.collectedInPeriod")}</th> : null}
                 <th>{t("common.actions")}</th>
               </tr>
             </thead>
@@ -225,6 +417,8 @@ export function TraderAccountWorkspace({
                         </>
                       )}
                     </td>
+                    {hasPeriod ? <td>{money(row.paidInPeriod ?? "0")}</td> : null}
+                    {hasPeriod ? <td>{money(row.collectedInPeriod ?? "0")}</td> : null}
                     <td>
                       <div className="row-actions">
                         <button onClick={() => setStatementFor(row.traderId)} type="button">
@@ -235,7 +429,7 @@ export function TraderAccountWorkspace({
                         </button>
                         {canSettle ? (
                           <button
-                            className="button-primary"
+                            className="button button-primary"
                             onClick={() => setSettle({ traderId: row.traderId })}
                             type="button"
                           >
@@ -256,6 +450,8 @@ export function TraderAccountWorkspace({
         <TraderAccountStatementDialog
           api={api}
           autoLoad
+          initialFrom={from}
+          initialTo={to}
           initialTraderId={statementFor}
           onClose={() => setStatementFor(undefined)}
           reportLanguage={reportLanguage}
@@ -267,6 +463,8 @@ export function TraderAccountWorkspace({
           canReverse={canReverse}
           onClose={() => setDocumentsFor(undefined)}
           onNavigate={onNavigate}
+          from={from}
+          to={to}
           onUnposted={(result) => {
             setDocumentsFor(undefined);
             setNotice(result.notice);
@@ -338,6 +536,8 @@ function documentUnpostPath(document: TraderAccountDocument): string | null {
 function TraderDocumentsDialog({
   api,
   canReverse,
+  from,
+  to,
   onClose,
   onNavigate,
   onUnposted,
@@ -347,6 +547,9 @@ function TraderDocumentsDialog({
 }: {
   api: ApiClient;
   canReverse: boolean;
+  /** Trader Account's date range, when set: documents dated in it. */
+  from: string;
+  to: string;
   onClose: () => void;
   onNavigate: (target: string) => void;
   onUnposted: (result: { draftId: string; notice: string }) => void;
@@ -363,9 +566,15 @@ function TraderDocumentsDialog({
   const load = useCallback(() => {
     void api
       .get<readonly TraderAccountDocument[]>(`operations/trader-accounts/${trader.traderId}/documents`)
-      .then(setDocuments)
+      .then((result) =>
+        setDocuments(
+          result.filter(
+            (document) => (from === "" || document.date >= from) && (to === "" || document.date <= to),
+          ),
+        ),
+      )
       .catch((requestError: unknown) => setError(failure(requestError, t("traderAccount.loadFailed"))));
-  }, [api, t, trader.traderId]);
+  }, [api, from, t, to, trader.traderId]);
   useEffect(() => load(), [load]);
 
   const runPdf = async (document: TraderAccountDocument, mode: PdfAction) => {

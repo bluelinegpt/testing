@@ -16,6 +16,10 @@ import type { DatabaseSchema } from "../infrastructure/database/database.types.j
  * money received and is left exactly as it is. Cancelling posts the full
  * reversal in the books through the `trader_receivables` trigger, the same
  * way an edited fee is replaced (`operations.service.ts`).
+ *
+ * Returned to Trader is the same (Aiman, 31 Oct 2026, option A): the Trader
+ * pays the fee only for a delivered Order; a parcel that comes back costs
+ * him nothing. Returned to branch keeps the fee: it may still go out again.
  */
 export async function cancelUncollectedOrderFeeReceivables(
   database: Kysely<DatabaseSchema>,
@@ -24,6 +28,8 @@ export async function cancelUncollectedOrderFeeReceivables(
     readonly companyId: string;
     readonly correlationId: string;
     readonly orderId: string;
+    /** Why, for the audit record. */
+    readonly reason?: "Order cancelled" | "Order returned to Trader";
   },
 ): Promise<readonly { readonly amount: string; readonly receivableId: string }[]> {
   const cancelled = await sql<{
@@ -58,7 +64,7 @@ export async function cancelUncollectedOrderFeeReceivables(
         ${JSON.stringify({
           amount: row.amount,
           orderNumber: row.orderNumber,
-          reason: "Order cancelled",
+          reason: input.reason ?? "Order cancelled",
           receivableNumber: row.receivableNumber,
           traderId: row.traderId,
         })}::jsonb,

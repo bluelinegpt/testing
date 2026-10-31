@@ -1,4 +1,5 @@
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
+import { receivableCollectableNowSql } from "./cod-shortfall.js";
 import { settlementLineActiveSql } from "./order-correction-sql.js";
 import { Decimal } from "decimal.js";
 import { type Kysely, sql } from "kysely";
@@ -278,6 +279,9 @@ export class TraderAccountStatementService {
            -- A cancelled or reversed charge (e.g. replaced after a fee change)
            -- is left out together with its cancellation.
            and r.status not in ('cancelled', 'reversed')
+           -- A fee is owed only once its Order is delivered (Aiman, 31 Oct
+           -- 2026): the same rule the settlement collects by.
+           and ${receivableCollectableNowSql("r")}
            and (${receivableDate}) between ${from}::date and ${to}::date
            -- Already charged on its Order's line in this statement: the same
            -- Order conditions as the Order branch, and the receivable's date
@@ -627,6 +631,7 @@ export class TraderAccountStatementService {
               and r.source_type = 'service_charge' and linked.order_number = r.source_reference
             where r.company_id = ${companyId}::uuid and r.trader_id = ${traderId}::uuid
               and r.status not in ('cancelled', 'reversed')
+              and ${receivableCollectableNowSql("r")}
               -- The same statement date the lines use, so a fee never falls
               -- in one period's lines and another period's opening balance.
               and (${RECEIVABLE_STATEMENT_DATE}) < ${from}::date), 0)

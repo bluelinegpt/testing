@@ -163,6 +163,7 @@ import {
   TraderSettlementSummaryQueryDto,
   TraderSettlementDraftListQueryDto,
   TraderAccountListQueryDto,
+  TraderAccountLookupQueryDto,
   TraderAccountStatementQueryDto,
   UpdateOrderDto,
   GenerateShipmentManifestDto,
@@ -1720,6 +1721,18 @@ export class OperationsController {
   @Get("trader-accounts")
   public traderAccountList(@Query() query: TraderAccountListQueryDto) {
     return this.traderAccounts.accounts(query);
+  }
+
+  @RequireAnyPermission(
+    "settlements.create",
+    "reports.export",
+    "trader_receivables.create",
+    "users_roles.manage",
+  )
+  @ApiOperation({ summary: "Trader Account: where each reference's Trader money went" })
+  @Get("trader-accounts/lookup")
+  public traderAccountLookup(@Query() query: TraderAccountLookupQueryDto) {
+    return this.traderAccounts.lookup(query.references);
   }
 
   @RequireAnyPermission(

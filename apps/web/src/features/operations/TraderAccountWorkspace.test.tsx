@@ -25,6 +25,21 @@ function setup(permissions: readonly string[] = ["settlements.create", "settleme
   const api = {
     get: vi.fn((path: string) => {
       if (path.startsWith("operations/trader-accounts?")) return Promise.resolve(accounts);
+      if (path.startsWith("operations/trader-accounts/lookup?")) {
+        return Promise.resolve([
+          {
+            deliveryDate: "2026-10-19", deliveryStatus: "closed", feeNumbers: [], found: true,
+            orderDate: "2026-10-18", orderNumber: "ORD-001128", referenceNumber: "4265", requested: "4265",
+            settledIn: ["SET-000147 (2026-10-20)"], traderAmount: "80.00", traderCode: "TRD-000075",
+            traderId: "trader-1", traderNameAr: null, traderNameEn: "BERVAZ", traderOutstanding: "0.00",
+          },
+          {
+            deliveryDate: null, deliveryStatus: null, feeNumbers: [], found: false, orderDate: null,
+            orderNumber: null, referenceNumber: null, requested: "99999", settledIn: [], traderAmount: null,
+            traderCode: null, traderId: null, traderNameAr: null, traderNameEn: null, traderOutstanding: null,
+          },
+        ]);
+      }
       if (path === "operations/trader-accounts/trader-1/documents") {
         return Promise.resolve([
           { amount: "0.00", date: "2026-10-30", draftId: "draft-1", id: "inv-1", kind: "zero_invoice", number: "INV-000017", orderCount: 3, reversed: false },
@@ -102,6 +117,34 @@ describe("Trader Account", () => {
     expect(within(invoice).queryByRole("button", { name: "View" })).not.toBeInTheDocument();
     expect(within(invoice).getByRole("button", { name: "Print" })).toBeVisible();
     expect(within(invoice).getByRole("button", { name: "Un-post" })).toBeVisible();
+  });
+
+  it("finds where each reference was settled", async () => {
+    const { api } = setup();
+    await screen.findByText("BERVAZ");
+    fireEvent.change(screen.getByLabelText("Reference numbers"), { target: { value: "4265 99999" } });
+    fireEvent.click(screen.getByRole("button", { name: "Find" }));
+    const table = await screen.findByTestId("trader-account-lookup");
+    expect(api.get).toHaveBeenCalledWith("operations/trader-accounts/lookup?references=4265+99999");
+    expect(within(table).getByText("SET-000147 (2026-10-20)")).toBeVisible();
+    expect(within(table).getByText("No order with this reference.")).toBeVisible();
+  });
+
+  it("filters by date and shows what was paid and collected in it", async () => {
+    const { api } = setup();
+    await screen.findByText("BERVAZ");
+    fireEvent.change(screen.getByLabelText("Date from"), { target: { value: "2026-10-01" } });
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith("operations/trader-accounts?from=2026-10-01"),
+    );
+    expect(screen.getByLabelText("Open balance only")).toBeDisabled();
+    expect(await screen.findByRole("columnheader", { name: "Paid to Trader in period" })).toBeVisible();
+  });
+
+  it("shows Settle as a real button", async () => {
+    setup();
+    const row = (await screen.findByText("BERVAZ")).closest("tr")!;
+    expect(within(row).getByRole("button", { name: "Settle" })).toHaveClass("button", "button-primary");
   });
 
   it("offers Settle only to users who can settle", async () => {

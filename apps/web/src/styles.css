@@ -13219,6 +13219,13 @@ tr.row-highlighted {
 .trader-account-table .amount-positive {
   color: #15803d;
 }
-.trader-account-table .amount-negative {
+.trader-account-table .amount-negative,
+.trader-account-lookup .amount-negative {
   color: #c62828;
+}
+.trader-account-lookup {
+  margin: 12px 0;
+}
+.trader-account-lookup-input {
+  min-width: min(420px, 100%);
 }

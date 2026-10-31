@@ -2123,4 +2123,24 @@ export class TraderAccountListQueryDto {
   @Type(() => Boolean)
   @IsBoolean()
   public readonly openOnly?: boolean;
+
+  @IsOptional()
+  @IsUUID()
+  public readonly traderId?: string;
+
+  /** Paid / collected in this period (YYYY-MM-DD, UAE business dates). */
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  public readonly from?: string;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  public readonly to?: string;
+}
+
+/** Trader Account reference lookup: references separated by spaces, commas or new lines. */
+export class TraderAccountLookupQueryDto {
+  @IsString()
+  @MaxLength(10000)
+  public readonly references!: string;
 }

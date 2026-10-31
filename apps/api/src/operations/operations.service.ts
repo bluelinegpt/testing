@@ -6565,14 +6565,16 @@ export class OperationsService {
           orderStatus: status,
         });
       }
-      if (status === "cancelled") {
-        // Cancelling the Order cancels its unpaid fee to the Trader (Aiman,
-        // 11 Oct 2026); a fee already paid, fully or partly, is kept.
+      if (status === "cancelled" || status === "returned_to_trader") {
+        // Cancelling the Order -- or returning it to the Trader (Aiman, 31
+        // Oct 2026: no fee unless delivered) -- cancels its unpaid fee to the
+        // Trader (11 Oct 2026); a fee already paid, fully or partly, is kept.
         await cancelUncollectedOrderFeeReceivables(transaction, {
           actorId: identity.identityId,
           companyId,
           correlationId,
           orderId,
+          reason: status === "cancelled" ? "Order cancelled" : "Order returned to Trader",
         });
       }
       if (status === "delivered") {

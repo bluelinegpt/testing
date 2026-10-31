@@ -633,14 +633,16 @@ export class OrdersWorkflowService {
         orderStatus: status,
       });
     }
-    if (status === "cancelled") {
+    if (status === "cancelled" || status === "returned_to_trader") {
       // Same rule as the single-Order path (operations.service): cancelling
-      // the Order cancels its unpaid fee to the Trader (Aiman, 11 Oct 2026).
+      // the Order, or returning it to the Trader (31 Oct 2026), cancels its
+      // unpaid fee to the Trader (Aiman, 11 Oct 2026).
       await cancelUncollectedOrderFeeReceivables(database, {
         actorId: input.actorId,
         companyId: input.companyId,
         correlationId: input.correlationId,
         orderId: order.id,
+        reason: status === "cancelled" ? "Order cancelled" : "Order returned to Trader",
       });
     }
     if (status === "delivered") {

@@ -50,6 +50,7 @@ const trader = (overrides: Record<string, unknown>) => ({
   awaitingDriverCash: 0,
   code: "TRD-1",
   collected: "0",
+  collectedInPeriod: "0",
   isActive: true,
   lastPaymentAmount: null,
   lastPaymentDate: null,
@@ -59,6 +60,7 @@ const trader = (overrides: Record<string, unknown>) => ({
   openReceivables: "0",
   ordersWaiting: 0,
   paid: "0",
+  paidInPeriod: "0",
   payable: "0",
   receivables: "0",
   traderId: "t",
@@ -82,7 +84,7 @@ describe("Trader Account list", () => {
     expect(result.totals).toEqual({ owedByTraders: "25.00", owedToTraders: "170.00" });
     // Every query is scoped to the Company.
     expect(queries[0]?.parameters).toContain(COMPANY);
-    expect(queries[0]?.sql).toContain("where t.company_id = $1::uuid");
+    expect(queries[0]?.sql).toMatch(/where t\.company_id = \$\d+::uuid/);
   });
 
   it("lists only open balances when asked", async () => {
@@ -92,6 +94,40 @@ describe("Trader Account list", () => {
     ]);
     const result = await service.accounts({ openOnly: true });
     expect(result.items.map((row) => row.code)).toEqual(["TRD-1"]);
+  });
+
+  it("with a date range lists the Traders paid or collected from in it", async () => {
+    const { queries, service } = serviceReturning([
+      trader({ code: "TRD-1", paidInPeriod: "330", traderId: "a" }),
+      trader({ code: "TRD-2", payable: "50", traderId: "b" }),
+      trader({ code: "TRD-3", collectedInPeriod: "25", receivables: "25", collected: "25", traderId: "c" }),
+    ]);
+    const result = await service.accounts({ from: "2026-10-01", openOnly: true, to: "2026-10-31" });
+    expect(result.items.map((row) => [row.code, row.paidInPeriod, row.collectedInPeriod])).toEqual([
+      ["TRD-1", "330.00", "0.00"],
+      ["TRD-3", "0.00", "25.00"],
+    ]);
+    expect(queries[0]?.parameters).toContain("2026-10-01");
+  });
+
+  it("counts a fee only once its Order is delivered, like the settlement", async () => {
+    const { queries, service } = serviceReturning([]);
+    await service.accounts({});
+    expect(queries[0]?.sql).toContain("delivered_order.delivered_at is not null");
+  });
+
+  it("looks references up in this Company only, in the order typed", async () => {
+    const { queries, service } = serviceReturning([
+      { position: 2, orderNumber: null, settledIn: null, feeNumbers: null },
+      { position: 1, orderNumber: "ORD-1", referenceNumber: "4265", settledIn: ["SET-000147 (2026-10-20)"], feeNumbers: [] },
+    ]);
+    const rows = await service.lookup("4265, 99999\n4265");
+    expect(queries[0]?.parameters).toContain(COMPANY);
+    expect(queries[0]?.parameters).toContainEqual(["4265", "99999"]);
+    expect(rows.map((row) => [row.requested, row.found, row.settledIn])).toEqual([
+      ["99999", false, []],
+      ["4265", true, ["SET-000147 (2026-10-20)"]],
+    ]);
   });
 
   it("refuses a user without any Trader money permission", async () => {

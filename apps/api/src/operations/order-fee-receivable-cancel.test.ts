@@ -19,12 +19,23 @@ describe("Cancelling an Order cancels its unpaid fee to the Trader", () => {
     expect(helper).toContain("'trader_receivable.cancel_from_order'");
   });
 
-  it("runs on both cancel paths, only for cancelled", () => {
+  it("runs on both status paths, for Cancelled and Returned to Trader (31 Oct 2026)", () => {
     for (const file of ["operations.service.ts", "orders-workflow.service.ts"]) {
       const source = read(file);
       const call = source.indexOf("await cancelUncollectedOrderFeeReceivables(");
       expect(call, file).toBeGreaterThan(0);
-      expect(source.slice(call - 300, call), file).toContain('status === "cancelled"');
+      expect(source.slice(call - 400, call), file).toContain(
+        'status === "cancelled" || status === "returned_to_trader"',
+      );
+      expect(source.slice(call, call + 400), file).toContain('"Order returned to Trader"');
+    }
+  });
+
+  it("keeps the fee when the Order is only Returned to branch", () => {
+    for (const file of ["operations.service.ts", "orders-workflow.service.ts"]) {
+      const source = read(file);
+      const call = source.indexOf("await cancelUncollectedOrderFeeReceivables(");
+      expect(source.slice(call - 400, call), file).not.toContain("returned_to_branch");
     }
   });
 });

@@ -1474,6 +1474,8 @@ export function TraderSettlementsWorkspace({
 export function TraderAccountStatementDialog({
   api,
   autoLoad = false,
+  initialFrom,
+  initialTo,
   initialTraderId,
   onClose,
   reportLanguage,
@@ -1481,6 +1483,9 @@ export function TraderAccountStatementDialog({
   api: ApiClient;
   /** Generate the current month's statement on open (Trader Account, 31 Oct 2026). */
   autoLoad?: boolean;
+  /** Open on this date range instead of the current month (Trader Account's dates). */
+  initialFrom?: string | undefined;
+  initialTo?: string | undefined;
   initialTraderId?: string | undefined;
   onClose: () => void;
   reportLanguage: "ar" | "en";
@@ -1493,9 +1498,12 @@ export function TraderAccountStatementDialog({
   const [month, setMonth] = useState(
     `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`,
   );
-  const [periodType, setPeriodType] = useState<"custom" | "month">("month");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  const rangeGiven = (initialFrom ?? "") !== "" || (initialTo ?? "") !== "";
+  const [periodType, setPeriodType] = useState<"custom" | "month">(rangeGiven ? "custom" : "month");
+  const [from, setFrom] = useState(
+    rangeGiven ? (initialFrom || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`) : "",
+  );
+  const [to, setTo] = useState(rangeGiven ? (initialTo || new Date().toISOString().slice(0, 10)) : "");
   const [transactionType, setTransactionType] = useState("all");
   const [settlementStatus, setSettlementStatus] = useState("all");
   const [paidOnly, setPaidOnly] = useState(false);
