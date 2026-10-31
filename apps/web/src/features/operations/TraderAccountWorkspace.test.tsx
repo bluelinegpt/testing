@@ -24,6 +24,9 @@ const accounts = {
 function setup(permissions: readonly string[] = ["settlements.create", "settlements.reverse"]) {
   const api = {
     get: vi.fn((path: string) => {
+      if (path === "operations/settlements/payments/open-traders") {
+        return Promise.resolve([{ traderId: "trader-1" }]);
+      }
       if (path.startsWith("operations/trader-accounts?")) return Promise.resolve(accounts);
       if (path.startsWith("operations/trader-accounts/lookup?")) {
         return Promise.resolve([
@@ -144,7 +147,15 @@ describe("Trader Account", () => {
   it("shows Settle as a real button", async () => {
     setup();
     const row = (await screen.findByText("BERVAZ")).closest("tr")!;
-    expect(within(row).getByRole("button", { name: "Settle" })).toHaveClass("button", "button-primary");
+    expect(await within(row).findByRole("button", { name: "Settle" })).toHaveClass("button", "button-primary");
+  });
+
+  it("shows Settle only for a Trader with something to settle", async () => {
+    setup();
+    const open = (await screen.findByText("BERVAZ")).closest("tr")!;
+    expect(await within(open).findByRole("button", { name: "Settle" })).toBeVisible();
+    const nothing = screen.getByText("Faisal Abaya").closest("tr")!;
+    expect(within(nothing).queryByRole("button", { name: "Settle" })).not.toBeInTheDocument();
   });
 
   it("offers Settle only to users who can settle", async () => {

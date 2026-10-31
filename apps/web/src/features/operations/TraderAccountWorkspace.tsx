@@ -101,6 +101,10 @@ export function TraderAccountWorkspace({
   const [references, setReferences] = useState("");
   const [lookup, setLookup] = useState<readonly TraderReferenceLookupRow[]>();
   const [lookupBusy, setLookupBusy] = useState(false);
+  // Traders the settlement has something for -- to pay, fees to collect or
+  // 0.00 Orders to invoice. "Settle" shows only for them (Aiman, 31 Oct
+  // 2026: a settled Trader's button only confused users).
+  const [settleable, setSettleable] = useState<ReadonlySet<string>>(new Set());
   const hasPeriod = from !== "" || to !== "";
   const [list, setList] = useState<TraderAccountList>();
   const [error, setError] = useState<string>();
@@ -135,6 +139,23 @@ export function TraderAccountWorkspace({
       window.clearTimeout(timer);
     };
   }, [api, from, hasPeriod, openOnly, reload, search, t, to, traderFilter]);
+
+  useEffect(() => {
+    if (!canSettle) return;
+    let active = true;
+    void Promise.resolve(
+      api.get<readonly { readonly traderId: string }[]>("operations/settlements/payments/open-traders"),
+    )
+      .then((rows) => {
+        if (active) setSettleable(new Set((Array.isArray(rows) ? rows : []).map((row) => row.traderId)));
+      })
+      .catch(() => {
+        if (active) setSettleable(new Set());
+      });
+    return () => {
+      active = false;
+    };
+  }, [api, canSettle, reload]);
 
   useEffect(() => {
     void Promise.resolve(api.get<readonly OperationsTrader[]>("operations/traders"))
@@ -427,7 +448,7 @@ export function TraderAccountWorkspace({
                         <button onClick={() => setDocumentsFor(row)} type="button">
                           {t("traderAccount.documents")}
                         </button>
-                        {canSettle ? (
+                        {canSettle && settleable.has(row.traderId) ? (
                           <button
                             className="button button-primary"
                             onClick={() => setSettle({ traderId: row.traderId })}
