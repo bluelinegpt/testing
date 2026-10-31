@@ -52,6 +52,8 @@ export interface ManifestData {
     readonly generatedBy: string;
     readonly manifestNumber: string;
     readonly orderCount: number;
+    /** How the rows are sorted; Emirate headings only for "emirate_area". */
+    readonly sortBy?: "reference" | "date" | "emirate_area";
   };
   readonly orders: readonly ManifestOrder[];
   readonly summary: {
@@ -225,10 +227,12 @@ export function buildDriverShipmentManifestHtml(
     (ar ? (order.emirateNameAr ?? order.emirateName) : order.emirateName) ?? "";
   const traderOf = (order: ManifestOrder) =>
     ar ? (order.traderNameAr ?? order.traderName) : order.traderName;
-  // The Orders arrive sorted Emirate -> Area -> Reference. One Emirate needs
-  // no heading; a sheet spanning several gets one heading row per Emirate.
+  // Sorted Emirate -> Area -> Reference, a sheet spanning several Emirates
+  // gets one heading row per Emirate. Sorted by Reference or Date, the
+  // Emirates interleave, so no headings.
   const emirates = new Set(data.orders.map((order) => order.emirateName ?? ""));
-  const showEmirateHeadings = emirates.size > 1;
+  const showEmirateHeadings =
+    (data.header.sortBy ?? "emirate_area") === "emirate_area" && emirates.size > 1;
   let currentEmirate: string | null = null;
 
   const orderRows = data.orders
@@ -245,7 +249,12 @@ export function buildDriverShipmentManifestHtml(
         `<td class="mono">${order.referenceNumber === null ? "" : escapeHtml(order.referenceNumber)}</td>` +
         `<td>${escapeHtml(traderOf(order))}</td>` +
         `<td>${escapeHtml(order.customerName)}</td>` +
-        `<td class="mono">${escapeHtml(order.customerMobileNumber)}</td>` +
+        // The second mobile under the first (Aiman, 31 Oct 2026).
+        `<td class="mono">${escapeHtml(order.customerMobileNumber)}${
+          order.customerSecondMobileNumber === null || order.customerSecondMobileNumber.trim() === ""
+            ? ""
+            : `<br>${escapeHtml(order.customerSecondMobileNumber)}`
+        }</td>` +
         `<td class="area">${escapeHtml(areaOf(order))}</td>` +
         `<td class="num">${escapeHtml(String(order.packageCount))}</td>` +
         `<td class="num">${money(order.amountToCollect)}</td>` +

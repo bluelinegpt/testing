@@ -1471,13 +1471,16 @@ export function TraderSettlementsWorkspace({
   );
 }
 
-function TraderAccountStatementDialog({
+export function TraderAccountStatementDialog({
   api,
+  autoLoad = false,
   initialTraderId,
   onClose,
   reportLanguage,
 }: {
   api: ApiClient;
+  /** Generate the current month's statement on open (Trader Account, 31 Oct 2026). */
+  autoLoad?: boolean;
   initialTraderId?: string | undefined;
   onClose: () => void;
   reportLanguage: "ar" | "en";
@@ -1554,6 +1557,11 @@ function TraderAccountStatementDialog({
       setLoading(false);
     }
   };
+  useEffect(() => {
+    if (autoLoad && (initialTraderId ?? "") !== "") void load();
+    // Once, on open: the Trader and month are already chosen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   /* Re-generate when a row filter changes, once a statement is on screen.
      Paid only / Outstanding only / Reversed only, and the two dropdowns beside
      them, are applied by the SERVER -- so toggling one changed nothing until

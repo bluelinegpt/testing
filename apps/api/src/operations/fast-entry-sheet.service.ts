@@ -80,8 +80,8 @@ export interface FastEntrySheetResult {
 }
 
 const TEMPLATE_COLUMNS = {
-  ar: ["م", "رقم الكوبون", "اسم التاجر", "المرسل اليه", "العنوان", "رقم الهاتف", "قيمة الطلبية", "التوصيل", "الاجمالى", "ملاحظات", "اسم المندوب"],
-  en: ["No", "Reference Number", "Trader Name", "Customer Name", "Area / Address", "Mobile", "Order Value (to Trader)", "Delivery Fee", "Total (COD)", "Notes", "Driver"],
+  ar: ["م", "رقم الكوبون", "اسم التاجر", "المرسل اليه", "العنوان", "رقم الهاتف", "جوال إضافي", "قيمة الطلبية", "التوصيل", "الاجمالى", "ملاحظات", "اسم المندوب"],
+  en: ["No", "Reference Number", "Trader Name", "Customer Name", "Area / Address", "Mobile", "Second Mobile", "Order Value (to Trader)", "Delivery Fee", "Total (COD)", "Notes", "Driver"],
 } as const;
 
 const TEMPLATE_NOTES = {

@@ -15,7 +15,9 @@ describe("Orders Report contract", () => {
     expect(service).toContain("(o.delivered_at at time zone ${timezone})::date::text as \"deliveryDate\"");
     expect(service).toContain("o.trader_id=${traderId}::uuid");
     expect(service).toContain("Invalid order status filter");
-    expect(service).toContain("order by ${orderDate} asc, o.created_at asc, o.id asc");
+    // Sorted by Reference Number as a number; no Reference last (31 Oct 2026).
+    expect(service).toContain("length(regexp_replace(coalesce(o.reference_number, ''), '[^0-9]', '', 'g')) asc,");
+    expect(service).toContain("o.reference_number asc nulls last, o.order_number asc, o.id asc");
     expect(service).toContain("limit ${pageSize} offset ${(page - 1) * pageSize}");
   });
 

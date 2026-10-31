@@ -138,6 +138,27 @@ describe("CompanyAppShell branding", () => {
     expect(links[0]).toHaveAttribute("href", "/trader-settlements");
   });
 
+  it("hides the Advanced (Accountant) Trader screens from a settlements-only user", async () => {
+    renderShell(makeApi(branding()), ["settlements.create"]);
+    await screen.findAllByText("Acme Logistics");
+    fireEvent.click(screen.getByRole("button", { name: "Traders" }));
+    expect(screen.getByRole("link", { name: "Trader Account" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Trader settlements" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Advanced (Accountant)")).not.toBeInTheDocument();
+  });
+
+  it("puts Trader Account first and the old Trader screens under Advanced (Accountant)", async () => {
+    renderShell(makeApi(branding()), ADMIN);
+    await screen.findAllByText("Acme Logistics");
+    fireEvent.click(screen.getByRole("button", { name: "Traders" }));
+    expect(screen.getByRole("link", { name: "Trader Account" })).toHaveAttribute("href", "/trader-account");
+    expect(screen.getByText("Advanced (Accountant)")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Trader Receivables" })).toHaveAttribute(
+      "href",
+      "/trader-receivables",
+    );
+  });
+
   it("keeps only the UI-language selector in the sidebar (no Text Language, no My Preferences)", async () => {
     renderShell(makeApi(branding()), ADMIN);
     await screen.findAllByText("Acme Logistics");

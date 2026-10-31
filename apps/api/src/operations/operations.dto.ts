@@ -499,7 +499,12 @@ export class ReverseDriverReconciliationDto {
 // Driver, entirely independent of Driver cash reconciliation — no financial
 // eligibility is required. Explicit historical selections may include an Order
 // whose status later became cancelled; its status is displayed in the report.
-export class GenerateShipmentManifestDto extends OrderSelectionDto {}
+export class GenerateShipmentManifestDto extends OrderSelectionDto {
+  /** Sheet order: by Reference (default), by Order Date, or Emirate then Area. */
+  @IsOptional()
+  @IsIn(["reference", "date", "emirate_area"])
+  public readonly sortBy?: "reference" | "date" | "emirate_area";
+}
 
 export class InlineOrderCustomerDto {
   @IsString()
@@ -2104,4 +2109,18 @@ export class UpdateTraderPortalProfileDto {
   @IsOptional()
   @IsIn(["en", "ar"])
   public preferredLanguage?: string;
+}
+
+/** Trader Account list (Aiman, 31 Oct 2026). */
+export class TraderAccountListQueryDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  public readonly search?: string;
+
+  /** Only Traders whose balance is not zero. */
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  public readonly openOnly?: boolean;
 }

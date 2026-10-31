@@ -101,6 +101,18 @@ describe("Fast Entry daily sheet", () => {
     expect(rows.map((row) => [row.driverId, row.driverName])).toEqual([[null, ""], [null, ""]]);
   });
 
+  it("reads an optional Second Mobile column", () => {
+    const parsed = parseFastEntrySheet([
+      ["م", "رقم الكوبون", "اسم التاجر", "المرسل اليه", "العنوان", "رقم الهاتف", "جوال إضافي", "قيمة الطلبية", "التوصيل", "الاجمالى", "ملاحظات"],
+      ["1", "501", "Plaza Store", "عميل", "ش التعاون", "0501234567", "552223333", "100", "25", "125", ""],
+      ["2", "502", "Plaza Store", "عميل", "ش التعاون", "0501234568", "", "100", "25", "125", ""],
+    ]);
+    expect(parsed.rows.map((row) => [row.mobile, row.secondMobile])).toEqual([
+      ["0501234567", "0552223333"],
+      ["0501234568", ""],
+    ]);
+  });
+
   it("downloads a template the importer reads back, in Arabic and English", () => {
     const service = new FastEntrySheetService(undefined as never, undefined as never);
     for (const language of ["ar", "en"] as const) {

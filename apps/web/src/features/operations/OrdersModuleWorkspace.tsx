@@ -3473,7 +3473,7 @@ export function FastOrderEntryDialog({
   const tabOrder: readonly string[] = isTrader
     ? fastEntryTabOrder.filter((field) => field !== "trader")
     : fastEntryTabOrder;
-  const columnCount = isTrader ? 12 : 17;
+  const columnCount = isTrader ? 13 : 18;
   // "+ Add Area" (Company only): the sheet line whose Area is being added.
   const [addAreaFor, setAddAreaFor] = useState<{ emirateId: string; sheetText: string }>();
   // Row errors in English and Arabic together, whatever the screen language.
@@ -4235,6 +4235,7 @@ export function FastOrderEntryDialog({
                 {isTrader ? null : <th>{t("operations.trader")}</th>}
                 <th>{t("operations.customerName")}</th>
                 <th>{t("operations.mobile")}</th>
+                <th>{t("operations.secondMobile")}</th>
                 <th>{t("areas.emirate")}</th>
                 <th>{t("operations.areaField")}</th>
                 <th>{t("operations.customerAddress")}</th>
@@ -4387,14 +4388,14 @@ export function FastOrderEntryDialog({
                       value={row.mobile}
                       onChange={(event) => updateRow(row.id, { mobile: event.target.value })}
                     />
-                    {row.secondMobile === "" ? null : (
-                      <input
-                        aria-label={t("operations.secondMobile")}
-                        className="fast-entry-override-reason"
-                        value={row.secondMobile}
-                        onChange={(event) => updateRow(row.id, { secondMobile: event.target.value })}
-                      />
-                    )}
+                  </td>
+                  {/* Optional second number, always offered (Aiman, 31 Oct 2026). */}
+                  <td data-fe="secondMobile">
+                    <input
+                      aria-label={t("operations.secondMobile")}
+                      value={row.secondMobile}
+                      onChange={(event) => updateRow(row.id, { secondMobile: event.target.value })}
+                    />
                   </td>
                   <td data-fe="emirate">
                     <select
@@ -4498,7 +4499,7 @@ export function FastOrderEntryDialog({
                       <span className="fast-entry-row-note">{row.areaNote}</span>
                     ) : null}
                   </td>
-                  <td>
+                  <td data-fe="customerAddress">
                     <input
                       value={row.customerAddress}
                       onChange={(event) =>
@@ -6402,9 +6403,12 @@ function DriverShipmentManifestDialog({
   const reportLanguage = locale;
   const [preview, setPreview] = useState<{
     header: { driverMobile: string; driverName: string; orderCount: number };
-    summary: { totalCustomerAmountToCollect?: string; totalCod?: string; totalOrders: number };
+    summary: { totalToCollect?: string; totalOrders: number };
   }>();
   const [error, setError] = useState<string>();
+  // How the sheet is sorted (Aiman, 31 Oct 2026). Reference Number first.
+  const [sortBy, setSortBy] = useState<"reference" | "date" | "emirate_area">("reference");
+  const printBody = useMemo(() => ({ ...selection, sortBy }), [selection, sortBy]);
   const pdf = useReconciliationPdfActions(api);
 
   const loadPreview = useCallback(async () => {
@@ -6412,7 +6416,7 @@ function DriverShipmentManifestDialog({
     try {
       const result = await api.post<{
         header: { driverMobile: string; driverName: string; orderCount: number };
-        summary: { totalCustomerAmountToCollect?: string; totalCod?: string; totalOrders: number };
+        summary: { totalToCollect?: string; totalOrders: number };
       }>("operations/cash/driver-shipment-manifest/data", selection);
       setPreview(result);
     } catch (requestError) {
@@ -6425,7 +6429,7 @@ function DriverShipmentManifestDialog({
     void api
       .post<{
         header: { driverMobile: string; driverName: string; orderCount: number };
-        summary: { totalCustomerAmountToCollect?: string; totalCod?: string; totalOrders: number };
+        summary: { totalToCollect?: string; totalOrders: number };
       }>("operations/cash/driver-shipment-manifest/data", selection)
       .then((result) => active && setPreview(result))
       .catch((requestError) =>
@@ -6444,7 +6448,7 @@ function DriverShipmentManifestDialog({
       `operations/cash/driver-shipment-manifest/pdf?language=${reportLanguage}`,
       filename,
       mode,
-      selection,
+      printBody,
     );
     if (requestError !== undefined) {
       setError(message(requestError, t("operations.manifestPreviewFailed")));
@@ -6455,7 +6459,7 @@ function DriverShipmentManifestDialog({
     try {
       const blob = await api.postBinary(
         `operations/cash/driver-shipment-manifest/xlsx?language=${reportLanguage}`,
-        selection,
+        printBody,
       );
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
@@ -6508,14 +6512,21 @@ function DriverShipmentManifestDialog({
             <div>
               <dt>{t("operations.manifestTotalAmountToCollect")}</dt>
               <dd>
-                {formatCurrency(
-                  preview.summary.totalCustomerAmountToCollect ?? preview.summary.totalCod ?? "0",
-                  "AED",
-                  locale,
-                )}
+                {formatCurrency(preview.summary.totalToCollect ?? "0", "AED", locale)}
               </dd>
             </div>
           </dl>
+          <label className="field">
+            <span>{t("operations.manifestSortBy")}</span>
+            <select
+              onChange={(event) => setSortBy(event.target.value as typeof sortBy)}
+              value={sortBy}
+            >
+              <option value="reference">{t("operations.manifestSortReference")}</option>
+              <option value="date">{t("operations.manifestSortDate")}</option>
+              <option value="emirate_area">{t("operations.manifestSortEmirateArea")}</option>
+            </select>
+          </label>
           {error === undefined ? null : <div className="alert alert-error">{error}</div>}
           <div className="modal-actions">
             <button

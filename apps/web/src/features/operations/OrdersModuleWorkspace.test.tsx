@@ -606,7 +606,7 @@ describe("OrdersModuleWorkspace", () => {
         if (path === "operations/cash/driver-shipment-manifest/data") {
           return Promise.resolve({
             header: { driverMobile: "971501234568", driverName: "Ahmed", orderCount: 1 },
-            summary: { totalCod: "100.00", totalOrders: 1, totalPackages: 1 },
+            summary: { totalOrders: 1, totalPackages: 1, totalToCollect: "175.00" },
           });
         }
         return Promise.resolve({});
@@ -630,6 +630,9 @@ describe("OrdersModuleWorkspace", () => {
         selectionMode: "ids",
       }),
     );
+    // The total is what the Driver collects (it read 0.00 before, 31 Oct 2026).
+    expect(await screen.findByText(/175\.00/)).toBeVisible();
+    expect(screen.getByLabelText("Sort by")).toHaveValue("reference");
   });
 
   it("offers Trader Returned Items only for Cancelled / Returned Orders and sends the selection", async () => {

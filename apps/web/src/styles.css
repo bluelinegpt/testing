@@ -1474,7 +1474,7 @@
   width: 44px;
   color: #64748b;
 }
-.fast-entry-table td:nth-child(9) input {
+.fast-entry-table td[data-fe="customerAddress"] input {
   min-width: 220px;
 }
 .fast-entry-override-reason {
@@ -5009,6 +5009,18 @@ tr.row-highlighted {
   text-decoration: none;
   font-size: 13px;
   line-height: 1.25;
+}
+
+/* "Advanced (Accountant)" label above the accountant-only Trader screens. */
+.nav-submenu-heading {
+  margin-top: 8px;
+  padding: 4px 9px 2px;
+  border-top: 1px solid rgb(255 255 255 / 8%);
+  color: #6f7d96;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .nav-submenu-link:hover {
@@ -13201,4 +13213,12 @@ tr.row-highlighted {
 }
 .route-feedback td {
   vertical-align: top;
+}
+
+/* Trader Account (31 Oct 2026): who owes whom, at a glance. */
+.trader-account-table .amount-positive {
+  color: #15803d;
+}
+.trader-account-table .amount-negative {
+  color: #c62828;
 }

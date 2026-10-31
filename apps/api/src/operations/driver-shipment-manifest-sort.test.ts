@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { sortForRoute, type ManifestOrderRow } from "./driver-shipment-manifest.service.js";
+import { sortForRoute, sortManifest, type ManifestOrderRow } from "./driver-shipment-manifest.service.js";
 
-const row = (referenceNumber: string, areaName: string, emirateOrder: number): ManifestOrderRow => ({
+const row = (
+  referenceNumber: string,
+  areaName: string,
+  emirateOrder: number,
+  orderDate: string | null = "2026-10-31",
+): ManifestOrderRow => ({
   areaId: `area:${areaName}`,
   areaName,
   areaNameAr: null,
@@ -17,6 +22,7 @@ const row = (referenceNumber: string, areaName: string, emirateOrder: number): M
   emirateNameAr: null,
   emirateOrder,
   notes: null,
+  orderDate,
   orderNumber: `ORD-${referenceNumber}`,
   referenceNumber,
   serialNumber: null,
@@ -35,5 +41,24 @@ describe("sortForRoute (Driver Shipment Manifest order)", () => {
       row("9", "Al Barsha 1", 2),
     ]);
     expect(sorted.map((r) => r.referenceNumber)).toEqual(["9", "10", "4216", "5233", "900"]);
+  });
+});
+
+describe("sortManifest (the order chosen when printing)", () => {
+  const rows = [
+    row("6803", "Hili", 7, "2026-10-30"),
+    row("6391", "Al Mutarad", 7, "2026-10-31"),
+    row("6398", "Al Towayya", 7, "2026-10-30"),
+    row("6345", "Seih Al Sidd", 8, "2026-10-31"),
+    row("", "Al Jimi", 7, "2026-10-29"),
+  ];
+  it("sorts by Reference Number by default, no Reference last", () => {
+    expect(sortManifest(rows).map((r) => r.referenceNumber)).toEqual(["6345", "6391", "6398", "6803", ""]);
+  });
+  it("sorts by Order Date, then Reference", () => {
+    expect(sortManifest(rows, "date").map((r) => r.referenceNumber)).toEqual(["", "6398", "6803", "6345", "6391"]);
+  });
+  it("keeps the Emirate then Area route order", () => {
+    expect(sortManifest(rows, "emirate_area").map((r) => r.referenceNumber)).toEqual(["", "6391", "6398", "6803", "6345"]);
   });
 });

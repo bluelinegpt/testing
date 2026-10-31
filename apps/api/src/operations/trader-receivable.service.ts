@@ -1077,7 +1077,11 @@ export class TraderReceivableService {
               or r.business_date >= ${query.businessDateFrom ?? null}::date)
          and (${query.businessDateTo ?? null}::date is null
               or r.business_date <= ${query.businessDateTo ?? null}::date)
-         and (${query.outstandingOnly === true} = false or r.outstanding_amount > 0)
+         -- A cancelled or reversed charge keeps its outstanding figure as a
+         -- record, but nothing is owed on it: never "outstanding" (RCV-000097,
+         -- cancelled 80.00, listed under Outstanding only -- 31 Oct 2026).
+         and (${query.outstandingOnly === true} = false
+              or (r.outstanding_amount > 0 and r.status not in ('cancelled', 'reversed')))
        order by ${sql.raw(sortColumn)} ${sql.raw(direction)},
                 r.receivable_number ${sql.raw(direction)}
        limit ${limit} offset ${offset}

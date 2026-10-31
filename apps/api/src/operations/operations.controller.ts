@@ -91,6 +91,7 @@ import {
   OrdersWorkflowService,
 } from "./orders-workflow.service.js";
 import { DriverShipmentManifestService } from "./driver-shipment-manifest.service.js";
+import { TraderAccountService } from "./trader-account.service.js";
 import {
   type ReturnedItemsTraders,
   TraderReturnedItemsService,
@@ -161,6 +162,7 @@ import {
   TraderSettlementListQueryDto,
   TraderSettlementSummaryQueryDto,
   TraderSettlementDraftListQueryDto,
+  TraderAccountListQueryDto,
   TraderAccountStatementQueryDto,
   UpdateOrderDto,
   GenerateShipmentManifestDto,
@@ -198,6 +200,7 @@ export class OperationsController {
     private readonly traderSettlementService: TraderSettlementService,
     @Inject(TraderAccountStatementService)
     private readonly traderAccountStatementService: TraderAccountStatementService,
+    @Inject(TraderAccountService) private readonly traderAccounts: TraderAccountService,
     @Inject(OrderDeliveryReopenService)
     private readonly deliveryReopen: OrderDeliveryReopenService,
     @Inject(OrderMaintenanceService)
@@ -1705,6 +1708,30 @@ export class OperationsController {
       this.correlationId(request),
       idempotencyKey,
     );
+  }
+
+  @RequireAnyPermission(
+    "settlements.create",
+    "reports.export",
+    "trader_receivables.create",
+    "users_roles.manage",
+  )
+  @ApiOperation({ summary: "Trader Account: every Trader with balance, open Orders and last payment" })
+  @Get("trader-accounts")
+  public traderAccountList(@Query() query: TraderAccountListQueryDto) {
+    return this.traderAccounts.accounts(query);
+  }
+
+  @RequireAnyPermission(
+    "settlements.create",
+    "reports.export",
+    "trader_receivables.create",
+    "users_roles.manage",
+  )
+  @ApiOperation({ summary: "Trader Account: the Trader's SET / INV / COL documents" })
+  @Get("trader-accounts/:traderId/documents")
+  public traderAccountDocuments(@Param("traderId", new ParseUUIDPipe()) traderId: string) {
+    return this.traderAccounts.documents(traderId);
   }
 
   @RequireAnyPermission("settlements.create", "users_roles.manage")

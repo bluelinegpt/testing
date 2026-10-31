@@ -48,6 +48,7 @@ import {
   OrderDetailsWorkspace,
   OrdersModuleWorkspace,
 } from "../features/operations/OrdersModuleWorkspace.js";
+import { TraderAccountWorkspace } from "../features/operations/TraderAccountWorkspace.js";
 import { TraderReceivablesWorkspace } from "../features/operations/TraderReceivablesWorkspace.js";
 import { TraderSettlementsWorkspace } from "../features/operations/TraderSettlementsWorkspace.js";
 import { DeploymentStatusPage } from "../features/administration/DeploymentStatusPage.js";
@@ -73,7 +74,7 @@ const redirects: Readonly<Record<string, string>> = {
   // Legacy route: the operational Trader view is now part of the Trader
   // Settlements workspace itself (outstanding balance is visible per Trader
   // there), so a dedicated /traders screen is no longer authoritative.
-  "/traders": "/trader-settlements",
+  "/traders": "/trader-account",
   "/users": "/configuration/users",
   "/roles": "/configuration/roles",
 };
@@ -85,7 +86,7 @@ const dashboardTargets: Readonly<Record<DashboardDrillDown, string>> = {
   // Both drill-down tiles land on the one authoritative Trader Settlements
   // workspace — routed directly rather than through the /traders redirect.
   settlements: "/trader-settlements",
-  traders: "/trader-settlements",
+  traders: "/trader-account",
 };
 
 const operationRoutes: Readonly<
@@ -187,6 +188,14 @@ export function CompanyWorkspace({
       <DriverCollectionsWorkspace
         api={api}
         detailId={detailSegment(path, "/drivers/collections/")}
+      />
+    );
+  } else if (path === "/trader-account") {
+    content = (
+      <TraderAccountWorkspace
+        api={api}
+        onNavigate={(target) => void navigate(target)}
+        permissions={session.identity.permissions}
       />
     );
   } else if (path === "/trader-settlements" || path.startsWith("/trader-settlements/")) {

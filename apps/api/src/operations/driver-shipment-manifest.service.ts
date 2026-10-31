@@ -56,6 +56,8 @@ export interface ManifestOrderRow {
   readonly deliveryStatus: string;
   readonly emirateName: string | null;
   readonly notes: string | null;
+  /** The Order Date (UAE), for the "by date" sort. */
+  readonly orderDate: string | null;
   readonly orderNumber: string;
   readonly serviceFee: string;
   readonly referenceNumber: string | null;
@@ -86,6 +88,40 @@ export function sortForRoute(rows: readonly ManifestOrderRow[]): readonly Manife
       (a.referenceNumber ?? "").localeCompare(b.referenceNumber ?? "") ||
       a.orderNumber.localeCompare(b.orderNumber),
   );
+}
+
+export type ManifestSort = "reference" | "date" | "emirate_area";
+
+/** "6391" before "6397" before "6803"; no Reference last. */
+function referenceKey(row: ManifestOrderRow): number {
+  const digits = (row.referenceNumber ?? "").replace(/[^0-9]/g, "");
+  return digits === "" ? Number.POSITIVE_INFINITY : Number(digits);
+}
+
+function byReference(a: ManifestOrderRow, b: ManifestOrderRow): number {
+  return (
+    referenceKey(a) - referenceKey(b) ||
+    (a.referenceNumber ?? "").localeCompare(b.referenceNumber ?? "") ||
+    a.orderNumber.localeCompare(b.orderNumber)
+  );
+}
+
+/**
+ * The sheet's order, chosen when printing (Aiman, 31 Oct 2026): by Reference
+ * Number (the default), by Order Date then Reference, or the route order --
+ * Emirate, then Area, then Reference -- with one heading per Emirate.
+ */
+export function sortManifest(
+  rows: readonly ManifestOrderRow[],
+  sort: ManifestSort = "reference",
+): readonly ManifestOrderRow[] {
+  if (sort === "emirate_area") return sortForRoute(rows);
+  if (sort === "date") {
+    return [...rows].sort(
+      (a, b) => (a.orderDate ?? "9999").localeCompare(b.orderDate ?? "9999") || byReference(a, b),
+    );
+  }
+  return [...rows].sort(byReference);
 }
 
 @Injectable()
@@ -150,7 +186,7 @@ export class DriverShipmentManifestService {
         HttpStatus.CONFLICT,
       );
     }
-    return { driverId, orders: sortForRoute(rows) };
+    return { driverId, orders: sortManifest(rows, input.sortBy ?? "reference") };
   }
 
   private async resolveOrdersByIds(
@@ -172,7 +208,8 @@ export class DriverShipmentManifestService {
              coalesce(o.package_count, 0)::int as "packageCount",
              o.service_fee::text as "serviceFee",
              o.customer_delivery_notes_snapshot as "deliveryInstructions", o.notes,
-             o.delivery_status as "deliveryStatus"
+             o.delivery_status as "deliveryStatus",
+             coalesce(o.order_date, (o.created_at at time zone 'Asia/Dubai')::date)::text as "orderDate"
         from orders o
         join traders t on t.id = o.trader_id and t.company_id = o.company_id
         left join areas a on a.id = o.area_id and a.company_id = o.company_id
@@ -218,7 +255,8 @@ export class DriverShipmentManifestService {
              coalesce(o.package_count, 0)::int as "packageCount",
              o.service_fee::text as "serviceFee",
              o.customer_delivery_notes_snapshot as "deliveryInstructions", o.notes,
-             o.delivery_status as "deliveryStatus"
+             o.delivery_status as "deliveryStatus",
+             coalesce(o.order_date, (o.created_at at time zone 'Asia/Dubai')::date)::text as "orderDate"
         from orders o
         join traders t on t.id = o.trader_id and t.company_id = o.company_id
         left join areas a on a.id = o.area_id and a.company_id = o.company_id
@@ -323,6 +361,7 @@ export class DriverShipmentManifestService {
         generatedBy: generatedByResult.rows[0]?.username ?? "—",
         manifestNumber,
         orderCount: orders.length,
+        sortBy: input.sortBy ?? "reference",
       },
       orders: orders.map((row) => ({
         areaName: row.areaName,
@@ -419,7 +458,9 @@ export class DriverShipmentManifestService {
           row.referenceNumber ?? "",
           language === "ar" ? (row.traderNameAr ?? row.traderName) : row.traderName,
           row.customerName,
-          row.customerMobileNumber,
+          [row.customerMobileNumber, row.customerSecondMobileNumber ?? ""]
+            .filter((mobile) => mobile.trim() !== "")
+            .join(" / "),
           language === "ar" ? (row.areaNameAr ?? row.areaName) : row.areaName,
           String(row.packageCount),
           row.amountToCollect,

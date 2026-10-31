@@ -143,6 +143,7 @@ type SheetColumn =
   | "notes"
   | "orderValue"
   | "phone"
+  | "phone2"
   | "reference"
   | "total"
   | "trader";
@@ -155,6 +156,12 @@ const HEADER_ALIASES: Readonly<Record<SheetColumn, readonly string[]>> = {
   notes: ["ملاحظات", "notes", "note"],
   orderValue: ["قيمه الطلبيه", "قيمه الطلب", "order value", "order value to trader", "value"],
   phone: ["رقم الهاتف", "الهاتف", "رقم الجوال", "الجوال", "mobile", "phone", "mobile number"],
+  // Optional second number in its own column (Aiman, 31 Oct 2026). Two numbers
+  // in the one phone cell ("0554451755-0553932609") still split as before.
+  phone2: [
+    "جوال اضافي", "الجوال الاضافي", "رقم هاتف اضافي", "رقم الهاتف 2", "هاتف 2", "جوال 2",
+    "second mobile", "mobile 2", "phone 2", "second phone", "other mobile",
+  ],
   reference: ["رقم الكوبون", "رقم المرجع", "الرقم المرجعي", "المرجع", "reference number", "reference", "coupon"],
   total: ["الاجمالي", "الاجمالى", "المبلغ المطلوب", "total", "total cod", "cod"],
   trader: ["اسم التاجر", "التاجر", "trader", "trader name"],
@@ -281,7 +288,8 @@ export function parseFastEntrySheet(rows: readonly (readonly string[])[]): Parse
     let total = toNumber(cell(row, "total"));
     if (total === null && value !== null && fee !== null) total = value + fee;
     const notes = cell(row, "notes");
-    const [mobile, secondMobile] = splitMobiles(phoneText);
+    const [mobile, splitSecond] = splitMobiles(phoneText);
+    const secondMobile = sheetMobile(cell(row, "phone2")) || splitSecond;
     const errors: SheetMessage[] = [];
     const referenceClean = reference.replace(/\s+/g, "");
     // A blank or "***" reference is allowed: the order is then known by its Order Number.

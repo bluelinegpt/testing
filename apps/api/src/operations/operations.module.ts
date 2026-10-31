@@ -56,6 +56,7 @@ import { PublicTrackingService } from "./public-tracking.service.js";
 import { TraderReceivableController } from "./trader-receivable.controller.js";
 import { TraderReceivableService } from "./trader-receivable.service.js";
 import { TraderAccountStatementService } from "./trader-account-statement.service.js";
+import { TraderAccountService } from "./trader-account.service.js";
 import { TraderSettlementService } from "./trader-settlement.service.js";
 import { ReceivableOffsetReversalService } from "./receivable-offset-reversal.service.js";
 import { OrderMaintenanceService } from "./order-maintenance.service.js";
@@ -133,6 +134,7 @@ import { CompanyOrderHealthService } from "./company-order-health.service.js";
     PasswordHasher,
     TraderReceivableService,
     TraderAccountStatementService,
+    TraderAccountService,
     TraderSettlementService,
     ReceivableOffsetReversalService,
     // Phase 3 Prompt 2: THE financial evaluation. Verify First

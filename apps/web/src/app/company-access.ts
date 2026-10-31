@@ -32,6 +32,14 @@ const routePermissions: Readonly<Record<string, readonly string[]>> = {
   ],
   "/orders/create": [manage, "orders.create"],
   "/orders/import": [manage, "orders.create"],
+  // Trader Account / حساب التاجر (Aiman, 31 Oct 2026): the one Trader money
+  // screen for everyday users. The two screens below stay for accountants.
+  "/trader-account": [
+    manage,
+    "settlements.create",
+    "reports.export",
+    "trader_receivables.create",
+  ],
   "/trader-settlements": [manage, "settlements.create", "settlements.reverse", "reports.export"],
   "/trader-receivables": [manage, "trader_receivables.create", "trader_receivables.reverse"],
   "/payroll": [
@@ -135,6 +143,17 @@ const hasAnyNonOrderPermission = (permissions: readonly string[]): boolean =>
     ([path, required]) =>
       !orderOnlyPaths.has(path) && required.some((permission) => permissions.includes(permission)),
   );
+
+/**
+ * The "Advanced (Accountant)" Trader screens -- Trader Settlements and Trader
+ * Receivables -- show in the menu only for administrators and accounting
+ * users (Aiman, 31 Oct 2026). Everyone else works from Trader Account. The
+ * routes themselves stay reachable for links (a Settlement or Collection
+ * opened from Trader Account), each with its own permissions.
+ */
+export function showsAdvancedTraderMenu(permissions: readonly string[]): boolean {
+  return accountingAccess.some((permission) => permissions.includes(permission));
+}
 
 export function canAccessCompanyPath(pathname: string, permissions: readonly string[]): boolean {
   const normalized = normalizePath(pathname);

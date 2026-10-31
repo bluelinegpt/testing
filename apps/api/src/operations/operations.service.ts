@@ -2247,7 +2247,13 @@ export class OperationsService {
              ${signedBalance}::numeric(18,2)::text as balance,
              ${shownStatus} as status
       ${base}
-      order by ${orderDate} asc, o.created_at asc, o.id asc
+      -- By Reference Number, smallest first, as a number (Aiman, 31 Oct
+      -- 2026): 4401, 4402 ... 4411, never 4411 before 4406. Orders with no
+      -- Reference come last, by Order Number. Screen, PDF and Excel alike.
+      order by (nullif(regexp_replace(coalesce(o.reference_number, ''), '[^0-9]', '', 'g'), '') is null) asc,
+               length(regexp_replace(coalesce(o.reference_number, ''), '[^0-9]', '', 'g')) asc,
+               regexp_replace(coalesce(o.reference_number, ''), '[^0-9]', '', 'g') asc,
+               o.reference_number asc nulls last, o.order_number asc, o.id asc
       limit ${pageSize} offset ${(page - 1) * pageSize}
     `.execute(this.database);
     const totalsRow = summary.rows[0];

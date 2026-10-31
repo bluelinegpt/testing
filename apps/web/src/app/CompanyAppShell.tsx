@@ -18,7 +18,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 
@@ -28,7 +28,11 @@ import { VersionBadge } from "../components/VersionBadge.js";
 import { normalizeLocale, storeLocale, type SupportedLocale } from "../localization/locale.js";
 import type { ThemePreference } from "../theme/theme-preference.js";
 import { useCompanyBranding } from "./CompanyBrandingContext.js";
-import { canAccessCompanyPath, firstAuthorizedCompanyPath } from "./company-access.js";
+import {
+  canAccessCompanyPath,
+  firstAuthorizedCompanyPath,
+  showsAdvancedTraderMenu,
+} from "./company-access.js";
 
 function brandInitials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -42,6 +46,8 @@ type MenuGroupId =
   "orders" | "traders" | "drivers" | "accounting" | "configuration" | "administration" | "reports";
 
 interface MenuItem {
+  /** Listed under "Advanced (Accountant)"; only for accounting users. */
+  readonly advanced?: boolean;
   readonly icon?: LucideIcon;
   readonly label: string;
   readonly path: string;
@@ -59,6 +65,7 @@ const routeTitles: Readonly<Record<string, string>> = {
   "/orders": "nav.ordersList",
   "/orders/create": "nav.createOrder",
   "/orders/import": "nav.importOrders",
+  "/trader-account": "nav.traderAccount",
   "/trader-settlements": "nav.traderSettlements",
   "/trader-receivables": "nav.traderReceivables",
   "/drivers": "nav.driversList",
@@ -164,7 +171,11 @@ export function CompanyAppShell({
             icon: Store,
             id: "traders",
             label: t("nav.traders"),
-            items: [{ label: t("nav.traderSettlements"), path: "/trader-settlements" }],
+            items: [
+              { label: t("nav.traderAccount"), path: "/trader-account" },
+              { advanced: true, label: t("nav.traderSettlements"), path: "/trader-settlements" },
+              { advanced: true, label: t("nav.traderReceivables"), path: "/trader-receivables" },
+            ],
           },
           {
             icon: Truck,
@@ -194,7 +205,6 @@ export function CompanyAppShell({
               },
               { label: t("accounting.sections.journals"), path: "/accounting/journals" },
               { label: t("accounting.sections.events"), path: "/accounting/events" },
-              { label: t("nav.traderReceivables"), path: "/trader-receivables" },
               { label: t("accounting.sections.expenses"), path: "/accounting/expenses" },
               {
                 label: t("accounting.sections.cash-bank-movements"),
@@ -257,10 +267,12 @@ export function CompanyAppShell({
           },
         ] satisfies readonly MenuGroup[]
       )
-        .map((group) => ({
+        .map((group): MenuGroup => ({
           ...group,
-          items: group.items.filter((item) =>
-            canAccessCompanyPath(item.path, session.identity.permissions),
+          items: (group.items as readonly MenuItem[]).filter(
+            (item) =>
+              canAccessCompanyPath(item.path, session.identity.permissions) &&
+              (item.advanced !== true || showsAdvancedTraderMenu(session.identity.permissions)),
           ),
         }))
         .filter((group) => group.items.length > 0),
@@ -498,6 +510,7 @@ function NavigationGroup({
   onToggle: () => void;
   pathname: string;
 }) {
+  const { t } = useTranslation();
   const Icon = group.icon;
   const active = group.items.some((item) => pathMatches(pathname, item.path));
   return (
@@ -514,10 +527,15 @@ function NavigationGroup({
       </button>
       {expanded ? (
         <div className="nav-submenu">
-          {group.items.map((item) => (
-            <NavLink className="nav-submenu-link" key={item.path} to={item.path}>
-              {item.label}
-            </NavLink>
+          {group.items.map((item, index) => (
+            <Fragment key={item.path}>
+              {item.advanced === true && group.items[index - 1]?.advanced !== true ? (
+                <div className="nav-submenu-heading">{t("nav.advancedAccountant")}</div>
+              ) : null}
+              <NavLink className="nav-submenu-link" to={item.path}>
+                {item.label}
+              </NavLink>
+            </Fragment>
           ))}
         </div>
       ) : null}
@@ -527,9 +545,9 @@ function NavigationGroup({
 
 function groupForPath(pathname: string): MenuGroupId | undefined {
   if (pathname.startsWith("/orders")) return "orders";
-  if (pathname === "/trader-settlements") return "traders";
+  if (pathname === "/trader-account" || pathname === "/trader-settlements") return "traders";
   if (pathname === "/trader-receivables" || pathname.startsWith("/trader-receivables/"))
-    return "accounting";
+    return "traders";
   if (pathname === "/drivers" || pathname === "/driver-cash-reconciliation") return "drivers";
   if (pathname === "/cash-management" || pathname === "/payroll") return "accounting";
   if (pathname.startsWith("/accounting")) return "accounting";
