@@ -919,6 +919,15 @@ export class OrderQuoteDto {
   @IsOptional()
   @IsUUID()
   public readonly driverId?: string;
+
+  /**
+   * Edit Order's preview (1 Nov 2026): the Order being edited. With the same
+   * Trader and Area and no new fee typed, the preview uses the Order's own
+   * saved fee -- not today's price list, which may have changed since.
+   */
+  @IsOptional()
+  @IsUUID()
+  public readonly orderId?: string;
 }
 
 export class OrderIdentifierAvailabilityQueryDto {

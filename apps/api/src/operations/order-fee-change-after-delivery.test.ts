@@ -41,3 +41,16 @@ describe("Change fee after delivery", () => {
     expect(method).toContain("'order.fee_changed_after_delivery'");
   });
 });
+
+describe("Edit Order preview keeps the Order's own saved fee", () => {
+  const source = readFileSync(resolve(process.cwd(), "src/operations/operations.service.ts"), "utf8");
+  const start = source.indexOf("public async quoteOrder(");
+  const method = source.slice(start, source.indexOf("public async identifierAvailability(", start));
+
+  it("uses the saved fee only for the same Order, Trader and Area with no new fee typed", () => {
+    expect(method).toContain("input.orderId === undefined || input.serviceFee !== undefined");
+    expect(method).toContain("where id = ${input.orderId}::uuid and company_id = ${companyId}::uuid");
+    expect(method).toContain("saved.traderId === input.traderId && saved.areaId === input.areaId");
+    expect(method).toContain("serviceFee: keepSaved ? new Decimal(saved.serviceFee) : pricing.finalFee");
+  });
+});

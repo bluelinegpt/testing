@@ -4842,13 +4842,49 @@ export class OperationsService {
       input.driverId === undefined
         ? new Decimal(0)
         : await this.activeDriverCost(companyId, input.driverId);
-    const vatPolicy = await this.vatPolicy(this.database, companyId);
+    // Editing an Order with the same Trader and Area and no new fee: preview
+    // its own saved fee and VAT snapshot -- what Save keeps -- rather than
+    // today's price list (Aiman, 1 Nov 2026: 4283 saved 25 + 45 showed
+    // 20 + 45 because the Trader's price had since changed to 20).
+    const saved =
+      input.orderId === undefined || input.serviceFee !== undefined
+        ? undefined
+        : (
+            await sql<{
+              traderId: string;
+              areaId: string;
+              serviceFee: string;
+              financialModelVersion: string | null;
+              vatEnabledSnapshot: boolean | null;
+              vatPriceModeSnapshot: "exclusive" | "inclusive" | null;
+              vatRateSnapshot: string | null;
+            }>`
+              select trader_id::text as "traderId", area_id::text as "areaId",
+                     service_fee::text as "serviceFee",
+                     financial_model_version as "financialModelVersion",
+                     vat_enabled_snapshot as "vatEnabledSnapshot",
+                     vat_price_mode_snapshot as "vatPriceModeSnapshot",
+                     vat_rate_snapshot::text as "vatRateSnapshot"
+                from orders
+               where id = ${input.orderId}::uuid and company_id = ${companyId}::uuid
+            `.execute(this.database)
+          ).rows[0];
+    const keepSaved =
+      saved !== undefined && saved.traderId === input.traderId && saved.areaId === input.areaId;
+    const vatPolicy =
+      keepSaved && saved.financialModelVersion === "trader_deduction_v1"
+        ? {
+            enabled: saved.vatEnabledSnapshot ?? false,
+            priceMode: saved.vatPriceModeSnapshot,
+            rate: new Decimal(saved.vatRateSnapshot ?? 0),
+          }
+        : await this.vatPolicy(this.database, companyId);
     const financials = this.calculateOrderFinancials({
       additionalFees: new Decimal(input.additionalFees ?? 0),
       codAmount: new Decimal(input.codAmount),
       driverCost,
       prospective: true,
-      serviceFee: pricing.finalFee,
+      serviceFee: keepSaved ? new Decimal(saved.serviceFee) : pricing.finalFee,
       paymentCondition: input.paymentCondition ?? "customer_pays_cod_and_fee",
       traderPaysCodShortfall: await traderPaysCodShortfall(this.database, companyId),
       vatPolicy,

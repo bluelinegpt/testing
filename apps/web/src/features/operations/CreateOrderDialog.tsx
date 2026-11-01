@@ -66,6 +66,9 @@ export function CreateOrderDialog({
   searchDebounceMs?: number;
 }) {
   const isEdit = edit !== undefined;
+  // A string, so the quote effect does not re-run on every render of a parent
+  // that passes `edit` as a fresh object.
+  const editOrderId = edit?.orderId;
   const { i18n, t } = useTranslation();
   const locale = normalizeLocale(i18n.resolvedLanguage);
   // Bilingual business data (Trader/Emirate/Area names) follows the user's
@@ -594,6 +597,8 @@ export function CreateOrderDialog({
           serviceFee: enteredFee,
           serviceFeeOverrideReason: enteredReason,
           traderId: trader.id,
+          // Edit: preview the Order's own saved fee, not today's price list.
+          ...(editOrderId === undefined ? {} : { orderId: editOrderId }),
         })
         .then((result) => {
           if (!active) return;
@@ -628,6 +633,7 @@ export function CreateOrderDialog({
     area,
     additionalFees,
     codAmount,
+    editOrderId,
     enteredFee,
     enteredReason,
     isFreeOrder,
