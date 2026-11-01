@@ -40,10 +40,8 @@ import type {
   TraderCollectionSummaryQueryDto,
   TraderReceivableEligibleQueryDto,
 } from "./operations.dto.js";
-import {
-  buildTraderPaymentReceiptHtml,
-  type ReportLanguage,
-} from "./trader-receivable-report-html.js";
+import type { ReportLanguage } from "./trader-receivable-report-html.js";
+import { buildTraderReceiptHtml } from "./trader-receipt-html.js";
 
 const defaultPageSize = 25;
 const idempotencyKeyPattern = /^[A-Za-z0-9._:-]{16,128}$/;
@@ -350,6 +348,13 @@ export interface TraderCollectionAllocationDetail {
   readonly remainingDue: string;
   readonly sourceReference: string | null;
   readonly sourceType: string;
+  /** For the receipt, printed like the Trader Invoice (1 Nov 2026). */
+  readonly referenceNumber?: string | null;
+  readonly orderCodAmount?: string | null;
+  readonly emirateName?: string | null;
+  readonly emirateNameAr?: string | null;
+  readonly areaName?: string | null;
+  readonly areaNameAr?: string | null;
 }
 
 interface TraderCollectionSummaryTotals {
@@ -419,6 +424,8 @@ export interface TraderCollectionReportData {
      */
     readonly traderCode?: string | null;
     readonly traderName: string;
+    readonly traderNameAr?: string | null;
+    readonly traderMobile?: string | null;
   };
   readonly lines: readonly TraderCollectionAllocationDetail[];
   readonly summary: TraderCollectionSummaryTotals & { readonly notes: string | null };
@@ -1907,7 +1914,9 @@ export class TraderReceivableService {
         reversalReason: header.reversalReason,
         reversedBy: header.reversedBy,
         status: header.status,
+        traderMobile: header.traderMobile,
         traderName: header.traderName,
+        traderNameAr: header.traderNameAr,
       },
       lines: allocations.lines,
       summary: { ...allocations.summary, notes: header.notes },
@@ -1932,7 +1941,8 @@ export class TraderReceivableService {
     const { companyId } = this.tenants.current();
     const identity = this.identities.current();
     const data = await this.reportData(collectionId);
-    const html = buildTraderPaymentReceiptHtml(data, language);
+    // Printed like the Trader Invoice, every Company (Aiman, 1 Nov 2026).
+    const html = buildTraderReceiptHtml(data, language);
     const footerTemplate =
       language === "ar"
         ? `<div style="font-size:9px;width:100%;text-align:center;color:#666;direction:rtl;">الصفحة <span class="pageNumber"></span> من <span class="totalPages"></span></div>`
@@ -2395,6 +2405,7 @@ export class TraderReceivableService {
     readonly traderName: string;
     /** Arabic Trader name. Nullable: `t.name_ar` is optional on the Trader. */
     readonly traderNameAr: string | null;
+    readonly traderMobile: string | null;
   }> {
     const row = (
       await sql<{
@@ -2417,12 +2428,13 @@ export class TraderReceivableService {
         traderName: string;
         traderCode: string | null;
         traderNameAr: string | null;
+        traderMobile: string | null;
       }>`
         select c.collection_number as "collectionNumber", c.status,
                c.payment_date::text as "paymentDate", c.payment_method as "paymentMethod",
                c.payment_reference as "paymentReference", c.notes, c.created_at::text as "createdAt",
                t.name_en as "traderName", t.code as "traderCode",
-               t.name_ar as "traderNameAr",
+               t.name_ar as "traderNameAr", t.mobile_number as "traderMobile",
                coalesce(receiver.username, 'Legacy/Unknown') as "receivedBy",
                coalesce(reverser.username, 'Legacy/Unknown') as "reversedBy",
                c.reversed_at::text as "reversedAt", c.reversal_reason as "reversalReason",
@@ -2475,6 +2487,7 @@ export class TraderReceivableService {
       traderCode: row.traderCode,
       traderName: row.traderName,
       traderNameAr: row.traderNameAr,
+      traderMobile: row.traderMobile,
     };
   }
 
@@ -2528,6 +2541,12 @@ export class TraderReceivableService {
         sourceType: string;
         collectionReversed: boolean;
         earlierCollected: string;
+        referenceNumber: string | null;
+        orderCodAmount: string | null;
+        emirateName: string | null;
+        emirateNameAr: string | null;
+        areaName: string | null;
+        areaNameAr: string | null;
       }>`
         -- The Receivable identifier is what its detail route consumes; the
         -- Receivable Number stays the value the User reads.
@@ -2539,6 +2558,10 @@ export class TraderReceivableService {
                r.reason, r.original_amount_due::text as "originalAmountDue",
                r.outstanding_amount::text as "outstandingAmount", r.status as "receivableStatus",
                alloc.amount_allocated as "amountAllocated",
+               ord.reference_number as "referenceNumber", ord.cod_amount::text as "orderCodAmount",
+               receipt_emirate.name_en as "emirateName", receipt_emirate.name_ar as "emirateNameAr",
+               coalesce(receipt_area.name_en, ord.customer_area_name_snapshot) as "areaName",
+               receipt_area.name_ar as "areaNameAr",
                (cur.status = 'reversed') as "collectionReversed",
                -- What earlier, still-active Collections had already collected
                -- on this Receivable when this one was made. Used for a REVERSED
@@ -2561,6 +2584,8 @@ export class TraderReceivableService {
           join trader_receivables r on r.id = alloc.receivable_id and r.company_id = alloc.company_id
           left join orders ord on ord.company_id = r.company_id
             and r.source_type = 'service_charge' and ord.order_number = r.source_reference
+          left join areas receipt_area on receipt_area.id = ord.area_id and receipt_area.company_id = ord.company_id
+          left join emirates receipt_emirate on receipt_emirate.id = receipt_area.emirate_id
          where alloc.collection_id = ${collectionId}::uuid and alloc.company_id = ${companyId}::uuid
          order by r.receivable_number
       `.execute(this.database)
@@ -2587,6 +2612,12 @@ export class TraderReceivableService {
       remainingDue: new Decimal(row.outstandingAmount).toFixed(2),
       sourceReference: row.sourceReference,
       sourceType: row.sourceType,
+      referenceNumber: row.referenceNumber,
+      orderCodAmount: row.orderCodAmount === null ? null : new Decimal(row.orderCodAmount).toFixed(2),
+      emirateName: row.emirateName,
+      emirateNameAr: row.emirateNameAr,
+      areaName: row.areaName,
+      areaNameAr: row.areaNameAr,
     }));
     const totals = lines.reduce(
       (acc, line) => ({

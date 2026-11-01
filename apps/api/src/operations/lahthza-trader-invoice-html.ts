@@ -74,13 +74,58 @@ const LABELS = {
   },
 } as const;
 
+/**
+ * The invoice's look, shared with the Trader Receipt (COL) so both print the
+ * same way (Aiman, 1 Nov 2026).
+ */
+export const INVOICE_CSS = `  /* Lahthza brand colours, from the logo: blue and orange. */
+  :root { --blue: #1d6fb8; --blue-dark: #134f86; --blue-soft: #eaf3fb; --orange: #f26a1b; --red: #c62828; --red-soft: #fdecea; }
+  @page { size: A4; margin: 12mm 10mm; }
+  * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { margin: 0; font-family: Arial, "Segoe UI", Tahoma, sans-serif; color: #1b1b1b; font-size: 12px; }
+  .box { border: 1.5px solid var(--blue); border-radius: 4px; }
+  .top { display: grid; grid-template-columns: 1fr 1.1fr 1fr; align-items: end; padding: 8px 12px;
+    border-top: 6px solid var(--blue); border-bottom: 3px solid var(--orange); }
+  .logo { max-height: 70px; max-width: 220px; display: block; }
+  .brand { font-size: 22px; font-weight: 800; color: var(--blue); }
+  .title { font-size: 20px; font-weight: 700; margin-top: 6px; color: var(--blue-dark); }
+  .mid { text-align: center; }
+  .barcode { width: 190px; height: 58px; display: block; margin: 0 auto; }
+  .number { font-size: 14px; margin-top: 2px; font-weight: 700; color: var(--blue-dark); }
+  .employee { font-size: 13px; margin-top: 4px; }
+  .date { text-align: end; font-size: 13px; font-weight: 700; color: var(--blue-dark); }
+  .party { display: flex; justify-content: space-between; gap: 12px; padding: 6px 12px; margin-top: 10px;
+    font-size: 14px; background: var(--blue-soft); }
+  table { width: 100%; border-collapse: collapse; border: 1.5px solid var(--blue); border-top: 0; margin-top: 6px; }
+  thead { display: table-header-group; }
+  th { background: var(--blue); color: #fff; border: 1px solid var(--blue-dark); padding: 6px 4px; font-size: 13px; font-weight: 700; }
+  td { border: 1px solid #b9cfe4; padding: 5px 4px; vertical-align: top; font-size: 12.5px; }
+  tbody tr:nth-child(even) td { background: var(--blue-soft); }
+  td.c { text-align: center; }
+  td.n { text-align: end; white-space: nowrap; }
+  td.neg { color: #c0392b; font-weight: 700; }
+  tr { page-break-inside: avoid; }
+  .totals { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; font-size: 14px; font-weight: 700; }
+  .totals .count { color: var(--blue-dark); }
+  .totals .count span { margin-inline-start: 60px; }
+  .totals .sum { background: var(--red-soft); border: 1.5px solid var(--red); border-radius: 4px; padding: 6px 12px; color: var(--blue-dark); }
+  .totals .sum span { margin-inline-start: 50px; font-size: 17px; color: var(--red); }
+  .printed { margin-top: 10px; font-size: 13px; color: #555; }
+  .signs { display: flex; justify-content: space-between; margin-top: 22px; font-size: 14px; color: var(--blue-dark); }
+  .notes { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 26px; padding-top: 8px; border-top: 2px solid var(--orange); }
+  .note { font-size: 11.5px; line-height: 1.5; color: #444; }
+  .flags { margin-top: 6px; font-size: 12px; font-weight: 700; color: #b42318; }
+  .watermark { position: fixed; top: 42%; left: 0; right: 0; text-align: center; font-size: 60px;
+    font-weight: 800; color: rgba(180, 35, 24, 0.12); transform: rotate(-24deg); z-index: 0; }
+`;
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const MONTHS_LONG = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
 
-function escapeHtml(value: string): string {
+export function escapeHtml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -90,13 +135,13 @@ function escapeHtml(value: string): string {
 }
 
 /** 2026-10-25 -> 25-Oct-2026 (the old sheet's format). */
-function shortDate(value: string): string {
+export function shortDate(value: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})/u.exec(value);
   if (match === null) return value;
   return `${match[3]}-${MONTHS[Number(match[2]) - 1] ?? match[2]}-${match[1]}`;
 }
 
-function todayLong(): string {
+export function todayLong(): string {
   const parts = new Intl.DateTimeFormat("en-GB", {
     day: "2-digit", month: "numeric", timeZone: "Asia/Dubai", year: "numeric",
   }).formatToParts(new Date());
@@ -118,7 +163,7 @@ interface Row {
   readonly vat: string;
 }
 
-function referenceKey(reference: string): number {
+export function referenceKey(reference: string): number {
   const digits = reference.replace(/[^0-9]/gu, "");
   return digits === "" ? Number.POSITIVE_INFINITY : Number(digits);
 }
@@ -235,46 +280,7 @@ export function buildLahthzaTraderInvoiceHtml(
 <meta charset="utf-8">
 <title>${escapeHtml(labels.title)} ${escapeHtml(invoiceNumber)}</title>
 <style>
-  /* Lahthza brand colours, from the logo: blue and orange. */
-  :root { --blue: #1d6fb8; --blue-dark: #134f86; --blue-soft: #eaf3fb; --orange: #f26a1b; --red: #c62828; --red-soft: #fdecea; }
-  @page { size: A4; margin: 12mm 10mm; }
-  * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  body { margin: 0; font-family: Arial, "Segoe UI", Tahoma, sans-serif; color: #1b1b1b; font-size: 12px; }
-  .box { border: 1.5px solid var(--blue); border-radius: 4px; }
-  .top { display: grid; grid-template-columns: 1fr 1.1fr 1fr; align-items: end; padding: 8px 12px;
-    border-top: 6px solid var(--blue); border-bottom: 3px solid var(--orange); }
-  .logo { max-height: 70px; max-width: 220px; display: block; }
-  .brand { font-size: 22px; font-weight: 800; color: var(--blue); }
-  .title { font-size: 20px; font-weight: 700; margin-top: 6px; color: var(--blue-dark); }
-  .mid { text-align: center; }
-  .barcode { width: 190px; height: 58px; display: block; margin: 0 auto; }
-  .number { font-size: 14px; margin-top: 2px; font-weight: 700; color: var(--blue-dark); }
-  .employee { font-size: 13px; margin-top: 4px; }
-  .date { text-align: end; font-size: 13px; font-weight: 700; color: var(--blue-dark); }
-  .party { display: flex; justify-content: space-between; gap: 12px; padding: 6px 12px; margin-top: 10px;
-    font-size: 14px; background: var(--blue-soft); }
-  table { width: 100%; border-collapse: collapse; border: 1.5px solid var(--blue); border-top: 0; margin-top: 6px; }
-  thead { display: table-header-group; }
-  th { background: var(--blue); color: #fff; border: 1px solid var(--blue-dark); padding: 6px 4px; font-size: 13px; font-weight: 700; }
-  td { border: 1px solid #b9cfe4; padding: 5px 4px; vertical-align: top; font-size: 12.5px; }
-  tbody tr:nth-child(even) td { background: var(--blue-soft); }
-  td.c { text-align: center; }
-  td.n { text-align: end; white-space: nowrap; }
-  td.neg { color: #c0392b; font-weight: 700; }
-  tr { page-break-inside: avoid; }
-  .totals { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; font-size: 14px; font-weight: 700; }
-  .totals .count { color: var(--blue-dark); }
-  .totals .count span { margin-inline-start: 60px; }
-  .totals .sum { background: var(--red-soft); border: 1.5px solid var(--red); border-radius: 4px; padding: 6px 12px; color: var(--blue-dark); }
-  .totals .sum span { margin-inline-start: 50px; font-size: 17px; color: var(--red); }
-  .printed { margin-top: 10px; font-size: 13px; color: #555; }
-  .signs { display: flex; justify-content: space-between; margin-top: 22px; font-size: 14px; color: var(--blue-dark); }
-  .notes { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 26px; padding-top: 8px; border-top: 2px solid var(--orange); }
-  .note { font-size: 11.5px; line-height: 1.5; color: #444; }
-  .flags { margin-top: 6px; font-size: 12px; font-weight: 700; color: #b42318; }
-  .watermark { position: fixed; top: 42%; left: 0; right: 0; text-align: center; font-size: 60px;
-    font-weight: 800; color: rgba(180, 35, 24, 0.12); transform: rotate(-24deg); z-index: 0; }
-</style>
+${INVOICE_CSS}</style>
 </head>
 <body>
 ${isDraft ? `<div class="watermark">${escapeHtml(labels.draft)}</div>` : ""}
