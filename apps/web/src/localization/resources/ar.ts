@@ -2099,6 +2099,17 @@ export const arabicTranslations = {
     },
   },
   operations: {
+    changeFee: {
+      action: "تغيير الرسوم",
+      title: "تغيير الرسوم — {{order}}",
+      hint: "لطلب تم توصيله ويدفع التاجر رسومه. إذا حُصّلت الرسوم في إيصال، ألغِ ترحيل ذلك الإيصال أولاً.",
+      total: "إجمالي الرسوم: {{before}} ← {{after}}",
+      reason: "السبب (مطلوب)",
+      save: "حفظ الرسوم الجديدة",
+      failed: "تعذّر تغيير الرسوم.",
+      saved: "تم تغيير رسوم {{order}} إلى {{total}}.",
+      draftUpdated: "تم تحديث مسودة التاجر المفتوحة بالرسوم الجديدة.",
+    },
     workflowActionIneligible: "لم يعد هذا الطلب مؤهلاً لهذا الإجراء.",
     changeStatusTitle: "تغيير حالة التوصيل",
     changeStatusPrompt: "اختر حالة التوصيل الجديدة للطلب",

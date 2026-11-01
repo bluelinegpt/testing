@@ -82,6 +82,7 @@ import {
   orderFeeSource,
   showsAccountingRelatedRecords,
 } from "./order-accounting-policy.js";
+import { ChangeOrderFeeDialog } from "./ChangeOrderFeeDialog.js";
 import { CreateOrderDialog } from "./CreateOrderDialog.js";
 import { listPasteHandler } from "./search-list-input.js";
 import { DriverCashStatusLabel, useDriverCashStatusLabel } from "./DriverCashStatus.js";
@@ -4769,6 +4770,7 @@ export function OrderDetailsWorkspace({
   const [detail, setDetail] = useState<OperationsOrderDetail>();
   const [historyFilter, setHistoryFilter] = useState("all");
   const [editOpen, setEditOpen] = useState(false);
+  const [changeFeeOpen, setChangeFeeOpen] = useState(false);
   const [holdOpen, setHoldOpen] = useState(false);
   const [reopenDeliveryOpen, setReopenDeliveryOpen] = useState(false);
   const [correctionOpen, setCorrectionOpen] = useState(false);
@@ -5172,6 +5174,17 @@ export function OrderDetailsWorkspace({
             >
               <Pencil aria-hidden="true" size={18} />
               {t("operations.editOrder")}
+            </button>
+          ) : null}
+          {!isDriverSelfServiceUser &&
+          canChangeFeeAfterDelivery(detail.deliveryStatus, permissions) &&
+          detail.metadata.paymentCondition === "customer_pays_cod_trader_pays_fee" ? (
+            <button
+              className="button button-secondary"
+              onClick={() => setChangeFeeOpen(true)}
+              type="button"
+            >
+              {t("operations.changeFee.action")}
             </button>
           ) : null}
           {detail.deliveryStatus === "delivered" && permissions.includes("users_roles.manage") ? (
@@ -5785,6 +5798,16 @@ export function OrderDetailsWorkspace({
           )}
         </div>
       </main>
+      {changeFeeOpen ? (
+        <ChangeOrderFeeDialog
+          api={api}
+          onClose={() => setChangeFeeOpen(false)}
+          onSaved={async () => {
+            await load();
+          }}
+          order={detail}
+        />
+      ) : null}
       {editOpen ? (
         <CreateOrderDialog
           api={api}
@@ -7440,6 +7463,7 @@ function OrderRowActions({
   const [reasonFor, setReasonFor] = useState<RowAction>();
   const [assignOpen, setAssignOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [changeFeeOpen, setChangeFeeOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
   const [suggestedStatus, setSuggestedStatus] = useState<string>();
   const statusOpenTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -7739,6 +7763,18 @@ function OrderRowActions({
                 {t("operations.editOrder")}
               </button>
             ) : null}
+            {!isDriverSelfServiceUser && canChangeFeeAfterDelivery(order.deliveryStatus, permissions) ? (
+              <button
+                className="button button-secondary"
+                onClick={() => {
+                  setOpen(false);
+                  setChangeFeeOpen(true);
+                }}
+                type="button"
+              >
+                {t("operations.changeFee.action")}
+              </button>
+            ) : null}
             {actions.map((action) => {
               const blocked =
                 (action === "markDelivered" || action === "markOutForDelivery") &&
@@ -7767,6 +7803,16 @@ function OrderRowActions({
           </div>
           {error === undefined ? null : <div className="alert alert-error">{error}</div>}
         </Modal>
+      ) : null}
+      {changeFeeOpen ? (
+        <ChangeOrderFeeDialog
+          api={api}
+          onClose={() => setChangeFeeOpen(false)}
+          onSaved={async () => {
+            await onChanged();
+          }}
+          order={order}
+        />
       ) : null}
       {!statusOpen ? null : (
         <ChangeStatusDialog
@@ -8376,3 +8422,12 @@ const bulkTargetStatuses = [
   "cancelled",
   "closed",
 ] as const;
+
+/** "Change fee" after delivery (1 Nov 2026): delivered / closed, fee-override permission. */
+function canChangeFeeAfterDelivery(status: string, permissions: readonly string[]): boolean {
+  return (
+    (status === "delivered" || status === "closed") &&
+    (permissions.includes("orders.override_service_fee") || permissions.includes("users_roles.manage"))
+  );
+}
+

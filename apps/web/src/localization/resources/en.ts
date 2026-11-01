@@ -2096,6 +2096,17 @@ export const englishTranslations = {
     },
   },
   operations: {
+    changeFee: {
+      action: "Change fee",
+      title: "Change fee — {{order}}",
+      hint: "For a delivered order where the Trader pays the fee. If the fee was already collected on a receipt, un-post that receipt first.",
+      total: "Total fee: {{before}} → {{after}}",
+      reason: "Reason (required)",
+      save: "Save new fee",
+      failed: "The fee could not be changed.",
+      saved: "Fee of {{order}} changed to {{total}}.",
+      draftUpdated: "The Trader's open draft was updated with the new fee.",
+    },
     workflowActionIneligible: "This Order is no longer eligible for this action.",
     changeStatusTitle: "Change delivery status",
     changeStatusPrompt: "Choose the new delivery status for Order",

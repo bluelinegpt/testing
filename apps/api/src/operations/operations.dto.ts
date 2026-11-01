@@ -2144,3 +2144,21 @@ export class TraderAccountLookupQueryDto {
   @MaxLength(10000)
   public readonly references!: string;
 }
+
+/** Change the fee of a delivered / closed Pay by Trader Order (1 Nov 2026). */
+export class ChangeDeliveredOrderFeeDto {
+  @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(9999999999999.99)
+  public readonly serviceFee!: number;
+
+  @IsNumber({ allowInfinity: false, allowNaN: false, maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(9999999999999.99)
+  public readonly additionalFees!: number;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(500)
+  public readonly reason!: string;
+}

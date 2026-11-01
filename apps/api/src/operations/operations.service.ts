@@ -878,6 +878,14 @@ export function normalizeAddressText(value: string): string {
   return value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLowerCase();
 }
 
+/** The parts of a saved settlement draft's payload a fee change touches. */
+interface SettlementDraftPayload {
+  readonly allocations?: readonly { readonly amount: number }[];
+  readonly creditApplications?: readonly { readonly amount: number }[];
+  readonly receivableOffsets?: readonly { readonly amount: number; readonly receivableId: string }[];
+  readonly [key: string]: unknown;
+}
+
 @Injectable()
 export class OperationsService {
   public constructor(
@@ -7582,6 +7590,358 @@ export class OperationsService {
       );
     }
     return trader;
+  }
+
+  /**
+   * Change the fee of a delivered or closed "Pay by Trader" Order (Aiman,
+   * 1 Nov 2026: 4283 50 -> 65, 4284 25 -> 35 after the receipt was made).
+   *
+   * Edit Order refuses fee changes after delivery; this is the one controlled
+   * way. Only where the Trader pays the fee, so the cash the Driver collected
+   * and the Trader's payment for the Order do not move -- only the fee the
+   * Trader owes. That fee (its service-charge receivable) is replaced exactly
+   * as Edit Order does before delivery: the old one cancelled (its journal
+   * reversed by the trigger), a new one raised at the new amount. A fee
+   * already collected, wholly or partly, must first be freed by un-posting
+   * the receipt that collected it -- the receipts are named in the refusal.
+   * An open settlement draft of the Trader that held the old fee is switched
+   * to the new one, at the new amount, so it can be posted straight away.
+   */
+  public async changeDeliveredOrderFee(
+    orderId: string,
+    input: { readonly serviceFee: number; readonly additionalFees: number; readonly reason: string },
+    correlationId: string,
+  ): Promise<{
+    readonly orderNumber: string;
+    readonly serviceFee: string;
+    readonly additionalFees: string;
+    readonly receivableNumber: string | null;
+    readonly draftUpdated: boolean;
+  }> {
+    const { companyId } = this.tenants.current();
+    const identity = this.identities.current();
+    if (
+      !identity.permissions.has("orders.override_service_fee") &&
+      !identity.permissions.has("users_roles.manage")
+    ) {
+      throw new ApplicationException(
+        "service_fee_override_denied",
+        "You do not have permission to change the service fee",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    const reason = input.reason.trim();
+    if (reason === "") {
+      throw new ApplicationException(
+        "service_fee_override_reason_required",
+        "A reason is required to change the fee",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const nextServiceFee = this.money(new Decimal(input.serviceFee));
+    const nextAdditionalFees = this.money(new Decimal(input.additionalFees));
+    if (nextServiceFee.lessThan(0) || nextAdditionalFees.lessThan(0)) {
+      throw new ApplicationException("order_fee_invalid", "Fees cannot be negative", HttpStatus.BAD_REQUEST);
+    }
+    return this.transactions.execute(async (transaction) => {
+      const current = (
+        await sql<{
+          orderNumber: string;
+          deliveryStatus: string;
+          paymentCondition: string;
+          isFreeOrder: boolean;
+          codAmount: string;
+          serviceFee: string;
+          additionalFees: string | null;
+          driverCost: string;
+          customerAmountDue: string;
+          traderNetPayable: string;
+          traderId: string;
+          financialModelVersion: string | null;
+          vatEnabledSnapshot: boolean | null;
+          vatPriceModeSnapshot: "exclusive" | "inclusive" | null;
+          vatRateSnapshot: string | null;
+        }>`
+          select o.order_number as "orderNumber", o.delivery_status as "deliveryStatus",
+                 o.payment_condition as "paymentCondition", o.is_free_order as "isFreeOrder",
+                 o.cod_amount::text as "codAmount", o.service_fee::text as "serviceFee",
+                 o.additional_fees::text as "additionalFees", o.driver_cost::text as "driverCost",
+                 o.customer_amount_due::text as "customerAmountDue",
+                 o.trader_net_payable::text as "traderNetPayable", o.trader_id::text as "traderId",
+                 o.financial_model_version as "financialModelVersion",
+                 o.vat_enabled_snapshot as "vatEnabledSnapshot",
+                 o.vat_price_mode_snapshot as "vatPriceModeSnapshot",
+                 o.vat_rate_snapshot::text as "vatRateSnapshot"
+            from orders o
+           where o.id = ${orderId}::uuid and o.company_id = ${companyId}::uuid
+           for update of o
+        `.execute(transaction)
+      ).rows[0];
+      if (current === undefined) {
+        throw new ApplicationException("order_not_found", "Order not found", HttpStatus.NOT_FOUND);
+      }
+      if (!["delivered", "closed"].includes(current.deliveryStatus)) {
+        throw new ApplicationException(
+          "order_fee_change_not_delivered",
+          "Use Edit Order to change the fee of an Order that is not delivered yet",
+          HttpStatus.CONFLICT,
+        );
+      }
+      if (current.isFreeOrder || current.paymentCondition !== "customer_pays_cod_trader_pays_fee") {
+        throw new ApplicationException(
+          "order_fee_change_customer_pays",
+          "Only a Pay by Trader Order's fee can be changed after delivery: the customer's cash was already collected",
+          HttpStatus.CONFLICT,
+        );
+      }
+      const isProspective = current.financialModelVersion === "trader_deduction_v1";
+      const vatPolicy = isProspective
+        ? {
+            enabled: current.vatEnabledSnapshot ?? false,
+            priceMode: current.vatPriceModeSnapshot,
+            rate: new Decimal(current.vatRateSnapshot ?? 0),
+          }
+        : await this.vatPolicy(transaction, companyId);
+      const financials = this.calculateOrderFinancials({
+        additionalFees: nextAdditionalFees,
+        codAmount: new Decimal(current.codAmount),
+        driverCost: new Decimal(current.driverCost),
+        paymentCondition: "customer_pays_cod_trader_pays_fee",
+        prospective: isProspective,
+        serviceFee: nextServiceFee,
+        traderPaysCodShortfall: await traderPaysCodShortfall(transaction, companyId),
+        vatPolicy,
+      });
+      // The Driver's cash and the Trader's payment for this Order stay as
+      // they were: only the fee the Trader owes may move.
+      if (
+        !this.money(financials.customerAmountDue).equals(this.money(new Decimal(current.customerAmountDue))) ||
+        !this.money(financials.traderNetPayable).equals(this.money(new Decimal(current.traderNetPayable)))
+      ) {
+        throw new ApplicationException(
+          "order_fee_change_moves_payment",
+          "This fee is taken from the Trader's payment for the Order, which is already settled. It cannot be changed here.",
+          HttpStatus.CONFLICT,
+        );
+      }
+      const feeUnchanged =
+        nextServiceFee.equals(this.money(new Decimal(current.serviceFee))) &&
+        nextAdditionalFees.equals(this.money(new Decimal(current.additionalFees ?? 0)));
+      if (feeUnchanged) {
+        throw new ApplicationException("order_fee_unchanged", "The fee is the same as before", HttpStatus.BAD_REQUEST);
+      }
+      const active = (
+        await sql<{ id: string; receivableNumber: string; status: string; amountCollected: string; originalAmountDue: string }>`
+          select id, receivable_number as "receivableNumber", status,
+                 amount_collected::text as "amountCollected",
+                 original_amount_due::text as "originalAmountDue"
+            from trader_receivables
+           where company_id = ${companyId}::uuid and source_type = 'service_charge'
+             and source_reference = ${current.orderNumber}
+             and status not in ('cancelled', 'reversed')
+           for update
+        `.execute(transaction)
+      ).rows;
+      if (active.length > 1) {
+        throw new ApplicationException(
+          "order_payment_condition_receivable_conflict",
+          "This Order has more than one open fee. Check it in Order Maintenance first.",
+          HttpStatus.CONFLICT,
+        );
+      }
+      const old = active[0];
+      if (old !== undefined && (old.status !== "outstanding" || new Decimal(old.amountCollected).greaterThan(0))) {
+        const holders = (
+          await sql<{ number: string }>`
+            select distinct c.collection_number as number
+              from trader_collection_allocations alloc
+              join trader_collections c on c.id = alloc.collection_id and c.company_id = alloc.company_id
+             where alloc.company_id = ${companyId}::uuid and alloc.receivable_id = ${old.id}::uuid
+               and c.status <> 'reversed'
+            union
+            select distinct s.settlement_number
+              from trader_settlement_receivable_offsets x
+              join trader_settlements s on s.id = x.settlement_id and s.company_id = x.company_id
+             where x.company_id = ${companyId}::uuid and x.receivable_id = ${old.id}::uuid
+               and s.status = 'confirmed' and s.reversal_of_id is null
+               and not exists (select 1 from trader_settlements rv
+                 where rv.company_id = s.company_id and rv.reversal_of_id = s.id)
+             order by 1
+          `.execute(transaction)
+        ).rows.map((row) => row.number);
+        throw new ApplicationException(
+          "order_fee_has_collections",
+          `This fee was already collected from the Trader${holders.length === 0 ? "" : ` on ${holders.join(", ")}`}. Un-post ${holders.length === 1 ? "that receipt" : "those receipts"} first, then change the fee.`,
+          HttpStatus.CONFLICT,
+          holders,
+        );
+      }
+
+      await sql`
+        update orders
+           set service_fee = ${financials.serviceFee.toFixed(2)}::numeric,
+               final_service_fee_snapshot = ${financials.serviceFee.toFixed(2)}::numeric,
+               service_fee_net_amount = case when ${isProspective}
+                 then ${financials.serviceFeeNetAmount.toFixed(2)}::numeric else service_fee_net_amount end,
+               service_fee_vat_amount = case when ${isProspective}
+                 then ${financials.serviceFeeVatAmount.toFixed(2)}::numeric else service_fee_vat_amount end,
+               additional_fees = ${financials.additionalFees.toFixed(2)}::numeric,
+               additional_fee_vat_amount = case when ${isProspective}
+                 then ${financials.additionalFeeVatAmount.toFixed(2)}::numeric else additional_fee_vat_amount end,
+               total_deductions = case when ${isProspective}
+                 then ${financials.totalDeductions.toFixed(2)}::numeric else total_deductions end,
+               vat_amount = ${financials.vatAmount.toFixed(2)}::numeric,
+               company_revenue = ${financials.companyRevenue.toFixed(2)}::numeric,
+               trader_paid_service_fee = case when ${isProspective}
+                 then ${financials.traderPaidServiceFee.toFixed(2)}::numeric
+                 else ${financials.serviceFee.toFixed(2)}::numeric end,
+               trader_deductions = case when ${isProspective}
+                 then ${financials.traderDeductions.toFixed(2)}::numeric else trader_deductions end,
+               order_profit = ${financials.orderProfit.toFixed(2)}::numeric,
+               updated_at = now(),
+               version = version + 1
+         where id = ${orderId}::uuid and company_id = ${companyId}::uuid
+      `.execute(transaction);
+
+      // Replace, never re-amount (see updateOrder): cancelling posts the full
+      // reversal, the new charge posts the new amount.
+      if (old !== undefined) {
+        await sql`
+          update trader_receivables set status = 'cancelled', updated_at = now()
+           where id = ${old.id}::uuid and company_id = ${companyId}::uuid
+        `.execute(transaction);
+        await this.audit(transaction, {
+          action: "trader_receivable.cancel_from_order",
+          actorId: identity.identityId,
+          after: {
+            newAmountDue: financials.traderReceivableDue.toFixed(2),
+            orderNumber: current.orderNumber,
+            previousAmountDue: old.originalAmountDue,
+            reason: `Replaced: fee changed after delivery -- ${reason}`,
+            traderId: current.traderId,
+          },
+          companyId,
+          correlationId,
+          subjectId: old.id,
+          subjectType: "trader_receivable",
+        });
+      }
+      await this.createOrderTraderReceivableIfNeeded(transaction, {
+        actorAccountId: identity.identityId,
+        amountDue: financials.traderReceivableDue,
+        companyId,
+        correlationId,
+        orderId,
+        orderNumber: current.orderNumber,
+        traderId: current.traderId,
+      });
+      const replacement = (
+        await sql<{ id: string; receivableNumber: string; amount: string }>`
+          select id, receivable_number as "receivableNumber", original_amount_due::text as amount
+            from trader_receivables
+           where company_id = ${companyId}::uuid and source_type = 'service_charge'
+             and source_reference = ${current.orderNumber} and status = 'outstanding'
+           order by created_at desc
+           limit 1
+        `.execute(transaction)
+      ).rows[0];
+
+      // The Trader's open draft (Un-post reopens one) keeps up: the old fee's
+      // line now points at the new fee, for its full amount.
+      let draftUpdated = false;
+      if (old !== undefined) {
+        const drafts = (
+          await sql<{ id: string; payload: SettlementDraftPayload }>`
+            select id, payload from trader_settlement_drafts
+             where company_id = ${companyId}::uuid and trader_id = ${current.traderId}::uuid
+               and status = 'draft'
+             for update
+          `.execute(transaction)
+        ).rows;
+        for (const draft of drafts) {
+          const offsets = draft.payload.receivableOffsets ?? [];
+          if (!offsets.some((line) => line.receivableId === old.id)) continue;
+          const receivableOffsets = offsets.flatMap((line) =>
+            line.receivableId !== old.id
+              ? [line]
+              : replacement === undefined
+                ? []
+                : [{ amount: new Decimal(replacement.amount).toNumber(), receivableId: replacement.id }],
+          );
+          const payload = { ...draft.payload, receivableOffsets };
+          // The draft's net, as draftNet (trader-settlement.service) works it
+          // out: Orders paid - fees deducted + credits paid back.
+          const total = (lines: readonly { readonly amount: number }[] | undefined) =>
+            (lines ?? [])
+              .filter((line) => line.amount > 0)
+              .reduce((sum, line) => sum.plus(line.amount), new Decimal(0));
+          const amount = total(payload.allocations)
+            .minus(total(payload.receivableOffsets))
+            .plus(total(payload.creditApplications))
+            .toDecimalPlaces(2, Decimal.ROUND_HALF_UP)
+            .toNumber();
+          await sql`
+            update trader_settlement_drafts
+               set payload = ${JSON.stringify({ ...payload, amount })}::jsonb,
+                   updated_by_account_id = ${identity.identityId}::uuid, updated_at = now()
+             where id = ${draft.id}::uuid and company_id = ${companyId}::uuid
+          `.execute(transaction);
+          draftUpdated = true;
+        }
+      }
+
+      const changed: { field: string; previous: string; next: string }[] = [];
+      if (!nextServiceFee.equals(this.money(new Decimal(current.serviceFee)))) {
+        changed.push({
+          field: "service_fee",
+          next: financials.serviceFee.toFixed(2),
+          previous: this.money(new Decimal(current.serviceFee)).toFixed(2),
+        });
+      }
+      if (!nextAdditionalFees.equals(this.money(new Decimal(current.additionalFees ?? 0)))) {
+        changed.push({
+          field: "additional_fees",
+          next: nextAdditionalFees.toFixed(2),
+          previous: this.money(new Decimal(current.additionalFees ?? 0)).toFixed(2),
+        });
+      }
+      for (const change of changed) {
+        await sql`
+          insert into order_events (
+            company_id, order_id, event_type, event_category, field_name,
+            previous_value, new_value, actor_account_id, actor_role, source,
+            reason, correlation_id
+          ) values (
+            ${companyId}::uuid, ${orderId}::uuid, 'order.fee_changed_after_delivery', 'financial_change',
+            ${change.field}, to_jsonb(${change.previous}::text), to_jsonb(${change.next}::text),
+            ${identity.identityId}::uuid, 'Company User', 'web_portal', ${reason}, ${correlationId}
+          )
+        `.execute(transaction);
+      }
+      await this.audit(transaction, {
+        action: "order.fee_changed_after_delivery",
+        actorId: identity.identityId,
+        after: {
+          additionalFees: nextAdditionalFees.toFixed(2),
+          draftUpdated,
+          newReceivable: replacement?.receivableNumber ?? null,
+          previousReceivable: old?.receivableNumber ?? null,
+          reason,
+          serviceFee: financials.serviceFee.toFixed(2),
+        },
+        companyId,
+        correlationId,
+        subjectId: orderId,
+        subjectType: "order",
+      });
+      return {
+        additionalFees: nextAdditionalFees.toFixed(2),
+        draftUpdated,
+        orderNumber: current.orderNumber,
+        receivableNumber: replacement?.receivableNumber ?? null,
+        serviceFee: financials.serviceFee.toFixed(2),
+      };
+    });
   }
 
   private normalizeOrderIdentifier(value: string): string {

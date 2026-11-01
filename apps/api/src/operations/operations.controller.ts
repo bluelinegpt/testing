@@ -163,6 +163,7 @@ import {
   TraderSettlementSummaryQueryDto,
   TraderSettlementDraftListQueryDto,
   TraderAccountListQueryDto,
+  ChangeDeliveredOrderFeeDto,
   TraderAccountLookupQueryDto,
   TraderAccountStatementQueryDto,
   UpdateOrderDto,
@@ -1313,6 +1314,17 @@ export class OperationsController {
     @Req() request: Request,
   ): Promise<OperationsOrderImportResult> {
     return this.operations.importOrdersCsv(input, this.correlationId(request));
+  }
+
+  @RequireAnyPermission("orders.override_service_fee", "users_roles.manage")
+  @ApiOperation({ summary: "Change the fee of a delivered or closed Pay by Trader order" })
+  @Post("orders/:orderId/change-fee")
+  public changeDeliveredOrderFee(
+    @Param("orderId", new ParseUUIDPipe()) orderId: string,
+    @Body() input: ChangeDeliveredOrderFeeDto,
+    @Req() request: Request,
+  ) {
+    return this.operations.changeDeliveredOrderFee(orderId, input, this.correlationId(request));
   }
 
   @ApiOperation({ summary: "Edit an order's business fields before delivery" })
