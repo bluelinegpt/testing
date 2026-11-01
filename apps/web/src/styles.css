@@ -2392,6 +2392,19 @@ textarea:focus-visible {
   color: var(--primary-strong);
   background: var(--primary-subtle);
 }
+/* Post: the row's main action, filled so it reads (Aiman, 1 Nov 2026 -- the
+   generic rule above gave it the surface background under white text). */
+.settlement-drafts__actions button.button-primary {
+  border-color: var(--color-primary);
+  color: #fff;
+  background: var(--color-primary);
+  font-weight: 600;
+}
+.settlement-drafts__actions button.button-primary:hover:not(:disabled) {
+  border-color: var(--color-primary-hover);
+  color: #fff;
+  background: var(--color-primary-hover);
+}
 /* Destructive, so it reads as destructive on hover — but quietly at rest, to
    keep it from competing with Edit on every row. */
 .settlement-drafts__actions .is-destructive:hover:not(:disabled) {
