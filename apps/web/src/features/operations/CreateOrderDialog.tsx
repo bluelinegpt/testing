@@ -23,6 +23,7 @@ function mobileKey(value: string): string {
   return normalizeUaeMobile(value) ?? value.replace(/[^0-9]/g, "").replace(/^00/, "");
 }
 import { Modal } from "../../components/Modal.js";
+import { TodayDateLabel } from "../../components/TodayDateLabel.js";
 import { isUaeMobile, normalizeUaeMobile } from "../../domain/uae-mobile.js";
 import { SearchCombobox } from "../../components/SearchCombobox.js";
 import { AreaSelector } from "../configuration/AreaSelector.js";
@@ -1014,6 +1015,7 @@ export function CreateOrderDialog({
         title={t(isEdit ? "operations.editOrder" : "operations.createOrder")}
         titleId="create-order-title"
       >
+        {isEdit ? null : <TodayDateLabel />}
         {isEdit && editDetail === undefined ? (
           editLoadError === undefined ? (
             <div className="loading-row">{t("common.loading")}</div>

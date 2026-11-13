@@ -49,6 +49,7 @@ import type {
   SearchPage,
 } from "../../api/contracts.js";
 import { Modal } from "../../components/Modal.js";
+import { TodayDateLabel } from "../../components/TodayDateLabel.js";
 import { StickyHorizontalScrollbar } from "../../components/StickyHorizontalScrollbar.js";
 import {
   useWorkflowDeepLink,
@@ -2282,6 +2283,7 @@ export function OrdersModuleWorkspace({
         ) : null}
         <>
           <div className="orders-filter-bar">
+            <TodayDateLabel />
             <label className="row-status-color-toggle">
               <input
                 checked={rowStatusColors}
