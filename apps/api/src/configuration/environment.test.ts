@@ -21,7 +21,7 @@ describe("environment configuration", () => {
     expect(result.auth.lockoutMinutes).toBe(15);
     expect(result.auth.sessionTtlMinutes).toBe(720);
     expect(result.database.connectionTimeoutMs).toBe(5000);
-    expect(result.database.queryTimeoutMs).toBe(10000);
+    expect(result.database.queryTimeoutMs).toBe(30000);
     expect(result.database.url).toContain("blueline_test");
     expect(result.companyDeletion.timeoutMs).toBe(300_000);
     expect(result.companyDeletion.backupRoot).toContain("company-deletion");

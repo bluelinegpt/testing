@@ -403,7 +403,7 @@ export function configuration(): AppConfiguration {
       queryTimeoutMs: parseInteger(
         process.env.DATABASE_QUERY_TIMEOUT_MS,
         "DATABASE_QUERY_TIMEOUT_MS",
-        10_000,
+        30_000,
         100,
         120_000,
       ),
