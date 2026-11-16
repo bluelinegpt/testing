@@ -4813,6 +4813,14 @@ export const englishTranslations = {
     viewSettlement: "View Settlement",
     // Errors
     settlementFailed: "The Trader settlement could not be created.",
+    posting: "Posting…",
+    working: "Working…",
+    checkingResult: "Checking the result… Please don't press again.",
+    notPostedAfterCheck: "It was not posted. Nothing was saved, so you can post it again.",
+    resultUnknown:
+      "We couldn't reach the server to check. Don't post again: refresh this page in a minute to see whether it was posted.",
+    stillWorking:
+      "The server is still working on this. Don't press again: the list is being refreshed to show the result.",
     detailLoadFailed: "The settlement details could not be loaded.",
     pdfGenerationFailed: "The Trader Settlement Statement could not be generated.",
     staleOutstandingBalance:

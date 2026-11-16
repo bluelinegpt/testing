@@ -1,16 +1,29 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { ApiClient } from "../../api/api-client.js";
+import { ApiError, type ApiClient } from "../../api/api-client.js";
 import "../../localization/i18n.js";
 import { OneScreenSettlementDialog } from "./OneScreenSettlementDialog.js";
 
 const page = <T,>(items: readonly T[]) => ({ items, page: 1, pageSize: 200, total: items.length });
 
-function setup(options: { readonly feesOnly?: boolean; readonly zeroOnly?: boolean } = {}) {
+function setup(
+  options: {
+    readonly feesOnly?: boolean;
+    readonly slowConfirm?: {
+      readonly draftCheck: Promise<{ status: string }>;
+      readonly postedOnServer: boolean;
+    };
+    readonly zeroOnly?: boolean;
+  } = {},
+) {
   const posts: { body: unknown; path: string }[] = [];
+  let confirmCalls = 0;
   const api = {
     get: vi.fn((path: string) => {
+      if (path === "operations/settlements/drafts/draft-1" && options.slowConfirm !== undefined) {
+        return options.slowConfirm.draftCheck;
+      }
       if (path === "operations/traders") {
         return Promise.resolve([
           { code: "TRD-1", id: "trader-1", mobileNumber: "", name: "ARMAN ABYA", openOrders: 1, status: "active", totalOrders: 1, unsettledNetPayable: "300.00" },
@@ -62,6 +75,14 @@ function setup(options: { readonly feesOnly?: boolean; readonly zeroOnly?: boole
         return Promise.resolve({ id: "draft-1", payload: body, status: "draft", traderId: "trader-1", traderName: "ARMAN ABYA" });
       }
       if (path.endsWith("/confirm")) {
+        confirmCalls += 1;
+        // The browser gave up waiting (over 10 s in production); the server
+        // may or may not have finished.
+        if (options.slowConfirm !== undefined && confirmCalls === 1) {
+          return Promise.reject(
+            new ApiError("The request timed out. Please try again.", "request_timeout", 408),
+          );
+        }
         return Promise.resolve(
           options.feesOnly === true
             ? { amountCollected: "25.00", collectionNumber: "TCL-000009", settlementId: null }
@@ -74,6 +95,8 @@ function setup(options: { readonly feesOnly?: boolean; readonly zeroOnly?: boole
     }),
     postBinary: vi.fn(),
   };
+  // Long-running writes go through postLong / patchLong (SET-PERF-1).
+  Object.assign(api, { patchLong: api.patch, postLong: api.post });
   const onPosted = vi.fn();
   render(
     <OneScreenSettlementDialog
@@ -84,7 +107,7 @@ function setup(options: { readonly feesOnly?: boolean; readonly zeroOnly?: boole
       reportLanguage="en"
     />,
   );
-  return { api, onPosted, posts };
+  return { api, confirmCount: () => confirmCalls, onPosted, posts };
 }
 
 describe("One-screen Trader Settlement", () => {
@@ -147,6 +170,51 @@ describe("One-screen Trader Settlement", () => {
       zeroDueOrderIds: ["zero-1"],
     });
     expect(posts.some((call) => call.path === "operations/settlements/drafts/draft-1/confirm")).toBe(true);
+  });
+
+  it("when the answer to Post is lost, checks the draft and shows the posted settlement, never 'try again'", async () => {
+    let finishCheck: (value: { status: string }) => void = () => undefined;
+    const draftCheck = new Promise<{ status: string }>((resolve) => {
+      finishCheck = resolve;
+    });
+    const { confirmCount, onPosted } = setup({ slowConfirm: { draftCheck, postedOnServer: true } });
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.click(await dialog.findByRole("button", { name: "ARMAN ABYA (TRD-1)" }));
+    await dialog.findByText("5183");
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const postButton = dialog.getByRole("button", { name: /Post payment/ });
+    await waitFor(() => expect(postButton).toBeEnabled());
+    fireEvent.click(postButton);
+    const checking = await dialog.findByRole("button", { name: /Checking the result/ });
+    expect(checking).toBeDisabled();
+    expect(dialog.queryByText(/try again/i)).toBeNull();
+    finishCheck({ status: "confirmed" });
+    await waitFor(() => expect(onPosted).toHaveBeenCalledWith({ settlementId: "settlement-9" }));
+    // The second confirm is the idempotent read-back of the first post.
+    expect(confirmCount()).toBe(2);
+    expect(dialog.queryByText(/try again/i)).toBeNull();
+  });
+
+  it("when the answer to Post is lost and the draft was not posted, says so without inviting a blind retry", async () => {
+    const { onPosted } = setup({
+      slowConfirm: { draftCheck: Promise.resolve({ status: "draft" }), postedOnServer: false },
+    });
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.click(await dialog.findByRole("button", { name: "ARMAN ABYA (TRD-1)" }));
+    await dialog.findByText("5183");
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      const postButton = dialog.getByRole("button", { name: /Post payment/ });
+      await waitFor(() => expect(postButton).toBeEnabled());
+      fireEvent.click(postButton);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(await dialog.findByText(/It was not posted\. Nothing was saved/)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(onPosted).not.toHaveBeenCalled();
+    expect(dialog.queryByText(/Please try again/)).toBeNull();
   });
 
   it("pays part of an order when Edit amounts is on", async () => {

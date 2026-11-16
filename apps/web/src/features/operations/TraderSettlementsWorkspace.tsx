@@ -32,6 +32,7 @@ import { PageHeader } from "../../components/PageHeader.js";
 import { formatMoneyValue, parseMoneyInput, safeMoneyValue } from "../../utils/numeric-input.js";
 
 import { type PdfAction, useReconciliationPdfActions } from "./reconciliation-pdf.js";
+import { confirmDraftSafely, isUncertainOutcome } from "./settlement-post.js";
 import { useWorkflowDeepLink, type WorkflowDialog } from "./use-workflow-deep-link.js";
 import { useIdempotencyKey } from "./useIdempotencyKey.js";
 import {
@@ -557,6 +558,7 @@ export function TraderSettlementsWorkspace({
      the list shows open ones by default and this reveals the rest on demand. */
   const [showConfirmedDrafts, setShowConfirmedDrafts] = useState(false);
   const [draftBusyId, setDraftBusyId] = useState<string>();
+  const [draftChecking, setDraftChecking] = useState(false);
   const [draftError, setDraftError] = useState<string>();
   const [addReceivableOpen, setAddReceivableOpen] = useState(false);
   const [collectFromTraderOpen, setCollectFromTraderOpen] = useState(false);
@@ -741,14 +743,25 @@ export function TraderSettlementsWorkspace({
       return;
     }
     setDraftBusyId(draft.id);
+    setDraftChecking(false);
     setDraftError(undefined);
     try {
-      const result = await api.post<{
+      const posted = await confirmDraftSafely<{
         amountCollected?: string;
         collectionNumber?: string;
         invoiceNumber?: string;
         settlementId: string | null;
-      }>(`operations/settlements/drafts/${draft.id}/confirm`);
+      }>(api, draft.id, () => setDraftChecking(true));
+      if (posted.outcome !== "posted") {
+        setDraftError(
+          posted.outcome === "not_posted"
+            ? t("traderSettlements.notPostedAfterCheck")
+            : t("traderSettlements.resultUnknown"),
+        );
+        refresh();
+        return;
+      }
+      const result = posted.result;
       if (result.invoiceNumber !== undefined) {
         setReceiptNotice(
           t("traderSettlements.oneScreen.zeroInvoiceNotice", {
@@ -770,9 +783,14 @@ export function TraderSettlementsWorkspace({
       if (result.settlementId !== null) openDetail(result.settlementId);
       else setShowConfirmedDrafts(true);
     } catch (error) {
-      setDraftError(message(error, t("traderSettlements.oneScreen.postDraftFailed")));
+      setDraftError(
+        isUncertainOutcome(error)
+          ? t("traderSettlements.resultUnknown")
+          : message(error, t("traderSettlements.oneScreen.postDraftFailed")),
+      );
     } finally {
       setDraftBusyId(undefined);
+      setDraftChecking(false);
     }
   };
 
@@ -1096,11 +1114,15 @@ export function TraderSettlementsWorkspace({
                             </button>
                             <button
                               className="button-primary"
-                              disabled={draftBusyId === draft.id}
+                              disabled={draftBusyId !== undefined}
                               onClick={() => void postDraft(draft)}
                               type="button"
                             >
-                              {t("traderSettlements.oneScreen.postDraft")}
+                              {draftBusyId === draft.id
+                                ? draftChecking
+                                  ? t("traderSettlements.checkingResult")
+                                  : t("traderSettlements.posting")
+                                : t("traderSettlements.oneScreen.postDraft")}
                             </button>
                           </>
                         ) : null}
@@ -2438,6 +2460,8 @@ function NewSettlementDialog({
 
   const [saving, setSaving] = useState(false);
   const [confirmError, setConfirmError] = useState<string>();
+  // What the confirm button says while a post runs (SET-PERF-1).
+  const [postPhase, setPostPhase] = useState<"checking" | "idle" | "posting">("idle");
   const [draftNotice, setDraftNotice] = useState<string>();
   const [confirmed, setConfirmed] = useState<CreateTraderSettlementResult>();
   const idempotency = useIdempotencyKey();
@@ -3084,8 +3108,8 @@ function NewSettlementDialog({
   const persistDraft = async (): Promise<TraderSettlementDraftRow> => {
     const payload = draftPayload();
     return draftId === undefined
-      ? api.post<TraderSettlementDraftRow>("operations/settlements/drafts", payload)
-      : api.patch<TraderSettlementDraftRow>(
+      ? api.postLong<TraderSettlementDraftRow>("operations/settlements/drafts", payload)
+      : api.patchLong<TraderSettlementDraftRow>(
           `operations/settlements/drafts/${draftId}`,
           payload,
         );
@@ -3125,15 +3149,29 @@ function NewSettlementDialog({
     try {
       const saved = await persistDraft();
       setDraftId(saved.id);
-      const result = await api.post<CreateTraderSettlementResult>(
-        `operations/settlements/drafts/${saved.id}/confirm`,
+      setPostPhase("posting");
+      const posted = await confirmDraftSafely<CreateTraderSettlementResult>(api, saved.id, () =>
+        setPostPhase("checking"),
       );
-      setConfirmed(result);
+      if (posted.outcome !== "posted") {
+        setConfirmError(
+          posted.outcome === "not_posted"
+            ? t("traderSettlements.notPostedAfterCheck")
+            : t("traderSettlements.resultUnknown"),
+        );
+        return;
+      }
+      setConfirmed(posted.result);
       idempotency.reset();
     } catch (error) {
-      setConfirmError(message(error, t("traderSettlements.settlementFailed")));
+      setConfirmError(
+        isUncertainOutcome(error)
+          ? t("traderSettlements.resultUnknown")
+          : message(error, t("traderSettlements.settlementFailed")),
+      );
     } finally {
       setSaving(false);
+      setPostPhase("idle");
     }
   };
 
@@ -4285,7 +4323,13 @@ function NewSettlementDialog({
                       {saving ? t("common.saving") : t("traderSettlements.saveDraft")}
                     </button>
                     <button className="button button-primary" disabled={saving || draftReadOnly} type="submit">
-                      {saving ? t("common.saving") : t("traderSettlements.confirmMoneySent")}
+                      {postPhase === "checking"
+                        ? t("traderSettlements.checkingResult")
+                        : postPhase === "posting"
+                          ? t("traderSettlements.posting")
+                          : saving
+                            ? t("common.saving")
+                            : t("traderSettlements.confirmMoneySent")}
                     </button>
                   </div>
                 </section>
@@ -4465,7 +4509,7 @@ function ReverseSettlementDialog({
     setSaving(true);
     setError(undefined);
     try {
-      await api.post(`operations/settlements/payments/${settlement.settlementId}/reverse`, {
+      await api.postLong(`operations/settlements/payments/${settlement.settlementId}/reverse`, {
         reason: reason.trim(),
       });
       // Refreshes the list/detail behind this dialog immediately; the dialog
@@ -4473,7 +4517,14 @@ function ReverseSettlementDialog({
       onReversed();
       setReversed(true);
     } catch (submitError) {
-      setError(message(submitError, t("traderSettlements.settlementFailed")));
+      if (isUncertainOutcome(submitError)) {
+        // A lost answer is not a failure: never invite a second reversal.
+        // Refresh what is behind the dialog so the outcome shows there.
+        onReversed();
+        setError(t("traderSettlements.stillWorking"));
+      } else {
+        setError(message(submitError, t("traderSettlements.settlementFailed")));
+      }
     } finally {
       setSaving(false);
     }

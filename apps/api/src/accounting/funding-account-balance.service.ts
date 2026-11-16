@@ -27,6 +27,10 @@ import type { PaymentAccountKind } from "./payment-funding-account.service.js";
  * right. A control that blocks payments must agree with the screen the user is
  * looking at, so it reads what that screen reads.
  *
+ * Since SET-PERF-1 (16 Nov 2026) it reads `balanceFor()`: the same statement
+ * as `balances()`, narrowed to the one account, so the lock is held for
+ * milliseconds. Still one formula, not two.
+ *
  * The cost is real and bounded: `balances()` computes every account, and this
  * discards all but one. A Company has tens of accounts, not millions, and the
  * work is one SQL statement either way -- no application-memory aggregation and
@@ -115,8 +119,12 @@ export class FundingAccountBalanceService {
     database?: Kysely<DatabaseSchema>,
   ): Promise<FundingAccountBalance> {
     const { companyId } = this.tenants.current();
-    const rows = await this.cashBank.balances(database);
-    const match = rows.find((row) => row.id === accountId && row.kind === kind);
+    // The single-account form of the SAME statement as balances() (SET-PERF-1):
+    // a payment needs one account, and computing every account behind the
+    // funding-account lock is what made posting slow. An equality test holds
+    // the two forms to one answer.
+    const row = await this.cashBank.balanceFor(kind, accountId, database);
+    const match = row !== undefined && row.id === accountId && row.kind === kind ? row : undefined;
     // A cross-tenant account is absent from this Company's list, so it lands
     // here identically to a nonexistent one. Distinguishing them would let a
     // caller enumerate another tenant's account ids by watching the error.

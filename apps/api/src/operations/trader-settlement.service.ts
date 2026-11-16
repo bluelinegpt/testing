@@ -1639,8 +1639,72 @@ export class TraderSettlementService {
       const grossPayable = this.money(allocationTotal);
       const netPayable = netPayment;
 
+      // 3b. Funding account and balance control, before any number is taken.
+      // A bank transfer names its Bank account and nothing else. Rejecting a
+      // stray cash account rather than ignoring it: silently dropping a field
+      // the caller supplied leaves them believing something untrue, and the
+      // table CHECK would reject the row anyway.
+      if (payment.method !== "cash" && input.cashAccountId !== undefined) {
+        throw new ApplicationException(
+          "payment_funding_account_not_allowed",
+          "A bank transfer settlement is funded from a Bank account, not a Cash account",
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+      // Resolved here rather than earlier so an account deactivated mid-flow
+      // fails at the moment of the write. A throw rolls back the settlement,
+      // its order rows and everything else this transaction has done.
+      let cashAccountId = input.cashAccountId;
+      if (payment.method === "cash" && !cashAccountId) {
+        // Auto-select default cash account (main_cash) if not provided
+        const defaultAccount = await sql<{ id: string }>`
+          select id from company_cash_accounts
+           where company_id=${companyId}::uuid and is_active
+             and cash_account_type='main_cash'
+           order by created_at asc
+           limit 1
+        `.execute(transaction);
+        cashAccountId = defaultAccount.rows[0]?.id;
+      }
+      const cashAccount =
+        payment.method === "cash"
+          ? await this.fundingAccounts.resolve(cashAccountId, "cash")
+          : null;
+      // Balance control, on whichever account this settlement actually draws
+      // on. Both methods move Company money out -- a bank transfer is not
+      // exempt just because it is not cash -- so both are checked, each against
+      // its own kind's policy: Cash has no overdraft, Bank may have one.
+      //
+      // Placed after the funding-account validation above and BEFORE the
+      // settlement number is taken (SET-PERF-1, 16 Nov 2026): the number
+      // row-locks `company_reference_counters` until commit, so everything
+      // slow happens first and the counter is held for milliseconds, not for
+      // the balance check. A second user posting at the same moment waited
+      // 8.9 s on that row when the order was the other way round.
+      // The coordinator locks the account, reads its balance behind that lock,
+      // then judges, all in this transaction. A throw here rolls back
+      // everything written so far.
+      const enforcement = await this.balanceEnforcement.evaluate(transaction, {
+        actorId: identity.identityId,
+        actorPermissions: [...identity.permissions],
+        deductions: [
+          cashAccount === null
+            ? { accountId: payment.bankAccountId!, amount: netPayable.toFixed(2), kind: "bank" }
+            : { accountId: cashAccount.accountId, amount: netPayable.toFixed(2), kind: "cash" },
+        ],
+        // No settlement number yet: it is taken after this check (below).
+        // `evaluate()` never reads the source fields; `recordOverrides()`
+        // receives the number once it exists.
+        sourceType: "trader_settlement",
+        ...(input.balanceOverrideReason === undefined
+          ? {}
+          : { overrideReason: input.balanceOverrideReason }),
+      });
+      if (!enforcement.allowed) this.balanceBlocked(enforcement);
+
       // 4. Write everything atomically: header (draft, then confirmed so the
       //    trigger actually validates it), lines, payment, Order updates.
+      //    The settlement number is taken HERE, after every slow step.
       const settlementNumber = await this.history.nextReferenceNumber(
         transaction,
         companyId,
@@ -1751,61 +1815,6 @@ export class TraderSettlementService {
           `.execute(transaction);
         }
       }
-      // A bank transfer names its Bank account and nothing else. Rejecting a
-      // stray cash account rather than ignoring it: silently dropping a field
-      // the caller supplied leaves them believing something untrue, and the
-      // table CHECK would reject the row anyway.
-      if (payment.method !== "cash" && input.cashAccountId !== undefined) {
-        throw new ApplicationException(
-          "payment_funding_account_not_allowed",
-          "A bank transfer settlement is funded from a Bank account, not a Cash account",
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-      // Resolved here rather than earlier so an account deactivated mid-flow
-      // fails at the moment of the write. A throw rolls back the settlement,
-      // its order rows and everything else this transaction has done.
-      let cashAccountId = input.cashAccountId;
-      if (payment.method === "cash" && !cashAccountId) {
-        // Auto-select default cash account (main_cash) if not provided
-        const defaultAccount = await sql<{ id: string }>`
-          select id from company_cash_accounts
-           where company_id=${companyId}::uuid and is_active
-             and cash_account_type='main_cash'
-           order by created_at asc
-           limit 1
-        `.execute(transaction);
-        cashAccountId = defaultAccount.rows[0]?.id;
-      }
-      const cashAccount =
-        payment.method === "cash"
-          ? await this.fundingAccounts.resolve(cashAccountId, "cash")
-          : null;
-      // Balance control, on whichever account this settlement actually draws
-      // on. Both methods move Company money out -- a bank transfer is not
-      // exempt just because it is not cash -- so both are checked, each against
-      // its own kind's policy: Cash has no overdraft, Bank may have one.
-      //
-      // Placed after the funding-account validation above and before the
-      // payment insert below. The coordinator locks the account, then reads its
-      // balance behind that lock, then judges, all in this transaction. A throw
-      // here rolls back the settlement header, its order rows and everything
-      // else written so far.
-      const enforcement = await this.balanceEnforcement.evaluate(transaction, {
-        actorId: identity.identityId,
-        actorPermissions: [...identity.permissions],
-        deductions: [
-          cashAccount === null
-            ? { accountId: payment.bankAccountId!, amount: netPayable.toFixed(2), kind: "bank" }
-            : { accountId: cashAccount.accountId, amount: netPayable.toFixed(2), kind: "cash" },
-        ],
-        sourceReference: settlementNumber,
-        sourceType: "trader_settlement",
-        ...(input.balanceOverrideReason === undefined
-          ? {}
-          : { overrideReason: input.balanceOverrideReason }),
-      });
-      if (!enforcement.allowed) this.balanceBlocked(enforcement);
       const paymentRow = await sql<{ id: string }>`
         insert into trader_settlement_payments (
           company_id, settlement_id, payment_method, amount, company_bank_account_id,
@@ -2003,14 +2012,31 @@ export class TraderSettlementService {
     this.assertAnyPermission("settlements.create");
     const { companyId } = this.tenants.current();
     return this.transactions.execute(async (transaction) => {
-      const row = (await sql<{ payload: CreateTraderSettlementDto; settlementId: string | null; status: string }>`
-        select payload, confirmed_settlement_id as "settlementId", status
+      const row = (await sql<{
+        collectionId: string | null;
+        payload: CreateTraderSettlementDto;
+        settlementId: string | null;
+        status: string;
+        zeroInvoiceId: string | null;
+      }>`
+        select payload, confirmed_settlement_id as "settlementId", status,
+               confirmed_collection_id as "collectionId",
+               confirmed_zero_invoice_id as "zeroInvoiceId"
           from trader_settlement_drafts
          where id=${draftId}::uuid and company_id=${companyId}::uuid
          for update
       `.execute(transaction)).rows[0];
       if (row === undefined) {
         throw new ApplicationException("trader_settlement_draft_not_found", "Trader settlement draft not found", HttpStatus.NOT_FOUND);
+      }
+      // Idempotent (SET-PERF-1, 16 Nov 2026): the draft IS the idempotency key.
+      // A second click, a retry after a timeout, or the browser re-sending the
+      // request returns what the first post created -- never a second
+      // settlement. A second request that arrives while the first is still
+      // running waits on the `for update` above and lands here once it commits.
+      if (row.status === "confirmed") {
+        const posted = await this.postedDraftResult(transaction, companyId, draftId, row);
+        if (posted !== undefined) return posted;
       }
       if (row.settlementId !== null || row.status !== "draft") {
         throw new ApplicationException("trader_settlement_draft_already_confirmed", "This Trader settlement draft was already confirmed", HttpStatus.CONFLICT);
@@ -2041,6 +2067,62 @@ export class TraderSettlementService {
       `.execute(transaction);
       return result;
     });
+  }
+
+  /**
+   * What an already-posted draft created, in the same shape its post returned.
+   * `undefined` when the draft names nothing it created (cannot happen under
+   * the 20260979000000 check), so the caller falls back to the plain conflict.
+   */
+  private async postedDraftResult(
+    database: Kysely<DatabaseSchema>,
+    companyId: string,
+    draftId: string,
+    draft: {
+      readonly collectionId: string | null;
+      readonly settlementId: string | null;
+      readonly zeroInvoiceId: string | null;
+    },
+  ): Promise<CreateTraderSettlementResult | TraderOwesDraftResult | ZeroInvoiceDraftResult | undefined> {
+    if (draft.zeroInvoiceId !== null) {
+      const invoice = (
+        await sql<{ invoiceNumber: string; orderCount: number }>`
+          select i.invoice_number as "invoiceNumber",
+                 (select count(*)::int from trader_settlement_zero_due_orders z
+                   where z.company_id = i.company_id and z.zero_invoice_id = i.id) as "orderCount"
+            from trader_zero_invoices i
+           where i.id = ${draft.zeroInvoiceId}::uuid and i.company_id = ${companyId}::uuid
+        `.execute(database)
+      ).rows[0];
+      if (invoice === undefined) return undefined;
+      return { draftId, invoiceId: draft.zeroInvoiceId, ...invoice, settlementId: null };
+    }
+    if (draft.collectionId !== null) {
+      const posted = (
+        await sql<{ amountCollected: string; collectionNumber: string; settlementNumber: string | null }>`
+          select c.collection_number as "collectionNumber",
+                 (c.amount_received - coalesce(s.net_payable, 0))::numeric(18,2)::text as "amountCollected",
+                 s.settlement_number as "settlementNumber"
+            from trader_collections c
+            left join trader_settlements s
+              on s.id = ${draft.settlementId}::uuid and s.company_id = c.company_id
+           where c.id = ${draft.collectionId}::uuid and c.company_id = ${companyId}::uuid
+        `.execute(database)
+      ).rows[0];
+      if (posted === undefined) return undefined;
+      return {
+        amountCollected: posted.amountCollected,
+        collectionId: draft.collectionId,
+        collectionNumber: posted.collectionNumber,
+        draftId,
+        settlementId: draft.settlementId,
+        settlementNumber: posted.settlementNumber,
+      };
+    }
+    if (draft.settlementId !== null) {
+      return this.settlementResult(database, companyId, draft.settlementId);
+    }
+    return undefined;
   }
 
   /**

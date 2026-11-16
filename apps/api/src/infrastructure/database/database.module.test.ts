@@ -3,6 +3,7 @@ import { Pool } from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  DATABASE_SESSION_OPTIONS,
   databasePoolOptions,
   IDLE_IN_TRANSACTION_TIMEOUT_MS,
   registerDatabasePoolErrorHandler,
@@ -43,6 +44,11 @@ describe("databasePoolOptions", () => {
   it("lets PostgreSQL enforce the query limit, so a timeout rolls the transaction back", () => {
     expect(options.statement_timeout).toBe(30000);
     expect(options.idle_in_transaction_session_timeout).toBe(IDLE_IN_TRANSACTION_TIMEOUT_MS);
+  });
+
+  it("turns JIT off for the API's sessions, so a short request never pays for compilation", () => {
+    expect(options.options).toBe(DATABASE_SESSION_OPTIONS);
+    expect(DATABASE_SESSION_OPTIONS).toContain("jit=off");
   });
 
   it("never uses the client-side query_timeout, which leaves a transaction open on the pooled connection", () => {

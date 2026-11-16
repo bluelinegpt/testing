@@ -6,6 +6,7 @@ import type { CompanyBankAccount, OperationsTrader } from "../../api/contracts.j
 import { Modal } from "../../components/Modal.js";
 import { formatMoneyValue, parseMoneyInput, safeMoneyValue } from "../../utils/numeric-input.js";
 import { useReconciliationPdfActions } from "./reconciliation-pdf.js";
+import { confirmDraftSafely, isUncertainOutcome } from "./settlement-post.js";
 
 /**
  * One-screen Trader Settlement (Aiman, 22 Oct 2026; per Company switch).
@@ -206,6 +207,8 @@ export function OneScreenSettlementDialog({
   const [bankReference, setBankReference] = useState("");
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
+  // What the primary button says while a post runs (SET-PERF-1).
+  const [postPhase, setPostPhase] = useState<"checking" | "idle" | "posting">("idle");
   const [error, setError] = useState<string>();
   // Start page: every Trader with something to invoice, with the amounts.
   const [openTraders, setOpenTraders] = useState<readonly OpenTrader[]>();
@@ -547,8 +550,8 @@ export function OneScreenSettlementDialog({
     try {
       const saved =
         draftId === undefined
-          ? await api.post<DraftRow>("operations/settlements/drafts", body)
-          : await api.patch<DraftRow>(`operations/settlements/drafts/${draftId}`, body);
+          ? await api.postLong<DraftRow>("operations/settlements/drafts", body)
+          : await api.patchLong<DraftRow>(`operations/settlements/drafts/${draftId}`, body);
       setDraftId(saved.id);
       return saved;
     } catch (reason) {
@@ -556,7 +559,7 @@ export function OneScreenSettlementDialog({
       if (reason instanceof ApiError && reason.code === "trader_settlement_draft_already_open") {
         const existing = Array.isArray(reason.details) ? String(reason.details[0] ?? "") : "";
         if (existing !== "") {
-          const saved = await api.patch<DraftRow>(`operations/settlements/drafts/${existing}`, body);
+          const saved = await api.patchLong<DraftRow>(`operations/settlements/drafts/${existing}`, body);
           setDraftId(saved.id);
           return saved;
         }
@@ -604,15 +607,25 @@ export function OneScreenSettlementDialog({
       return;
     }
     setBusy(true);
+    setPostPhase("posting");
     setError(undefined);
     try {
       const saved = await persist();
-      const result = await api.post<{
+      const posted = await confirmDraftSafely<{
         amountCollected?: string;
         collectionNumber?: string;
         invoiceNumber?: string;
         settlementId: string | null;
-      }>(`operations/settlements/drafts/${saved.id}/confirm`);
+      }>(api, saved.id, () => setPostPhase("checking"));
+      if (posted.outcome !== "posted") {
+        setError(
+          posted.outcome === "not_posted"
+            ? t("traderSettlements.notPostedAfterCheck")
+            : t("traderSettlements.resultUnknown"),
+        );
+        return;
+      }
+      const result = posted.result;
       const notice =
         result.invoiceNumber !== undefined
           ? t("traderSettlements.oneScreen.zeroInvoiceNotice", { number: result.invoiceNumber, trader: traderName })
@@ -628,9 +641,14 @@ export function OneScreenSettlementDialog({
         settlementId: result.settlementId,
       });
     } catch (reason) {
-      setError(errorText(reason, t("traderSettlements.settlementFailed")));
+      setError(
+        isUncertainOutcome(reason)
+          ? t("traderSettlements.resultUnknown")
+          : errorText(reason, t("traderSettlements.settlementFailed")),
+      );
     } finally {
       setBusy(false);
+      setPostPhase("idle");
     }
   };
 
@@ -1056,11 +1074,15 @@ export function OneScreenSettlementDialog({
           {t("traderSettlements.saveDraft")}
         </button>
         <button className="button button-primary" disabled={!canPost} onClick={() => void post()} type="button">
-          {zeroOnly
-            ? t("traderSettlements.oneScreen.postZeroInvoice")
-            : traderOwes
-              ? t("traderSettlements.oneScreen.collect", { amount: money(-totals.net) })
-              : t("traderSettlements.oneScreen.post", { amount: money(totals.net) })}
+          {postPhase === "posting"
+            ? t("traderSettlements.posting")
+            : postPhase === "checking"
+              ? t("traderSettlements.checkingResult")
+              : zeroOnly
+                ? t("traderSettlements.oneScreen.postZeroInvoice")
+                : traderOwes
+                  ? t("traderSettlements.oneScreen.collect", { amount: money(-totals.net) })
+                  : t("traderSettlements.oneScreen.post", { amount: money(totals.net) })}
         </button>
       </div>
       </>
@@ -1133,7 +1155,7 @@ export function UnpostSettlementDialog({
     setBusy(true);
     setError(undefined);
     try {
-      const result = await api.post<{ draftId: string; reversalSettlementNumber: string; settlementNumber: string }>(
+      const result = await api.postLong<{ draftId: string; reversalSettlementNumber: string; settlementNumber: string }>(
         path ?? `operations/settlements/payments/${settlementId}/unpost`,
         { reason: reason.trim() },
       );
@@ -1145,7 +1167,12 @@ export function UnpostSettlementDialog({
         }),
       });
     } catch (reasonError) {
-      setError(errorText(reasonError, t("traderSettlements.oneScreen.unpostFailed")));
+      // A lost answer is not a failure: never invite a second un-post.
+      setError(
+        isUncertainOutcome(reasonError)
+          ? t("traderSettlements.stillWorking")
+          : errorText(reasonError, t("traderSettlements.oneScreen.unpostFailed")),
+      );
     } finally {
       setBusy(false);
     }
@@ -1177,7 +1204,7 @@ export function UnpostSettlementDialog({
           {t("common.close")}
         </button>
         <button className="button button-primary" disabled={busy} onClick={() => void submit()} type="button">
-          {busy ? t("common.loading") : t("traderSettlements.oneScreen.unpost")}
+          {busy ? t("traderSettlements.working") : t("traderSettlements.oneScreen.unpost")}
         </button>
       </div>
     </Modal>

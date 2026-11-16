@@ -627,45 +627,71 @@ export class CashBankQueryService {
    */
   public async balances(database: Kysely<DatabaseSchema> = this.database) {
     this.support.assertPermission("accounting.view");
+    return this.balanceRows(database, null);
+  }
+
+  /**
+   * The balance of ONE Cash or Bank account -- what posting a payment needs
+   * (SET-PERF-1). The SAME statement as `balances()`, narrowed: the Movements
+   * scanned are only those that touch the account, and only its row is
+   * returned. One formula, so the control that blocks a payment can never
+   * disagree with the screen; an equality test holds the two to that.
+   */
+  public async balanceFor(
+    kind: "cash" | "bank",
+    accountId: string,
+    database: Kysely<DatabaseSchema> = this.database,
+  ) {
+    this.support.assertPermission("accounting.view");
+    const rows = await this.balanceRows(database, { accountId, kind });
+    return rows[0];
+  }
+
+  /*
+   * Each Movement is classified ONCE (`classified`, `undone`), then split into
+   * its four account legs. The original statement repeated the classification
+   * in each of eight union branches; with its per-row subqueries and
+   * `accounting_enabled_at()` call that made PostgreSQL cost the statement in
+   * the millions and JIT-compile it on every call (13 s of 13.3 s on a
+   * Lahthza-sized Company). Same predicates, same legs, same signs.
+   */
+  private async balanceRows(
+    database: Kysely<DatabaseSchema>,
+    account: { readonly accountId: string; readonly kind: "cash" | "bank" } | null,
+  ) {
     const { companyId } = this.support.context();
+    const accountId = account?.accountId ?? null;
+    const kind = account?.kind ?? null;
+    const touches = (alias: "m" | "o") =>
+      sql`(${accountId}::uuid is null or ${accountId}::uuid in (
+        ${sql.ref(`${alias}.source_cash_account_id`)}, ${sql.ref(`${alias}.destination_cash_account_id`)},
+        ${sql.ref(`${alias}.source_bank_account_id`)}, ${sql.ref(`${alias}.destination_bank_account_id`)}))`;
     const result = await sql<Record<string, unknown>>`
-      with movements as (
+      with classified as materialized (
+        select m.source_cash_account_id,m.destination_cash_account_id,
+               m.source_bank_account_id,m.destination_bank_account_id,m.amount,m.fee_amount
+          from cash_bank_movements m where m.company_id=${companyId}::uuid
+           and m.status in('confirmed','reversed') and m.reversal_of_movement_id is null
+           and ${touches("m")}
+           and ${countsInOperationalBalance("m")}
+      ), undone as materialized (
+        select o.source_cash_account_id,o.destination_cash_account_id,
+               o.source_bank_account_id,o.destination_bank_account_id,o.amount,o.fee_amount
+          from cash_bank_movements r join cash_bank_movements o
+            on o.id=r.reversal_of_movement_id and o.company_id=r.company_id
+         where r.company_id=${companyId}::uuid and r.status='confirmed'
+           and ${touches("o")}
+           and ${reversalCountsInOperationalBalance("o")}
+      ), movements as (
         select source_cash_account_id as id,'cash'::text as kind,-amount-fee_amount as value
-          from cash_bank_movements m where company_id=${companyId}::uuid
-           and status in('confirmed','reversed') and reversal_of_movement_id is null
-           and ${countsInOperationalBalance("m")}
-        union all select destination_cash_account_id,'cash',amount
-          from cash_bank_movements m where company_id=${companyId}::uuid
-           and status in('confirmed','reversed') and reversal_of_movement_id is null
-           and ${countsInOperationalBalance("m")}
-        union all select source_bank_account_id,'bank',-amount-fee_amount
-          from cash_bank_movements m where company_id=${companyId}::uuid
-           and status in('confirmed','reversed') and reversal_of_movement_id is null
-           and ${countsInOperationalBalance("m")}
-        union all select destination_bank_account_id,'bank',amount
-          from cash_bank_movements m where company_id=${companyId}::uuid
-           and status in('confirmed','reversed') and reversal_of_movement_id is null
-           and ${countsInOperationalBalance("m")}
-        union all select o.source_cash_account_id,'cash',o.amount+o.fee_amount
-          from cash_bank_movements r join cash_bank_movements o
-            on o.id=r.reversal_of_movement_id and o.company_id=r.company_id
-         where r.company_id=${companyId}::uuid and r.status='confirmed'
-           and ${reversalCountsInOperationalBalance("o")}
-        union all select o.destination_cash_account_id,'cash',-o.amount
-          from cash_bank_movements r join cash_bank_movements o
-            on o.id=r.reversal_of_movement_id and o.company_id=r.company_id
-         where r.company_id=${companyId}::uuid and r.status='confirmed'
-           and ${reversalCountsInOperationalBalance("o")}
-        union all select o.source_bank_account_id,'bank',o.amount+o.fee_amount
-          from cash_bank_movements r join cash_bank_movements o
-            on o.id=r.reversal_of_movement_id and o.company_id=r.company_id
-         where r.company_id=${companyId}::uuid and r.status='confirmed'
-           and ${reversalCountsInOperationalBalance("o")}
-        union all select o.destination_bank_account_id,'bank',-o.amount
-          from cash_bank_movements r join cash_bank_movements o
-            on o.id=r.reversal_of_movement_id and o.company_id=r.company_id
-         where r.company_id=${companyId}::uuid and r.status='confirmed'
-           and ${reversalCountsInOperationalBalance("o")}
+          from classified
+        union all select destination_cash_account_id,'cash',amount from classified
+        union all select source_bank_account_id,'bank',-amount-fee_amount from classified
+        union all select destination_bank_account_id,'bank',amount from classified
+        union all select source_cash_account_id,'cash',amount+fee_amount from undone
+        union all select destination_cash_account_id,'cash',-amount from undone
+        union all select source_bank_account_id,'bank',amount+fee_amount from undone
+        union all select destination_bank_account_id,'bank',-amount from undone
         -- Payroll payments. Cash only by table CHECK, and a reversal flips the
         -- row's own status in place rather than writing a counter-row, so
         -- status='confirmed' both includes the live ones and excludes the
@@ -765,9 +791,11 @@ export class CashBankQueryService {
         select id,'cash'::text kind,cash_account_code code,cash_account_name name,is_active,
                linked_gl_account_id
           from company_cash_accounts where company_id=${companyId}::uuid
+           and (${kind}::text is null or (${kind}::text='cash' and id=${accountId}::uuid))
         union all
         select id,'bank',bank_account_code,account_name,is_active,linked_gl_account_id
           from company_bank_accounts where company_id=${companyId}::uuid
+           and (${kind}::text is null or (${kind}::text='bank' and id=${accountId}::uuid))
       ), opening as (
         select l.account_id,coalesce(sum(l.debit-l.credit),0) as value
           from journal_lines l join journal_entries j

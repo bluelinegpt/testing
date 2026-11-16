@@ -295,6 +295,8 @@ function setup(
       return Promise.resolve({});
     }),
   };
+  // Long-running writes go through postLong / patchLong (SET-PERF-1).
+  Object.assign(api, { patchLong: (api as { patch?: unknown }).patch, postLong: api.post });
   renderWithRouter(
     <TraderSettlementsWorkspace
       api={api as unknown as ApiClient}
@@ -728,6 +730,8 @@ describe("TraderSettlementsWorkspace", () => {
         ),
       ),
     };
+    // Long-running writes go through postLong / patchLong (SET-PERF-1).
+    Object.assign(api, { patchLong: (api as { patch?: unknown }).patch, postLong: api.post });
     renderWithRouter(
       <TraderSettlementsWorkspace
         api={api as unknown as ApiClient}
@@ -779,6 +783,8 @@ describe("TraderSettlementsWorkspace", () => {
         return Promise.resolve({});
       }),
     };
+    // Long-running writes go through postLong / patchLong (SET-PERF-1).
+    Object.assign(api, { patchLong: (api as { patch?: unknown }).patch, postLong: api.post });
     renderWithRouter(
       <TraderSettlementsWorkspace
         api={api as unknown as ApiClient}

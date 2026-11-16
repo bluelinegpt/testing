@@ -54,6 +54,31 @@ function ref(alias: string): RawBuilder<unknown> {
   return sql.raw(alias);
 }
 
+/**
+ * The Movement's `correlation_id` as a uuid, or NULL when it is not one.
+ *
+ * WHY THIS AND NOT `source.id::text = m.correlation_id` (SET-PERF-1, 16 Nov
+ * 2026): casting the indexed uuid COLUMN to text stops PostgreSQL using the
+ * primary key, so every Movement scanned each source table -- in eight union
+ * branches. Worse, the planner then costed the balance query in the millions,
+ * which switched on JIT compilation: 13 of the 13.3 seconds a Lahthza-sized
+ * balance check took were spent compiling, not running. Casting the TEXT side
+ * keeps the index and the estimate honest.
+ *
+ * Identical results: `uuid::text` is always the lowercase, hyphenated form,
+ * so `id::text = x` can only be true when x is exactly that form. The regex
+ * admits only that form (case-sensitive), so x::uuid is never attempted on
+ * anything else -- no cast error, and no new match for an upper-case or
+ * unhyphenated spelling that did not match before.
+ */
+export function correlationUuid(alias = "m"): RawBuilder<string | null> {
+  const m = ref(alias);
+  return sql<
+    string | null
+  >`(case when ${m}.correlation_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    then ${m}.correlation_id::uuid end)`;
+}
+
 /** The original rule: linked to a non-Cash/Bank Accounting Event. */
 export function linkedToOwnerEvent(alias = "m"): RawBuilder<boolean> {
   const m = ref(alias);
@@ -81,15 +106,15 @@ export function duplicatePaymentTrail(alias = "m"): RawBuilder<boolean> {
       'trader_settlement','payroll_payment','employee_payment','general_expense_payment'
     ), false)
     or exists (select 1 from trader_settlements s
-                where s.company_id = ${m}.company_id and s.id::text = ${m}.correlation_id)
+                where s.company_id = ${m}.company_id and s.id = ${correlationUuid(alias)})
     or exists (select 1 from payroll_payments p
-                where p.company_id = ${m}.company_id and p.id::text = ${m}.correlation_id)
+                where p.company_id = ${m}.company_id and p.id = ${correlationUuid(alias)})
     or exists (select 1 from employee_salary_advances a
-                where a.company_id = ${m}.company_id and a.id::text = ${m}.correlation_id)
+                where a.company_id = ${m}.company_id and a.id = ${correlationUuid(alias)})
     or exists (select 1 from employee_variable_earning_payments v
-                where v.company_id = ${m}.company_id and v.id::text = ${m}.correlation_id)
+                where v.company_id = ${m}.company_id and v.id = ${correlationUuid(alias)})
     or exists (select 1 from outsourced_driver_fee_payments f
-                where f.company_id = ${m}.company_id and f.id::text = ${m}.correlation_id)
+                where f.company_id = ${m}.company_id and f.id = ${correlationUuid(alias)})
     or (${m}.idempotency_identity like 'general\\_expense\\_payment:%'
         and exists (select 1 from general_expense_payments g
                      where g.company_id = ${m}.company_id
@@ -103,9 +128,9 @@ export function inflowTrail(alias = "m"): RawBuilder<boolean> {
   return sql<boolean>`(
     coalesce(${m}.generated_by_source_type = 'trader_collection', false)
     or exists (select 1 from trader_collections c
-                where c.company_id = ${m}.company_id and c.id::text = ${m}.correlation_id)
+                where c.company_id = ${m}.company_id and c.id = ${correlationUuid(alias)})
     or exists (select 1 from driver_reconciliations r
-                where r.company_id = ${m}.company_id and r.id::text = ${m}.correlation_id)
+                where r.company_id = ${m}.company_id and r.id = ${correlationUuid(alias)})
   )`;
 }
 
@@ -114,10 +139,10 @@ function inflowSourceReversed(alias: string): RawBuilder<boolean> {
   const m = ref(alias);
   return sql<boolean>`(
     exists (select 1 from trader_collections c
-             where c.company_id = ${m}.company_id and c.id::text = ${m}.correlation_id
+             where c.company_id = ${m}.company_id and c.id = ${correlationUuid(alias)}
                and c.status = 'reversed')
     or exists (select 1 from driver_reconciliations r
-                where r.company_id = ${m}.company_id and r.id::text = ${m}.correlation_id
+                where r.company_id = ${m}.company_id and r.id = ${correlationUuid(alias)}
                   and exists (select 1 from driver_reconciliations rv
                                where rv.company_id = r.company_id and rv.reversal_of_id = r.id))
   )`;

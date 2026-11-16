@@ -2,6 +2,15 @@ import { webConfiguration } from "../configuration/environment.js";
 
 const defaultTimeoutMs = 10_000;
 
+/**
+ * For requests that move money or post records -- settlement post / un-post /
+ * reverse and draft save (SET-PERF-1, 16 Nov 2026). The server keeps working
+ * after the browser stops waiting, so a short timeout here turned a slow but
+ * successful post into "please try again" and a second click. The server's own
+ * statement limit is 30 s; 90 s leaves room for the whole request.
+ */
+export const LONG_OPERATION_TIMEOUT_MS = 90_000;
+
 interface ApiErrorPayload {
   readonly error?: {
     readonly code?: string;
@@ -63,6 +72,34 @@ export class ApiClient {
     headers?: Readonly<Record<string, string>>,
   ): Promise<TResponse> {
     return this.request<TResponse>(path, { body, headers, method: "PATCH" });
+  }
+
+  /** POST that may legitimately take long; see LONG_OPERATION_TIMEOUT_MS. */
+  public postLong<TResponse>(
+    path: string,
+    body?: unknown,
+    headers?: Readonly<Record<string, string>>,
+  ): Promise<TResponse> {
+    return this.request<TResponse>(path, {
+      body,
+      headers,
+      method: "POST",
+      timeoutMs: LONG_OPERATION_TIMEOUT_MS,
+    });
+  }
+
+  /** PATCH that may legitimately take long; see LONG_OPERATION_TIMEOUT_MS. */
+  public patchLong<TResponse>(
+    path: string,
+    body?: unknown,
+    headers?: Readonly<Record<string, string>>,
+  ): Promise<TResponse> {
+    return this.request<TResponse>(path, {
+      body,
+      headers,
+      method: "PATCH",
+      timeoutMs: LONG_OPERATION_TIMEOUT_MS,
+    });
   }
 
   public delete<TResponse>(path: string): Promise<TResponse> {
@@ -149,11 +186,15 @@ export class ApiClient {
       headers?: Readonly<Record<string, string>> | undefined;
       method: string;
       signal?: AbortSignal | undefined;
+      timeoutMs?: number | undefined;
     },
   ): Promise<TResponse> {
     const controller = new AbortController();
     const abortRequest = () => controller.abort(input.signal?.reason);
-    const timeout = globalThis.setTimeout(() => controller.abort(), this.timeoutMs);
+    const timeout = globalThis.setTimeout(
+      () => controller.abort(),
+      input.timeoutMs ?? this.timeoutMs,
+    );
     if (input.signal?.aborted === true) abortRequest();
     else input.signal?.addEventListener("abort", abortRequest, { once: true });
 

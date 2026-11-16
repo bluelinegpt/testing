@@ -39,7 +39,17 @@ export const IDLE_IN_TRANSACTION_TIMEOUT_MS = 60_000;
  * half-done work -- that is how SET-000278..282 were left as drafts without
  * a payment. A server-side timeout cancels the statement, the whole
  * transaction is rolled back, and the connection comes back clean.
+ *
+ * JIT is OFF for the API's sessions (SET-PERF-1, 16 Nov 2026). JIT compiles a
+ * statement to machine code before running it whenever its ESTIMATED cost is
+ * high; it pays off on long analytical scans, never on a short request. The
+ * Cash/Bank balance check was costed in the millions, so every settlement
+ * post spent 13 of 13.3 s compiling a query that runs in 0.09 s -- 30-41 s on
+ * the VPS. Set here, per connection, so the API is fast whatever the server's
+ * own `jit` setting is.
  */
+export const DATABASE_SESSION_OPTIONS = "-c jit=off";
+
 export function databasePoolOptions(settings: DatabasePoolSettings): PoolConfig {
   return {
     application_name: "blueline-api",
@@ -49,6 +59,7 @@ export function databasePoolOptions(settings: DatabasePoolSettings): PoolConfig 
     keepAlive: true,
     max: settings.poolMax,
     min: settings.poolMin,
+    options: DATABASE_SESSION_OPTIONS,
     statement_timeout: settings.statementTimeoutMs,
   };
 }
