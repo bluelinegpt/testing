@@ -4,6 +4,7 @@ import {
   Suspense,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -77,6 +78,7 @@ import {
   stripPublicLocale,
 } from "./public-localization";
 import { apiUrl } from "./api-base";
+import { trackMetaPageView } from "./meta-pixel";
 import {
   TAWSEELHUB_FACEBOOK_URL,
   TAWSEELHUB_INSTAGRAM_URL,
@@ -283,6 +285,16 @@ function AppLayout() {
     navigate(`${publicLanguageDestination(location.pathname, next, alternate)}${location.search}`);
   };
   useEffect(() => setLocaleState(localeFromPublicPath(location.pathname)), [location.pathname]);
+  // Meta Pixel PageView for page changes inside the app. The first view is
+  // sent when the Pixel installs, so the very first render is skipped here.
+  const firstPage = useRef(true);
+  useEffect(() => {
+    if (firstPage.current) {
+      firstPage.current = false;
+      return;
+    }
+    trackMetaPageView();
+  }, [location.pathname]);
   useEffect(() => {
     let cancelled = false;
     document.documentElement.lang = locale;

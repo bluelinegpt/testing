@@ -1,3 +1,4 @@
+import { forwardToMetaPixel } from "./meta-pixel";
 export type AnalyticsEventName =
   | "page_view"
   | "pricing_viewed"
@@ -190,7 +191,7 @@ function locale(): string {
   return document.documentElement.lang === "ar" ? "ar" : "en";
 }
 
-function analyticsConsentAllowed(): boolean {
+export function analyticsConsentAllowed(): boolean {
   try {
     return window.localStorage.getItem(consentKey) !== "denied";
   } catch {
@@ -346,7 +347,10 @@ export function trackEvent(name: AnalyticsEventName, metadata: SafeMetadata = {}
   appendDebugEvent(event);
   window.dispatchEvent(new CustomEvent("tawseelhub:analytics", { detail: event }));
   try {
-    if (trackingAllowed()) window.dataLayer?.push(event);
+    if (trackingAllowed()) {
+      window.dataLayer?.push(event);
+      forwardToMetaPixel(name);
+    }
   } catch {
     // Third-party analytics must never affect the public user journey.
   }
