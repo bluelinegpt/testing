@@ -375,8 +375,10 @@ export class WebsiteCmsService {
       faqs: prefer(faqs.rows, "faqKey"),
       navigation: prefer(navigation.rows, "itemKey"),
       contact: contact.rows[0]?.data ?? {
-        publicPhone: "+971 50 689 8604",
-        whatsapp: "+971 50 689 8604",
+        publicPhone: "+971 54 770 6255",
+        whatsapp: "+971 54 770 6255",
+        facebook: "https://www.facebook.com/tawseelhubapp",
+        instagram: "https://www.instagram.com/tawseelhubapp",
       },
     };
   }

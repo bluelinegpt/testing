@@ -1,6 +1,7 @@
 export type Locale = "en" | "ar";
 
 import { apiUrl } from "./api-base";
+import { TAWSEELHUB_PHONE } from "./company-contact";
 
 export type CmsPage = {
   pageKey: string;
@@ -64,7 +65,13 @@ export type WebsiteCmsBundle = {
   features: CmsFeature[];
   faqs: CmsFaq[];
   navigation: CmsNavigation[];
-  contact: { publicPhone: string; whatsapp?: string; supportEmail?: string };
+  contact: {
+    publicPhone: string;
+    whatsapp?: string;
+    supportEmail?: string;
+    facebook?: string;
+    instagram?: string;
+  };
 };
 
 export async function loadWebsiteCms(locale: Locale): Promise<WebsiteCmsBundle | null> {
@@ -78,5 +85,5 @@ export async function loadWebsiteCms(locale: Locale): Promise<WebsiteCmsBundle |
 }
 
 export function phoneHref(value: string | undefined): string {
-  return `tel:${(value ?? "+971 50 689 8604").replace(/[^\d+]/g, "")}`;
+  return `tel:${(value ?? TAWSEELHUB_PHONE).replace(/[^\d+]/g, "")}`;
 }

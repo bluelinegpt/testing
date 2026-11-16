@@ -1,4 +1,5 @@
 import { apiBase, publicAssetUrl } from "./api-base";
+import { TAWSEELHUB_WHATSAPP_DIGITS } from "./company-contact";
 
 const base = () => apiBase();
 
@@ -121,8 +122,8 @@ export type LiveAvatarUsageEvent = "response_completed" | "fallback" | "provider
 export const fallbackWhatsAppSettings: WhatsAppPublicSettings = {
   enabled: true,
   label: "Chat on WhatsApp",
-  number: "971506898604",
-  url: "https://wa.me/971506898604",
+  number: TAWSEELHUB_WHATSAPP_DIGITS,
+  url: `https://wa.me/${TAWSEELHUB_WHATSAPP_DIGITS}`,
 };
 
 export function buildWhatsAppMessageUrl(url: string, message: string): string {

@@ -1,8 +1,9 @@
 import { useState, type FormEvent } from "react";
 import { apiUrl } from "./api-base";
 import "./BlogEnquiry.css";
+import { TAWSEELHUB_WHATSAPP_DIGITS } from "./company-contact";
 
-export const blogWhatsAppUrl="https://api.whatsapp.com/send/?phone=971506898604&text=Hi%2C%20I%20would%20like%20to%20contact%20Tawseelhub%20on%20WhatsApp.&type=phone_number&app_absent=0";
+export const blogWhatsAppUrl=`https://api.whatsapp.com/send/?phone=${TAWSEELHUB_WHATSAPP_DIGITS}&text=Hi%2C%20I%20would%20like%20to%20contact%20Tawseelhub%20on%20WhatsApp.&type=phone_number&app_absent=0`;
 export function BlogEnquiry({slug,language}:{slug:string;language:string}) {
   const ar=language==="ar",[busy,setBusy]=useState(false),[sent,setSent]=useState(false),[error,setError]=useState("");
   async function submit(event:FormEvent<HTMLFormElement>){event.preventDefault();if(busy)return;const data=new FormData(event.currentTarget);setBusy(true);setError("");try{

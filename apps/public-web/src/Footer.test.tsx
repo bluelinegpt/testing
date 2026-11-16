@@ -36,4 +36,15 @@ describe('site footer legal links', () => {
       expect(screen.getByRole('link', { name: label })).toHaveAttribute('href', href);
     expect(solutionPages).toHaveLength(9);
   });
+
+  it('shows the Tawseelhub phone and opens Facebook and Instagram in a new tab', () => {
+    // Contact details changed 16 Nov 2026 (Aiman).
+    render(<MemoryRouter><Footer /></MemoryRouter>);
+    expect(screen.getByRole('link', { name: '+971 54 770 6255' })).toHaveAttribute('href', 'tel:+971547706255');
+    const facebook = screen.getByRole('link', { name: 'Facebook' });
+    expect(facebook).toHaveAttribute('href', 'https://www.facebook.com/tawseelhubapp');
+    expect(facebook).toHaveAttribute('target', '_blank');
+    expect(facebook).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(screen.getByRole('link', { name: 'Instagram' })).toHaveAttribute('href', 'https://www.instagram.com/tawseelhubapp');
+  });
 });

@@ -28,7 +28,7 @@ The Platform CSP allows sanitized style attributes via style-src-attr, while
 inline scripts and style blocks remain blocked; HTTPS inline images are allowed.
 
 Every public platform blog article has an English/Arabic private enquiry form
-and WhatsApp link to +971506898604 with the approved Tawseelhub greeting.
+and WhatsApp link to +971547706255 with the approved Tawseelhub greeting.
 POST `/api/v1/public/blog/articles/:slug/enquiry` validates a publicly available
 article, name/email/message, explicit consent and honeypot. The shared rate limiter
 allows three requests per minute per IP. This is not a public comment system.

@@ -1166,9 +1166,11 @@ function Contact({
 }) {
   const [form, setForm] = useState<any>(
       data.contact?.draft_data ?? {
-        publicPhone: "+971 50 689 8604",
-        whatsapp: "+971 50 689 8604",
+        publicPhone: "+971 54 770 6255",
+        whatsapp: "+971 54 770 6255",
         supportEmail: "hello@tawseelhub.com",
+        facebook: "https://www.facebook.com/tawseelhubapp",
+        instagram: "https://www.instagram.com/tawseelhubapp",
       },
     ),
     set = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }));
@@ -1195,6 +1197,22 @@ function Contact({
       <label>
         LinkedIn
         <input value={form.linkedin ?? ""} onChange={(e) => set("linkedin", e.target.value)} />
+      </label>
+      <label>
+        Facebook
+        <input
+          placeholder="https://www.facebook.com/tawseelhubapp"
+          value={form.facebook ?? ""}
+          onChange={(e) => set("facebook", e.target.value)}
+        />
+      </label>
+      <label>
+        Instagram
+        <input
+          placeholder="https://www.instagram.com/tawseelhubapp"
+          value={form.instagram ?? ""}
+          onChange={(e) => set("instagram", e.target.value)}
+        />
       </label>
       <div className="publishing-actions">
         {canManage && (

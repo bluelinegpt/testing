@@ -3640,10 +3640,10 @@ export class AgentService {
     ).rows[0]!;
     const enabled =
       Boolean(row.whatsapp_public_cta_enabled) && row.whatsapp_provider !== "disabled";
-    const number = String(row.whatsapp_business_number ?? "+971 50 689 8604");
+    const number = String(row.whatsapp_business_number ?? "+971 54 770 6255");
     const normalized =
       normalizeInternationalMobile(String(row.whatsapp_business_number_normalized ?? number)) ??
-      "971506898604";
+      "971547706255";
     return {
       enabled,
       label: "Chat on WhatsApp",

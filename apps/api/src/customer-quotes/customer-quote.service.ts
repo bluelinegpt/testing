@@ -657,7 +657,7 @@ export class CustomerQuoteService {
     const trader = (
       await sql<{
         traderId: string;
-      }>`insert into traders(company_id,account_id,code,name_en,name_ar,contact_person,mobile_number,email,address_en,pickup_address,account_status,notes) values(${companyId}::uuid,${account.accountId}::uuid,'TAW-PUBLIC-QUOTES','Tawseelhub Public Quotes','طلبات توصيل هب العامة','Tawseelhub Platform','971506898604','support@tawseelhub.com','Platform customer quote orders','Platform customer quote orders','active','System Trader used only for Platform customer quote conversions.') on conflict(company_id,lower(code)) do update set account_status='active',updated_at=now() returning id "traderId"`.execute(
+      }>`insert into traders(company_id,account_id,code,name_en,name_ar,contact_person,mobile_number,email,address_en,pickup_address,account_status,notes) values(${companyId}::uuid,${account.accountId}::uuid,'TAW-PUBLIC-QUOTES','Tawseelhub Public Quotes','طلبات توصيل هب العامة','Tawseelhub Platform','971547706255','support@tawseelhub.com','Platform customer quote orders','Platform customer quote orders','active','System Trader used only for Platform customer quote conversions.') on conflict(company_id,lower(code)) do update set account_status='active',updated_at=now() returning id "traderId"`.execute(
         tx,
       )
     ).rows[0]!;

@@ -158,7 +158,8 @@ const organizationSchema = {
   url: `${canonicalOrigin}/`,
   description:
     "Tawseelhub provides a delivery operating system for modern delivery companies in the UAE.",
-  telephone: "+971506898604",
+  telephone: "+971547706255",
+  sameAs: ["https://www.facebook.com/tawseelhubapp", "https://www.instagram.com/tawseelhubapp"],
   areaServed: { "@type": "Country", name: "United Arab Emirates" },
   address: {
     "@type": "PostalAddress",

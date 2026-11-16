@@ -77,6 +77,11 @@ import {
   stripPublicLocale,
 } from "./public-localization";
 import { apiUrl } from "./api-base";
+import {
+  TAWSEELHUB_FACEBOOK_URL,
+  TAWSEELHUB_INSTAGRAM_URL,
+  TAWSEELHUB_PHONE,
+} from "./company-contact";
 import { DemoRequestError, submitDemoRequest } from "./demo-request-client";
 
 export const routeDefinitions = Object.entries(routeMetadata.en).map(([path, metadata]) => ({
@@ -2173,7 +2178,7 @@ function AboutPage() {
 function ContactPage() {
   const { cms, locale } = useCms(),
     copy = publicUi[locale],
-    phone = cms?.contact?.publicPhone ?? "+971 50 689 8604";
+    phone = cms?.contact?.publicPhone ?? TAWSEELHUB_PHONE;
   return (
     <>
       <InnerHero
@@ -2201,6 +2206,7 @@ function ContactPage() {
             </a>
           </p>
           <WhatsAppContactButton />
+          <SocialLinks location="contact" />
         </article>
       </section>
       <ContactForm />
@@ -2444,6 +2450,48 @@ function WhatsAppContactButton() {
     </a>
   );
 }
+/**
+ * Tawseelhub's Facebook and Instagram pages. The links come from Platform
+ * Administration (Website Content -> Contact) when set there, with the
+ * company-contact fallbacks otherwise.
+ */
+function SocialLinks({ location }: { readonly location: "contact" | "footer" }) {
+  const { cms, locale } = useCms();
+  const links = [
+    {
+      href: cms?.contact?.facebook || TAWSEELHUB_FACEBOOK_URL,
+      label: "Facebook",
+      path: "M13.5 22v-8.2h2.8l.4-3.2h-3.2V8.5c0-.9.3-1.6 1.6-1.6h1.7V4.1c-.3 0-1.3-.1-2.5-.1-2.5 0-4.2 1.5-4.2 4.3v2.4H7.3v3.2h2.8V22h3.4z",
+    },
+    {
+      href: cms?.contact?.instagram || TAWSEELHUB_INSTAGRAM_URL,
+      label: "Instagram",
+      path: "M12 7.4a4.6 4.6 0 1 0 0 9.2 4.6 4.6 0 0 0 0-9.2zm0 7.6a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm5.9-7.8a1.1 1.1 0 1 1-2.2 0 1.1 1.1 0 0 1 2.2 0zM21.9 8.3c-.1-1.6-.4-3-1.6-4.2-1.2-1.2-2.6-1.5-4.2-1.6C14.5 2.4 9.5 2.4 8 2.5c-1.6.1-3 .4-4.2 1.6C2.6 5.3 2.3 6.7 2.2 8.3c-.1 1.6-.1 6.6 0 8.2.1 1.6.4 3 1.6 4.2 1.2 1.2 2.6 1.5 4.2 1.6 1.6.1 6.6.1 8.2 0 1.6-.1 3-.4 4.2-1.6 1.2-1.2 1.5-2.6 1.6-4.2.1-1.6.1-6.6-.1-8.2zm-2.2 10.1a3.3 3.3 0 0 1-1.9 1.9c-1.3.5-4.4.4-5.8.4s-4.5.1-5.8-.4a3.3 3.3 0 0 1-1.9-1.9c-.5-1.3-.4-4.4-.4-5.8s-.1-4.5.4-5.8a3.3 3.3 0 0 1 1.9-1.9c1.3-.5 4.4-.4 5.8-.4s4.5-.1 5.8.4a3.3 3.3 0 0 1 1.9 1.9c.5 1.3.4 4.4.4 5.8s.1 4.5-.4 5.8z",
+    },
+  ];
+  return (
+    <div
+      aria-label={locale === "ar" ? "تابع Tawseelhub" : "Follow Tawseelhub"}
+      className={`social-links social-links--${location}`}
+      role="group"
+    >
+      {links.map((link) => (
+        <a
+          aria-label={link.label}
+          href={link.href}
+          key={link.label}
+          rel="noopener noreferrer"
+          target="_blank"
+        >
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+            <path d={link.path} fill="currentColor" />
+          </svg>
+          {location === "contact" && <span>{link.label}</span>}
+        </a>
+      ))}
+    </div>
+  );
+}
 function NotFoundPage() {
   const { locale } = useCms(),
     copy = publicUi[locale];
@@ -2486,7 +2534,7 @@ export const solutionPages = [
 export function Footer() {
   const { cms, locale } = useCms(),
     copy = publicUi[locale],
-    phone = cms?.contact?.publicPhone ?? "+971 50 689 8604";
+    phone = cms?.contact?.publicPhone ?? TAWSEELHUB_PHONE;
   const groups =
     locale === "ar"
       ? ([
@@ -2591,6 +2639,7 @@ export function Footer() {
           <a href={phoneHref(phone)}>
             <bdi dir="ltr">{phone}</bdi>
           </a>
+          <SocialLinks location="footer" />
         </div>
         {groups.map(([title, links]) => (
           <div className="footer-group" key={title}>

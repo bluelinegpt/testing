@@ -3087,3 +3087,36 @@ body,
     font-size: 15.5px;
   }
 }
+
+/* Facebook / Instagram links (footer and Contact page) */
+.social-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+.social-links a {
+  align-items: center;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  color: inherit;
+  display: inline-flex;
+  gap: 8px;
+  justify-content: center;
+  min-height: 40px;
+  min-width: 40px;
+  opacity: 0.85;
+  padding: 0 10px;
+  text-decoration: none;
+}
+.social-links a:hover,
+.social-links a:focus-visible {
+  opacity: 1;
+}
+.social-links svg {
+  height: 18px;
+  width: 18px;
+}
+.social-links--footer a {
+  padding: 0;
+}
