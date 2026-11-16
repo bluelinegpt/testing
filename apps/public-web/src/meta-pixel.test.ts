@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// Vite loads the page template as text; no Node file APIs, so the browser-typed
+// build (tsc -b) can check this file too.
+import indexHtml from "../index.html?raw";
 
 import {
   setAnalyticsConsent,
@@ -32,7 +33,7 @@ describe("Meta Pixel (16 Nov 2026)", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("serves the domain verification tag in the HTML itself, where Meta looks for it", () => {
-    const html = readFileSync(resolve(__dirname, "../index.html"), "utf8");
+    const html = indexHtml;
     expect(html).toContain(
       '<meta name="facebook-domain-verification" content="fmnq8qymy5r1bfekl9qezjwsm4i78c" />',
     );
