@@ -1,6 +1,7 @@
 import { HttpStatus, Inject, Injectable } from "@nestjs/common";
 import { type Kysely, sql } from "kysely";
 
+import { accountingXlsx } from "../accounting/accounting-xlsx.js";
 import { DATABASE } from "../infrastructure/database/database.tokens.js";
 import type { DatabaseSchema } from "../infrastructure/database/database.types.js";
 import { KyselyTransactionManager } from "../infrastructure/database/transaction-manager.js";
@@ -9,6 +10,7 @@ import { IdentityContextAccessor } from "../security/identity-context.js";
 import { TenantContextAccessor } from "../tenancy/tenant-context.js";
 
 import type {
+  AreaExportQueryDto,
   AreaListQueryDto,
   AreaSearchQueryDto,
   CreateAreaDto,
@@ -124,6 +126,50 @@ export class AreaConfigurationService {
       pageSize,
       total: Number(result.rows[0]?.total ?? 0),
     };
+  }
+
+  /**
+   * Configuration -> Areas -> Export to Excel: every Area matching the
+   * screen's filters (no paging), Company-scoped like the list, in the list's
+   * order. Columns: Code, Emirate, Area (Arabic), Area (English).
+   */
+  public async exportXlsx(query: AreaExportQueryDto): Promise<{ bytes: Buffer; filename: string }> {
+    const { companyId } = this.tenants.current();
+    const search = query.search?.trim() ?? "";
+    const status = query.status ?? "all";
+    const emirateId = query.emirateId ?? null;
+    const arabic = query.language !== "en";
+
+    const result = await sql<{ code: string; emirateNameAr: string; emirateNameEn: string; nameAr: string | null; nameEn: string }>`
+      select a.code,
+             a.name_en as "nameEn",
+             a.name_ar as "nameAr",
+             e.name_en as "emirateNameEn",
+             e.name_ar as "emirateNameAr"
+        from areas a
+        join emirates e on e.id = a.emirate_id
+       where a.company_id = ${companyId}::uuid
+         and (${emirateId}::uuid is null or a.emirate_id = ${emirateId}::uuid)
+         and (${status} = 'all'
+              or (${status} = 'active' and a.is_active)
+              or (${status} = 'disabled' and not a.is_active))
+         and (${search} = ''
+              or a.name_en ilike '%' || ${search} || '%'
+              or coalesce(a.name_ar, '') ilike '%' || ${search} || '%'
+              or a.code ilike '%' || ${search} || '%')
+       order by e.display_order, lower(btrim(a.name_en)), a.code
+    `.execute(this.database);
+
+    const columns = arabic
+      ? (["الكود", "الإمارة", "المنطقة (عربي)", "المنطقة (إنجليزي)"] as const)
+      : (["Code", "Emirate", "Area (Arabic)", "Area (English)"] as const);
+    const rows = result.rows.map((row) => ({
+      [columns[0]]: row.code,
+      [columns[1]]: arabic ? row.emirateNameAr : row.emirateNameEn,
+      [columns[2]]: row.nameAr ?? "",
+      [columns[3]]: row.nameEn,
+    }));
+    return { bytes: accountingXlsx(columns, rows), filename: arabic ? "Areas-AR.xlsx" : "Areas-EN.xlsx" };
   }
 
   /** Typeahead source for the shared Area selector. */

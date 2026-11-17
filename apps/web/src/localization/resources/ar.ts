@@ -1187,6 +1187,8 @@ export const arabicTranslations = {
     area: "المنطقة",
     code: "رمز المنطقة",
     create: "إضافة منطقة",
+    exportExcel: "تصدير إلى Excel",
+    exportFailed: "تعذر تصدير المناطق.",
     createTitle: "إضافة منطقة",
     disable: "تعطيل",
     disabled: "معطّلة",

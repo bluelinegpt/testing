@@ -9,9 +9,10 @@ import {
   Post,
   Query,
   Req,
+  Res,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
-import type { Request } from "express";
+import type { Request, Response } from "express";
 
 import {
   RequireAnyPermission,
@@ -21,6 +22,7 @@ import {
 // Runtime class values are required for Nest validation metadata.
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import {
+  AreaExportQueryDto,
   AreaListQueryDto,
   AreaSearchQueryDto,
   CreateAreaDto,
@@ -76,6 +78,19 @@ export class AreaConfigurationController {
   @Get("areas")
   public list(@Query() query: AreaListQueryDto): Promise<AreaPage> {
     return this.areas.list(query);
+  }
+
+  // Declared before `areas/:areaId` so "export" is not read as an Area id.
+  @ApiOperation({ summary: "Download the Areas matching the list filters as an Excel file" })
+  @RequirePermissions()
+  @RequireAnyPermission("orders.create", "traders.manage", "users_roles.manage")
+  @Get("areas/export")
+  public async export(@Query() query: AreaExportQueryDto, @Res() response: Response): Promise<void> {
+    const file = await this.areas.exportXlsx(query);
+    response.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    response.setHeader("Content-Disposition", `attachment; filename="${file.filename}"`);
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.send(file.bytes);
   }
 
   @ApiOperation({ summary: "Typeahead search over Areas for the shared selector" })

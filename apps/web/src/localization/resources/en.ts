@@ -1205,6 +1205,8 @@ export const englishTranslations = {
     area: "Area",
     code: "Area Code",
     create: "Add Area",
+    exportExcel: "Export to Excel",
+    exportFailed: "The Areas could not be exported.",
     createTitle: "Add Area",
     disable: "Disable",
     disabled: "Disabled",

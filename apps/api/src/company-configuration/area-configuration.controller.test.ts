@@ -29,7 +29,7 @@ describe("AreaConfigurationController inline Order authorization", () => {
 
   // Reads also admit traders.manage: the Trader form picks a pickup Emirate
   // and Area. Writes stay with Order creators and administrators.
-  it.each(["emirates", "list", "search", "get"] as const)(
+  it.each(["emirates", "list", "export", "search", "get"] as const)(
     "allows Order creators and Trader managers to read %s",
     (method) => {
       const handler = AreaConfigurationController.prototype[method];

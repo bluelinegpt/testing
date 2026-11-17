@@ -25,6 +25,7 @@ export function AreaWorkspace({ api }: { api: ApiClient }) {
   const [editing, setEditing] = useState<CompanyArea>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -71,6 +72,29 @@ export function AreaWorkspace({ api }: { api: ApiClient }) {
     }
   };
 
+  // Export to Excel: every Area matching the current filters (no paging).
+  const exportAreas = async () => {
+    setExporting(true);
+    setError(undefined);
+    try {
+      const query = new URLSearchParams({ language: locale === "ar" ? "ar" : "en" });
+      if (status !== "all") query.set("status", status);
+      if (search.trim().length > 0) query.set("search", search.trim());
+      if (emirateId.length > 0) query.set("emirateId", emirateId);
+      const blob = await api.getBinary(`configuration/areas/export?${query.toString()}`);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = locale === "ar" ? "Areas-AR.xlsx" : "Areas-EN.xlsx";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError(t("areas.exportFailed"));
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const emirateName = (area: CompanyArea) =>
     locale === "ar" ? area.emirateNameAr : area.emirateNameEn;
   const lastPage = Math.max(Math.ceil(result.total / result.pageSize), 1);
@@ -79,9 +103,19 @@ export function AreaWorkspace({ api }: { api: ApiClient }) {
     <section className="stacked-section standalone-section">
       <div className="section-heading">
         <h2>{t("areas.title")}</h2>
-        <button className="button button-primary" onClick={() => setCreating(true)} type="button">
-          {t("areas.create")}
-        </button>
+        <div className="row-actions">
+          <button
+            className="button"
+            disabled={exporting}
+            onClick={() => void exportAreas()}
+            type="button"
+          >
+            {t("areas.exportExcel")}
+          </button>
+          <button className="button button-primary" onClick={() => setCreating(true)} type="button">
+            {t("areas.create")}
+          </button>
+        </div>
       </div>
 
       <div className="filter-bar">

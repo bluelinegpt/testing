@@ -90,6 +90,29 @@ export class AreaListQueryDto {
   public pageSize?: number;
 }
 
+/**
+ * Export to Excel (Aiman, 17 Nov 2026): the same filters as the list, no
+ * paging, plus the header language. Every matching Area goes in one file.
+ */
+export class AreaExportQueryDto {
+  @IsOptional()
+  @IsString()
+  @Length(0, 160)
+  public search?: string;
+
+  @IsOptional()
+  @IsUUID()
+  public emirateId?: string;
+
+  @IsOptional()
+  @IsIn(["all", "active", "disabled"])
+  public status?: "all" | "active" | "disabled";
+
+  @IsOptional()
+  @IsIn(["ar", "en"])
+  public language?: "ar" | "en";
+}
+
 export class AreaSearchQueryDto {
   @IsOptional()
   @IsString()
