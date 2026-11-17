@@ -70,6 +70,8 @@ export class CustomerConfigurationController {
   }
 
   @Get(":code")
+  // Read-only; Fast Entry reads a matched Customer's addresses for each row.
+  @Throttle({ default: { limit: FAST_ENTRY_CHECK_RATE_LIMIT, ttl: 60_000 } })
   public detail(@Param("code") code: string): Promise<Record<string, unknown>> {
     return this.customers.customer(code);
   }

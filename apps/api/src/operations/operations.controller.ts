@@ -21,7 +21,7 @@ import {
 import { FileInterceptor } from "@nestjs/platform-express";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { Throttle } from "@nestjs/throttler";
-import { FAST_ENTRY_CHECK_RATE_LIMIT } from "../security/fast-entry-rate-limit.js";
+import { FAST_ENTRY_CHECK_RATE_LIMIT, FAST_ENTRY_CREATE_RATE_LIMIT } from "../security/fast-entry-rate-limit.js";
 import type { Request, Response } from "express";
 import { CompanyProfileService } from "../company-profile/company-profile.service.js";
 import { accountingReportHtml, LABEL_SPAN } from "../accounting/accounting-report-html.js";
@@ -1281,6 +1281,9 @@ export class OperationsController {
   }
 
   @ApiOperation({ summary: "Create a delivery order in the authenticated Company" })
+  // Fast Entry creates large sheets here one Order at a time (paced by the
+  // browser); see FAST_ENTRY_CREATE_RATE_LIMIT.
+  @Throttle({ default: { limit: FAST_ENTRY_CREATE_RATE_LIMIT, ttl: 60_000 } })
   @RequireAnyPermission("orders.create", "users_roles.manage")
   @Post("orders")
   public createOrder(

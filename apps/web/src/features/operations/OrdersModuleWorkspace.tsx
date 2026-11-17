@@ -3406,32 +3406,63 @@ function rowHasFastEntryContent(row: FastEntryRow): boolean {
 }
 
 /**
- * Fast Entry row checks (Aiman, 17 Nov 2026). Each row needs 3-4 requests
- * (customer, reference, quote). Checking every row at once tripped the
- * server's 100-requests-per-minute limit on large sheets, so rows are checked
- * a few at a time and a "too many requests" answer is waited out and retried.
+ * Fast Entry pacing (Aiman, 17 Nov 2026). A sheet of hundreds of rows must
+ * never be sent in one burst: every request waits its turn with a steady gap
+ * (checks ~8/second, creates ~2/second), and when the server still answers
+ * "Too Many Requests" every request pauses together for 20 seconds and then
+ * carries on, so even a 1,000-row sheet finishes instead of failing.
  */
 const FAST_ENTRY_VALIDATION_CONCURRENCY = 3;
-const FAST_ENTRY_RATE_LIMIT_WAITS_MS = [5_000, 10_000, 20_000, 30_000] as const;
+const FAST_ENTRY_CHECKS_PER_MINUTE = 500;
+const FAST_ENTRY_CREATES_PER_MINUTE = 120;
+const FAST_ENTRY_RATE_LIMIT_PAUSE_MS = 20_000;
+const FAST_ENTRY_MAX_RATE_LIMIT_RETRIES = 30;
 
-async function withRateLimitRetry<T>(request: () => Promise<T>): Promise<T> {
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      return await request();
-    } catch (error) {
-      const wait = FAST_ENTRY_RATE_LIMIT_WAITS_MS[attempt];
-      if (!(error instanceof ApiError) || error.status !== 429 || wait === undefined) throw error;
-      await new Promise((resolve) => setTimeout(resolve, wait));
+const pause = (milliseconds: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+
+/**
+ * The API calls Fast Entry makes, spaced `requestsPerMinute` apart across all
+ * callers sharing this object, and waited out (not failed) on HTTP 429.
+ */
+function pacedApi(
+  api: ApiClient,
+  requestsPerMinute: number,
+  onServerBusy?: (busy: boolean) => void,
+) {
+  const gap = 60_000 / requestsPerMinute;
+  let nextStart = 0;
+  let pausedUntil = 0;
+  const takeTurn = async () => {
+    for (;;) {
+      const now = Date.now();
+      const start = Math.max(now, nextStart, pausedUntil);
+      nextStart = start + gap;
+      if (start > now) await pause(start - now);
+      if (Date.now() >= pausedUntil) return;
     }
-  }
-}
-
-/** The API calls Fast Entry validation makes, each retried on HTTP 429. */
-function rateLimitedApi(api: ApiClient) {
+  };
+  const send = async <TResponse,>(request: () => Promise<TResponse>): Promise<TResponse> => {
+    for (let attempt = 0; ; attempt += 1) {
+      await takeTurn();
+      try {
+        const response = await request();
+        onServerBusy?.(false);
+        return response;
+      } catch (error) {
+        const rateLimited = error instanceof ApiError && error.status === 429;
+        if (!rateLimited || attempt >= FAST_ENTRY_MAX_RATE_LIMIT_RETRIES) throw error;
+        pausedUntil = Math.max(pausedUntil, Date.now() + FAST_ENTRY_RATE_LIMIT_PAUSE_MS);
+        onServerBusy?.(true);
+      }
+    }
+  };
   return {
-    get: <TResponse,>(path: string) => withRateLimitRetry(() => api.get<TResponse>(path)),
-    post: <TResponse,>(path: string, body?: unknown) =>
-      withRateLimitRetry(() => api.post<TResponse>(path, body)),
+    get: <TResponse,>(path: string) => send(() => api.get<TResponse>(path)),
+    post: <TResponse,>(path: string, body?: unknown, headers?: Readonly<Record<string, string>>) =>
+      send(() => api.post<TResponse>(path, body, headers)),
   };
 }
 
@@ -3685,12 +3716,17 @@ export function FastOrderEntryDialog({
     setPasteText("");
   };
 
-  // "Checking rows… 45 of 160" while a large sheet is validated.
-  const [checkProgress, setCheckProgress] = useState<{ done: number; total: number }>();
+  // "Checking rows… 45 of 160" / "Creating orders… 12 of 160" on large sheets.
+  const [checkProgress, setCheckProgress] = useState<{
+    done: number;
+    stage: "checking" | "creating";
+    total: number;
+  }>();
+  const [serverBusy, setServerBusy] = useState(false);
 
   const validateRows = useCallback(
     async (targetRows: readonly FastEntryRow[]) => {
-      const checks = rateLimitedApi(api);
+      const checks = pacedApi(api, FAST_ENTRY_CHECKS_PER_MINUTE, setServerBusy);
       const serialCounts = new Map<string, number>();
       const referenceCounts = new Map<string, number>();
       for (const row of targetRows) {
@@ -3908,8 +3944,11 @@ export function FastOrderEntryDialog({
             status: errors.length === 0 ? "ready" : "error",
           };
         },
-        (done, total) => setCheckProgress({ done, total }),
-      ).finally(() => setCheckProgress(undefined));
+        (done, total) => setCheckProgress({ done, stage: "checking", total }),
+      ).finally(() => {
+        setCheckProgress(undefined);
+        setServerBusy(false);
+      });
     },
     [api, both, isTrader, linkCustomerByMobile, locale, t],
   );
@@ -4061,6 +4100,10 @@ export function FastOrderEntryDialog({
       }
       const nextRows = [...validated];
       let stoppedOnCreateError = false;
+      const writer = pacedApi(api, FAST_ENTRY_CREATES_PER_MINUTE, setServerBusy);
+      const toCreate = nextRows.filter((row) => row.status === "ready").length;
+      let createdSoFar = 0;
+      setCheckProgress({ done: 0, stage: "creating", total: toCreate });
       for (let index = 0; index < nextRows.length; index += 1) {
         const row = nextRows[index];
         if (row === undefined) continue;
@@ -4094,7 +4137,7 @@ export function FastOrderEntryDialog({
                   inlineCustomer: undefined,
                 };
           const createdOrder = isTrader
-            ? await api.post<OperationsOrder>(
+            ? await writer.post<OperationsOrder>(
                 "portal/trader/orders",
                 {
                   areaId: row.areaId,
@@ -4117,7 +4160,7 @@ export function FastOrderEntryDialog({
                 },
                 { "X-Idempotency-Key": row.submissionKey },
               )
-            : await api.post<OperationsOrder>(
+            : await writer.post<OperationsOrder>(
             "operations/orders",
             {
               additionalFees: row.pickup === true ? 0 : additionalFees,
@@ -4156,6 +4199,8 @@ export function FastOrderEntryDialog({
             serialNumber: createdOrder?.serialNumber ?? row.serialNumber,
             status: "created",
           };
+          createdSoFar += 1;
+          setCheckProgress({ done: createdSoFar, stage: "creating", total: toCreate });
         } catch (requestError) {
           nextRows[index] = {
             ...row,
@@ -4208,6 +4253,8 @@ export function FastOrderEntryDialog({
       }
       setMessage(t("operations.fastEntryCreatedCount", { count: createdCount }));
     } finally {
+      setCheckProgress(undefined);
+      setServerBusy(false);
       setBusy(false);
     }
   };
@@ -4270,7 +4317,10 @@ export function FastOrderEntryDialog({
           </span>
           {checkProgress === undefined ? null : (
             <span aria-live="polite" className="form-hint">
-              {t("operations.fastEntryCheckingProgress", checkProgress)}
+              {checkProgress.stage === "creating"
+                ? t("operations.fastEntryCreatingProgress", checkProgress)
+                : t("operations.fastEntryCheckingProgress", checkProgress)}
+              {serverBusy ? ` — ${t("operations.fastEntryServerBusy")}` : ""}
             </span>
           )}
           <button

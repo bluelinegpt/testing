@@ -2191,6 +2191,8 @@ export const arabicTranslations = {
     fastEntryUsePastedRows: "استخدام الصفوف الملصقة",
     fastEntryValidate: "التحقق من الصفوف",
     fastEntryCheckingProgress: "جارٍ التحقق من الصفوف… {{done}} من {{total}}",
+    fastEntryCreatingProgress: "جارٍ إنشاء الطلبات… {{done}} من {{total}}",
+    fastEntryServerBusy: "الخادم مشغول، توقف لثوانٍ ثم المتابعة",
     fastEntryShowErrorsOnly: "عرض الصفوف التي بها أخطاء فقط ({{count}})",
     fastEntryShowAllRows: "عرض كل الصفوف",
     fastEntryValidationFailed: "تعذر التحقق من هذا الصف. حاول مرة أخرى.",

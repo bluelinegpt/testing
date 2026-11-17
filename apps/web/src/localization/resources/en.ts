@@ -2437,6 +2437,8 @@ export const englishTranslations = {
     fastEntryUsePastedRows: "Use pasted rows",
     fastEntryValidate: "Validate rows",
     fastEntryCheckingProgress: "Checking rows… {{done}} of {{total}}",
+    fastEntryCreatingProgress: "Creating orders… {{done}} of {{total}}",
+    fastEntryServerBusy: "server busy, pausing a few seconds then continuing",
     fastEntryShowErrorsOnly: "Show only rows with errors ({{count}})",
     fastEntryShowAllRows: "Show all rows",
     fastEntryValidationFailed: "This row could not be validated. Try again.",
