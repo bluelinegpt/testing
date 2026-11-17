@@ -53,6 +53,8 @@ describe("Fast Entry in the Trader portal", () => {
     expect(headers).not.toContain("Trader");
     expect(headers).not.toContain("Driver");
     expect(headers).not.toContain("Service Fee");
+    // Back-dating is Company-side only: a Trader's Order is always today.
+    expect(headers).not.toContain("Order date");
     expect(dialog.queryByText("Paste from Excel or CSV")).toBeNull();
     fireEvent.change(document.querySelector<HTMLInputElement>('input[type="file"]')!, {
       target: { files: [new File(["x"], "sheet.xlsx")] },

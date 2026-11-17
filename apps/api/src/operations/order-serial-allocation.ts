@@ -75,18 +75,20 @@ export async function allocateAutomaticOrderSerial(
   database: Kysely<DatabaseSchema> | Transaction<DatabaseSchema>,
   companyId: string,
   alsoTaken: readonly string[] = [],
+  /** The Order Date (YYYY-MM-DD) when back-dated; null = today (`current_date`). */
+  orderDate: string | null = null,
 ): Promise<string> {
   await sql`
     select pg_advisory_xact_lock(
       hashtext(${companyId}),
-      hashtext('order-serial-allocator:' || current_date::text)
+      hashtext('order-serial-allocator:' || coalesce(${orderDate}::date, current_date)::text)
     )
   `.execute(database);
   const result = await sql<{ serial: string }>`
     select distinct serial_number as serial
       from orders
      where company_id = ${companyId}::uuid
-       and order_date = current_date
+       and order_date = coalesce(${orderDate}::date, current_date)
        and serial_number ~ '^[0-9]+$'
   `.execute(database);
   return nextAutomaticSerial([...result.rows.map((row) => row.serial), ...alsoTaken]);

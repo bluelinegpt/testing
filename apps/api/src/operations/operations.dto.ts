@@ -626,6 +626,18 @@ export class CreateOrderDto {
   @OptionalTrimmedText()
   public readonly referenceNumber?: string;
 
+  /**
+   * Optional Order Date (`orders.order_date`, YYYY-MM-DD) for an Order keyed
+   * in after the day it happened -- Fast Entry from a trader's old waybills
+   * (Aiman, 17 Nov 2026). Omitted: today, exactly as before. A future date is
+   * refused by the service. The Serial Number duplicate check and automatic
+   * Serial use this date, so serials stay unique per Order Date.
+   */
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/u, { message: "orderDate must be YYYY-MM-DD" })
+  public readonly orderDate?: string;
+
   @IsOptional()
   @IsUUID()
   public readonly customerId?: string;
@@ -749,6 +761,8 @@ export class CreateOrderDto {
 export class CreateTraderPortalOrderDto extends OmitType(CreateOrderDto, [
   "serialNumber",
   "traderId",
+  // Back-dating is a Company-side Fast Entry tool; a Trader's Order is always today.
+  "orderDate",
 ] as const) {
   /**
    * Which of the Trader's linked Delivery Companies this Order belongs to

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { accountingXlsx } from "../accounting/accounting-xlsx.js";
 
-import { nameKey, parseFastEntrySheet, readXlsxRows, splitEmiratePrefix } from "./fast-entry-sheet.js";
+import { nameKey, parseFastEntrySheet, readXlsxRows, sheetOrderDate, splitEmiratePrefix } from "./fast-entry-sheet.js";
 import { FastEntrySheetService, matchFastEntryRows, type FastEntrySheetArea } from "./fast-entry-sheet.service.js";
 
 const header = ["م", "رقم الكوبون", "الكود", "اسم التاجر", "المرسل الية", "العنوان", "رقم الهاتف", "قيمة الطلبية", "التوصيل", "الاجمالى", "ملاحظات", "اسم المندوب"];
@@ -73,8 +73,48 @@ describe("Fast Entry daily sheet", () => {
       expect.stringContaining('Trader "New Shop" not found'),
       expect.stringContaining("more than one Emirate"),
     ]);
-    expect(rows[3]).toMatchObject({ area: null, emirateId: "auh" });
-    expect(rows[3]?.errors[0]?.ar).toContain("اسم إمارة فقط");
+    // "ابوظبي" alone: the Emirate's first Area alphabetically, with a warning.
+    expect(rows[3]).toMatchObject({ area: { id: "bahia-auh" }, emirateId: "auh", errors: [] });
+    expect(rows[3]?.areaNote?.ar).toContain("غير موجودة");
+  });
+
+  it("uses the Emirate's first Area alphabetically when the Area is not found, and says so", () => {
+    const parsed = parseFastEntrySheet(
+      sheet([
+        [1, "1", "", "Plaza Store", "", "ابوظبي الشامخة", "0501234567", 100, 25, 125, "", ""],
+        [2, "2", "", "Plaza Store", "", "ش منطقة جديدة", "0501234568", 100, 25, 125, "", ""],
+        [3, "3", "", "Plaza Store", "", "مكان غير معروف", "0501234569", 100, 25, 125, "", ""],
+      ]),
+    );
+    const { rows } = matchFastEntryRows(parsed.rows, directory);
+    // Abu Dhabi: الباهية sorts before الزاهية.
+    expect(rows[0]).toMatchObject({ area: { id: "bahia-auh" }, customerAddress: "ابوظبي الشامخة", emirateId: "auh", errors: [] });
+    expect(rows[0]?.areaNote?.en).toContain('Area "ابوظبي الشامخة" not found');
+    expect(rows[1]).toMatchObject({ area: { id: "taawun" }, emirateId: "shj", errors: [] });
+    // No Emirate on the line: nothing is guessed.
+    expect(rows[2]).toMatchObject({ area: null, areaNote: null });
+    expect(rows[2]?.errors.map((error) => error.en)).toEqual([expect.stringContaining("not found — choose the Area")]);
+  });
+
+  it("reads an Order Date column; blank or incomplete dates mean today", () => {
+    expect(sheetOrderDate("17/05/2026")).toBe("2026-05-17");
+    expect(sheetOrderDate("9-5-2026")).toBe("2026-05-09");
+    expect(sheetOrderDate("1.10.26")).toBe("2026-10-01");
+    expect(sheetOrderDate("2026-09-22")).toBe("2026-09-22");
+    expect(sheetOrderDate("46158")).toBe("2026-05-16"); // a real Excel date cell
+    expect(sheetOrderDate("31/02/2026")).toBeNull();
+    expect(sheetOrderDate("??/09/2026")).toBeNull();
+    expect(sheetOrderDate("")).toBeNull();
+    const parsed = parseFastEntrySheet([
+      ["م", "رقم الكوبون", "اسم التاجر", "العنوان", "رقم الهاتف", "التوصيل", "الاجمالى", "ملاحظات", "التاريخ"],
+      ["1", "0650", "Plaza Store", "ش التعاون", "0501234567", "20", "105", "", "17/05/2026"],
+      ["2", "0651", "Plaza Store", "ش التعاون", "0501234568", "20", "105", "", "??/09/2026"],
+      ["3", "0652", "Plaza Store", "ش التعاون", "0501234569", "20", "105", "", ""],
+    ]);
+    expect(parsed.rows.map((row) => row.orderDate)).toEqual(["2026-05-17", null, null]);
+    expect(parsed.rows.map((row) => row.orderDateNote === null)).toEqual([true, false, true]);
+    expect(parsed.rows[1]?.orderDateNote?.en).toContain("today");
+    expect(parsed.rows.every((row) => row.errors.length === 0)).toBe(true);
   });
 
   it("finds an Area named after the Emirate prefix in another Emirate, and says so", () => {

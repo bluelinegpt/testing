@@ -4202,6 +4202,17 @@ export class OperationsService {
       );
     }
     const suppliedSerialNumber = input.serialNumber?.trim() || null;
+    // Omitted or blank = today (`current_date`), exactly as before.
+    const orderDate = input.orderDate?.trim() || null;
+    // "2026-02-30" passes the DTO's pattern but is not a date; refuse it here
+    // rather than let the `::date` cast fail as a server error.
+    const parsedOrderDate = orderDate === null ? null : new Date(`${orderDate}T00:00:00Z`);
+    if (
+      parsedOrderDate !== null &&
+      (Number.isNaN(parsedOrderDate.getTime()) || parsedOrderDate.toISOString().slice(0, 10) !== orderDate)
+    ) {
+      throw new ApplicationException("order_date_invalid", "Order Date is not a valid date", HttpStatus.BAD_REQUEST);
+    }
     const referenceNumber = input.referenceNumber?.trim() || null;
     const referenceNumberNormalized =
       referenceNumber === null ? null : this.normalizeOrderIdentifier(referenceNumber);
@@ -4351,13 +4362,28 @@ export class OperationsService {
         `.execute(transaction)
         ).rows[0]?.value ?? null;
       const psystemSerialNormalized = psystemSerial?.toLowerCase() ?? null;
+      // Back-dated Order Date (Fast Entry). The future check uses the
+      // database's own `current_date`, the same clock the INSERT and the
+      // Serial check use.
+      if (orderDate !== null) {
+        const dateCheck = await sql<{ future: boolean }>`
+          select (${orderDate}::date > current_date) as future
+        `.execute(transaction);
+        if (dateCheck.rows[0]?.future === true) {
+          throw new ApplicationException(
+            "order_date_in_future",
+            "Order Date cannot be in the future",
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+      }
       // Typed Serial: kept exactly as typed, or refused as a duplicate for the
       // day. Blank Serial: assigned now, at the moment of saving, under the
       // per-Company per-day allocator lock (see order-serial-allocation.ts).
       const { serialNumber, serialNumberNormalized } = await this.assignSerialAndAssertIdentifiers(
         transaction,
         companyId,
-        { referenceNumber, referenceNumberNormalized, suppliedSerialNumber },
+        { orderDate, referenceNumber, referenceNumberNormalized, suppliedSerialNumber },
       );
 
       const trader = await sql<{ id: string; name: string }>`
@@ -4568,7 +4594,7 @@ export class OperationsService {
           ${companyId}::uuid, ${orderNumber}, ${serialNumber}, ${serialNumberNormalized},
           ${psystemSerial}, ${psystemSerialNormalized},
           ${referenceNumber}, ${referenceNumberNormalized}, 'trader_deduction_v1',
-          current_date, ${traderRow.id}::uuid,
+          coalesce(${orderDate}::date, current_date), ${traderRow.id}::uuid,
           ${area?.id ?? null}::uuid, ${actingAccountId}::uuid,
           ${driverRow?.id ?? null}::uuid,${customerRow?.id ?? null}::uuid,${customerAddressRow?.id ?? null}::uuid,
           ${customerName}, ${customerMobileNumber},${customerSecondMobileNumber}, ${customerAddress},
@@ -8000,6 +8026,8 @@ export class OperationsService {
       referenceNumberNormalized: string | null;
       serialNumber: string;
       serialNumberNormalized: string;
+      /** Back-dated Order Date (YYYY-MM-DD); omitted/null = today (`current_date`). */
+      orderDate?: string | null;
     },
   ): Promise<void> {
     // Serial Number uniqueness is scoped to the Order's own Business Date
@@ -8008,10 +8036,11 @@ export class OperationsService {
     // rather than computed in JS so the lock key, the duplicate check, and
     // the eventual INSERT's own `current_date` can never disagree due to a
     // clock or timezone mismatch between the app process and the database.
+    const orderDate = input.orderDate ?? null;
     await sql`
       select pg_advisory_xact_lock(
         hashtext(${companyId}),
-        hashtext('order-serial:' || current_date::text || ':' || ${input.serialNumberNormalized})
+        hashtext('order-serial:' || coalesce(${orderDate}::date, current_date)::text || ':' || ${input.serialNumberNormalized})
       )
     `.execute(transaction);
     if (input.referenceNumberNormalized !== null) {
@@ -8028,11 +8057,11 @@ export class OperationsService {
       serialExists: boolean;
     }>`
       select
-        current_date::text as "orderDate",
+        coalesce(${orderDate}::date, current_date)::text as "orderDate",
         exists(
           select 1 from orders
           where company_id=${companyId}::uuid
-            and order_date = current_date
+            and order_date = coalesce(${orderDate}::date, current_date)
             and serial_number_normalized=${input.serialNumberNormalized}
         ) as "serialExists",
         exists(
@@ -8078,6 +8107,8 @@ export class OperationsService {
       referenceNumber: string | null;
       referenceNumberNormalized: string | null;
       suppliedSerialNumber: string | null;
+      /** Back-dated Order Date (YYYY-MM-DD); null = today. */
+      orderDate?: string | null;
     },
   ): Promise<{ serialNumber: string; serialNumberNormalized: string }> {
     if (input.suppliedSerialNumber !== null) {
@@ -8088,6 +8119,7 @@ export class OperationsService {
         referenceNumberNormalized: input.referenceNumberNormalized,
         serialNumber,
         serialNumberNormalized,
+        orderDate: input.orderDate ?? null,
       });
       return { serialNumber, serialNumberNormalized };
     }
@@ -8098,6 +8130,7 @@ export class OperationsService {
         transaction,
         companyId,
         lostToTypedSerial,
+        input.orderDate ?? null,
       );
       const serialNumberNormalized = this.normalizeOrderIdentifier(serialNumber);
       try {
@@ -8106,6 +8139,7 @@ export class OperationsService {
           referenceNumberNormalized: input.referenceNumberNormalized,
           serialNumber,
           serialNumberNormalized,
+          orderDate: input.orderDate ?? null,
         });
         return { serialNumber, serialNumberNormalized };
       } catch (error) {

@@ -141,6 +141,7 @@ type SheetColumn =
   | "driver"
   | "fee"
   | "notes"
+  | "orderDate"
   | "orderValue"
   | "phone"
   | "phone2"
@@ -154,6 +155,9 @@ const HEADER_ALIASES: Readonly<Record<SheetColumn, readonly string[]>> = {
   driver: ["اسم المندوب", "المندوب", "السائق", "driver", "driver name"],
   fee: ["التوصيل", "رسوم التوصيل", "delivery fee", "delivery", "service fee"],
   notes: ["ملاحظات", "notes", "note"],
+  // Order Date (Aiman, 17 Nov 2026): the day the Order happened, for sheets
+  // keyed in later. Blank or unreadable = today.
+  orderDate: ["التاريخ", "تاريخ الطلب", "تاريخ الطلبيه", "order date", "date"],
   orderValue: ["قيمه الطلبيه", "قيمه الطلب", "order value", "order value to trader", "value"],
   phone: ["رقم الهاتف", "الهاتف", "رقم الجوال", "الجوال", "mobile", "phone", "mobile number"],
   // Optional second number in its own column (Aiman, 31 Oct 2026). Two numbers
@@ -196,6 +200,10 @@ export interface ParsedSheetRow {
   /** The delivery fee written on the sheet (التوصيل). */
   readonly sheetFee: number | null;
   readonly paymentCondition: "customer_pays_cod_and_fee" | "customer_pays_cod_trader_pays_fee";
+  /** Order Date as YYYY-MM-DD, or null = today (blank or unreadable cell). */
+  readonly orderDate: string | null;
+  /** Set when the date cell had text that is not a full date: today is used. */
+  readonly orderDateNote: SheetMessage | null;
   readonly errors: readonly SheetMessage[];
   /** Returned / cancelled line: listed in red and not loaded. */
   readonly excludedReason: SheetMessage | null;
@@ -231,6 +239,35 @@ function splitMobiles(value: string): [string, string] {
     .map(sheetMobile)
     .filter((part) => part !== "");
   return [parts[0] ?? "", parts[1] ?? ""];
+}
+
+const isoDate = (year: number, month: number, day: number): string | null => {
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  return date.toISOString().slice(0, 10);
+};
+
+/**
+ * A sheet date cell as YYYY-MM-DD. Reads a real Excel date (stored as a day
+ * number, e.g. "46158"), "17/05/2026", "17-5-2026", "17.5.26" (day first, as
+ * the operators write it) and "2026-05-17". Anything else -- "??/09/2026", a
+ * missing day, text -- is null, and the caller uses today.
+ */
+export function sheetOrderDate(value: string): string | null {
+  const text = value.trim();
+  if (text === "") return null;
+  if (/^\d{5}(\.\d+)?$/.test(text)) {
+    // Excel day number, counted from 30 Dec 1899.
+    const serial = Math.floor(Number(text));
+    if (serial < 20000 || serial > 80000) return null;
+    return new Date(Date.UTC(1899, 11, 30) + serial * 86_400_000).toISOString().slice(0, 10);
+  }
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(text);
+  if (iso !== null) return isoDate(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+  const dayFirst = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})$/.exec(text);
+  if (dayFirst === null) return null;
+  const year = dayFirst[3]!.length === 2 ? 2000 + Number(dayFirst[3]) : Number(dayFirst[3]);
+  return isoDate(year, Number(dayFirst[2]), Number(dayFirst[1]));
 }
 
 function packagesFrom(notes: string): number {
@@ -288,6 +325,8 @@ export function parseFastEntrySheet(rows: readonly (readonly string[])[]): Parse
     let total = toNumber(cell(row, "total"));
     if (total === null && value !== null && fee !== null) total = value + fee;
     const notes = cell(row, "notes");
+    const dateText = cell(row, "orderDate");
+    const orderDate = sheetOrderDate(dateText);
     const [mobile, splitSecond] = splitMobiles(phoneText);
     const secondMobile = sheetMobile(cell(row, "phone2")) || splitSecond;
     const errors: SheetMessage[] = [];
@@ -317,6 +356,14 @@ export function parseFastEntrySheet(rows: readonly (readonly string[])[]): Parse
         : null,
       mobile,
       notes,
+      orderDate,
+      orderDateNote:
+        dateText !== "" && orderDate === null
+          ? {
+              ar: `التاريخ «${dateText}» غير مكتمل — تم استخدام تاريخ اليوم`,
+              en: `Date "${dateText}" is not a full date — today's date is used`,
+            }
+          : null,
       packageCount: packagesFrom(notes),
       paymentCondition: traderPays ? "customer_pays_cod_trader_pays_fee" : "customer_pays_cod_and_fee",
       referenceNumber: /^\*+$/.test(referenceClean) ? "" : referenceClean,

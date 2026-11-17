@@ -57,8 +57,15 @@ export interface FastEntrySheetRow {
   readonly secondMobile: string;
   readonly emirateId: string;
   readonly area: FastEntrySheetArea | null;
-  /** The Area was matched in another Emirate than the sheet's prefix said. */
+  /**
+   * A warning about the Area: matched in another Emirate than the sheet's
+   * prefix said, or not found and replaced by the Emirate's default Area.
+   */
   readonly areaNote: SheetMessage | null;
+  /** Order Date (YYYY-MM-DD) from the sheet; null = today. */
+  readonly orderDate: string | null;
+  /** The date cell had text that is not a full date, so today is used. */
+  readonly orderDateNote: SheetMessage | null;
   readonly pickup: boolean;
   readonly customerAddress: string;
   readonly codAmount: string;
@@ -80,8 +87,8 @@ export interface FastEntrySheetResult {
 }
 
 const TEMPLATE_COLUMNS = {
-  ar: ["م", "رقم الكوبون", "اسم التاجر", "المرسل اليه", "العنوان", "رقم الهاتف", "جوال إضافي", "قيمة الطلبية", "التوصيل", "الاجمالى", "ملاحظات", "اسم المندوب"],
-  en: ["No", "Reference Number", "Trader Name", "Customer Name", "Area / Address", "Mobile", "Second Mobile", "Order Value (to Trader)", "Delivery Fee", "Total (COD)", "Notes", "Driver"],
+  ar: ["م", "رقم الكوبون", "اسم التاجر", "المرسل اليه", "العنوان", "رقم الهاتف", "جوال إضافي", "قيمة الطلبية", "التوصيل", "الاجمالى", "ملاحظات", "اسم المندوب", "التاريخ"],
+  en: ["No", "Reference Number", "Trader Name", "Customer Name", "Area / Address", "Mobile", "Second Mobile", "Order Value (to Trader)", "Delivery Fee", "Total (COD)", "Notes", "Driver", "Order Date"],
 } as const;
 
 const TEMPLATE_NOTES = {
@@ -92,6 +99,7 @@ const TEMPLATE_NOTES = {
     ["قيمة الطلبية", "الاجمالى − التوصيل. إذا كانت بالسالب (مثال −25 / 25 / 0) فالدفع من التاجر"],
     ["العنوان", "اسم المنطقة، ويمكن كتابة الإمارة قبلها: ش التعاون، راك الظيت، الفجيره الفصيل"],
     ["الملاحظات", "اكتب «2 قطعه» لعدد الطرود، و«رجعت» أو «كنسل» لطلب لا يُحمّل"],
+    ["التاريخ", "تاريخ الطلب: 17/05/2026 (اليوم أولاً). إذا كان فارغاً أو غير مكتمل يُستخدم تاريخ اليوم"],
   ],
   en: [
     ["Daily orders sheet", ""],
@@ -100,6 +108,7 @@ const TEMPLATE_NOTES = {
     ["Order Value (to Trader)", "Total − Delivery Fee. Negative (e.g. −25 / 25 / 0) means the Trader pays"],
     ["Area / Address", "The Area name; the Emirate may come first: ش التعاون, راك الظيت, الفجيره الفصيل"],
     ["Notes", "Write \"2 pcs\" for packages, and \"returned\" or \"cancelled\" for a line not to load"],
+    ["Order Date", "The day of the Order: 17/05/2026 (day first). Blank or incomplete = today"],
   ],
 } as const;
 
@@ -253,6 +262,15 @@ export function matchFastEntryRows(
     }
   }
   const areaKey = (value: string | null) => nameKey(value);
+  // Default Area per Emirate (Aiman, 17 Nov 2026): when a line's Area is not
+  // found but its Emirate is known, the first active Area of that Emirate in
+  // alphabetical order is used, with a warning, instead of failing the line.
+  const defaultAreaByEmirate = new Map<string, FastEntrySheetArea>();
+  for (const area of [...areas].sort((left, right) =>
+    (left.nameAr ?? left.nameEn).localeCompare(right.nameAr ?? right.nameEn, "ar"),
+  )) {
+    if (!defaultAreaByEmirate.has(area.emirateId)) defaultAreaByEmirate.set(area.emirateId, area);
+  }
   const emirateKeys = new Map<string, string>(); // name key -> emirate id
   for (const area of areas) {
     emirateKeys.set(nameKey(area.emirateNameEn), area.emirateId);
@@ -298,13 +316,27 @@ export function matchFastEntryRows(
           (onlyEmirate === undefined || candidate.emirateId === onlyEmirate) &&
           (areaKey(candidate.nameAr) === areaKey(text) || areaKey(candidate.nameEn) === areaKey(text)),
       );
+    const useDefaultArea = (forEmirateId: string | undefined): boolean => {
+      const fallback = forEmirateId === undefined ? undefined : defaultAreaByEmirate.get(forEmirateId);
+      if (fallback === undefined) return false;
+      area = fallback;
+      emirateId = fallback.emirateId;
+      const fallbackName = fallback.nameAr ?? fallback.nameEn;
+      areaNote = {
+        ar: `المنطقة «${row.addressText}» غير موجودة — تم اختيار «${fallbackName}» في ${fallback.emirateNameAr}، تحقق منها`,
+        en: `Area "${row.addressText}" not found — "${fallback.nameEn}" in ${fallback.emirateNameEn} was used, please check`,
+      };
+      return true;
+    };
     if (row.addressText === "") {
       errors.push({ ar: "المنطقة غير موجودة في الكشف", en: "Area is missing on the sheet" });
     } else if (wholeTextEmirateId !== undefined && lookup(row.addressText).length === 0) {
-      errors.push({
-        ar: `«${row.addressText}» اسم إمارة فقط — اختر المنطقة`,
-        en: `"${row.addressText}" is an Emirate only — choose the Area`,
-      });
+      if (!useDefaultArea(wholeTextEmirateId)) {
+        errors.push({
+          ar: `«${row.addressText}» اسم إمارة فقط — اختر المنطقة`,
+          en: `"${row.addressText}" is an Emirate only — choose the Area`,
+        });
+      }
     } else {
       let candidates = areaText === "" ? [] : lookup(areaText, prefixEmirateId);
       // "الفجيره السيوح" may also be an Area's full name.
@@ -339,7 +371,7 @@ export function matchFastEntryRows(
             en: `Area "${row.addressText}" exists in more than one Emirate — choose the Area`,
           });
         }
-      } else {
+      } else if (!useDefaultArea(prefixEmirateId)) {
         errors.push({
           ar: `المنطقة «${row.addressText}» غير موجودة — اختر المنطقة`,
           en: `Area "${row.addressText}" not found — choose the Area`,
@@ -365,6 +397,8 @@ export function matchFastEntryRows(
       excludedReason: row.excludedReason,
       mobile: row.mobile,
       notes: row.notes,
+      orderDate: row.orderDate,
+      orderDateNote: row.orderDateNote,
       packageCount: row.packageCount,
       paymentCondition: row.paymentCondition,
       referenceNumber: row.referenceNumber,

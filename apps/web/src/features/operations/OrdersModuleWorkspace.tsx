@@ -3094,6 +3094,9 @@ interface FastEntrySheetMessage {
 interface FastEntrySheetRowPayload {
   area: CompanyArea | null;
   areaNote: FastEntrySheetMessage | null;
+  /** Order Date from the sheet (YYYY-MM-DD); null = today. */
+  orderDate: string | null;
+  orderDateNote: FastEntrySheetMessage | null;
   pickup: boolean;
   codAmount: string;
   customerAddress: string;
@@ -3132,6 +3135,13 @@ interface FastEntryRow {
   emirateId: string;
   id: string;
   notes: string;
+  /**
+   * Order Date (YYYY-MM-DD) for an Order keyed in after its day (Aiman,
+   * 17 Nov 2026). Blank = today, as before. Company Fast Entry only.
+   */
+  orderDate: string;
+  /** The sheet's date cell was not a full date, so today is used (both languages). */
+  orderDateNote?: string | undefined;
   overrideReason: string;
   packageCount: string;
   referenceNumber: string;
@@ -3228,6 +3238,7 @@ function createFastEntryRow(serialNumber = ""): FastEntryRow {
         ? crypto.randomUUID()
         : `${Date.now()}-${Math.random()}`,
     notes: "",
+    orderDate: "",
     overrideReason: "",
     packageCount: "1",
     referenceNumber: "",
@@ -3287,6 +3298,8 @@ function fastEntryRowFromSheet(line: FastEntrySheetRowPayload): FastEntryRow {
     message: line.errors.length === 0 ? undefined : line.errors.map(bothLanguages).join("\n"),
     mobile: line.mobile,
     notes: line.notes,
+    orderDate: line.orderDate ?? "",
+    orderDateNote: line.orderDateNote == null ? undefined : bothLanguages(line.orderDateNote),
     packageCount: String(line.packageCount),
     paymentCondition: line.paymentCondition,
     referenceNumber: line.referenceNumber,
@@ -3476,7 +3489,13 @@ export function FastOrderEntryDialog({
   const tabOrder: readonly string[] = isTrader
     ? fastEntryTabOrder.filter((field) => field !== "trader")
     : fastEntryTabOrder;
-  const columnCount = isTrader ? 13 : 18;
+  const columnCount = isTrader ? 13 : 19;
+  // Latest Order Date the picker offers: today on this computer. The server
+  // re-checks against its own date and refuses a future one.
+  const todayIso = useMemo(() => {
+    const now = new Date();
+    return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+  }, []);
   // "+ Add Area" (Company only): the sheet line whose Area is being added.
   const [addAreaFor, setAddAreaFor] = useState<{ emirateId: string; sheetText: string }>();
   // Row errors in English and Arabic together, whatever the screen language.
@@ -4053,6 +4072,8 @@ export function FastOrderEntryDialog({
               driverId: row.driverId === "" || row.pickup === true ? undefined : row.driverId,
               inlineCustomer: customerPayload.inlineCustomer,
               notes: row.notes.trim() || undefined,
+              // Blank is sent as omitted: the Order is dated today, as before.
+              orderDate: row.orderDate.trim() === "" ? undefined : row.orderDate.trim(),
               packageCount: packages.ok ? packages.value : 1,
               paymentCondition: row.pickup === true ? undefined : row.paymentCondition,
               referenceNumber: row.referenceNumber.trim() || undefined,
@@ -4234,6 +4255,7 @@ export function FastOrderEntryDialog({
               <tr>
                 <th>#</th>
                 {isTrader ? null : <th>{t("operations.serialNumber")}</th>}
+                {isTrader ? null : <th>{t("operations.orderDate")}</th>}
                 <th>{t("operations.referenceNumber")}</th>
                 {isTrader ? null : <th>{t("operations.trader")}</th>}
                 <th>{t("operations.customerName")}</th>
@@ -4329,6 +4351,22 @@ export function FastOrderEntryDialog({
                       value={row.serialNumber}
                       onChange={(event) => updateRow(row.id, { serialNumber: event.target.value })}
                     />
+                  </td>
+                  )}
+                  {isTrader ? null : (
+                  <td className="fast-entry-order-date">
+                    <input
+                      aria-label={t("operations.orderDate")}
+                      max={todayIso}
+                      type="date"
+                      value={row.orderDate}
+                      onChange={(event) =>
+                        updateRow(row.id, { orderDate: event.target.value, orderDateNote: undefined })
+                      }
+                    />
+                    {row.orderDateNote === undefined ? null : (
+                      <span className="fast-entry-row-note">{row.orderDateNote}</span>
+                    )}
                   </td>
                   )}
                   <td data-fe="referenceNumber">
