@@ -150,16 +150,17 @@ describe("One-screen Trader Settlement", () => {
 
   it("shows an order once even when the server's pages repeat it", async () => {
     const { api } = setup();
-    const original = api.get.getMockImplementation()!;
-    api.get.mockImplementation((path: string) => {
+    const original = api.get.getMockImplementation() as unknown as (path: string) => Promise<unknown>;
+    const repeating = (path: string): Promise<unknown> => {
       if (path.startsWith("operations/settlements/payments/eligible-orders")) {
-        return (original(path) as Promise<{ items: unknown[] }>).then((result) => ({
-          ...result,
-          items: [...result.items, result.items[0]],
-        }));
+        return original(path).then((result) => {
+          const paged = result as { items: readonly unknown[] };
+          return { ...paged, items: [...paged.items, paged.items[0]] };
+        });
       }
       return original(path);
-    });
+    };
+    api.get.mockImplementation(repeating as unknown as typeof original as never);
     const dialog = within(await screen.findByRole("dialog"));
     fireEvent.click(await dialog.findByRole("button", { name: "ARMAN ABYA (TRD-1)" }));
     await dialog.findByText("5183");
