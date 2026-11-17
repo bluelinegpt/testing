@@ -2190,6 +2190,8 @@ export const arabicTranslations = {
     fastEntryTotalCod: "إجمالي COD في الجدول: {{amount}}",
     fastEntryUsePastedRows: "استخدام الصفوف الملصقة",
     fastEntryValidate: "التحقق من الصفوف",
+    fastEntryShowErrorsOnly: "عرض الصفوف التي بها أخطاء فقط ({{count}})",
+    fastEntryShowAllRows: "عرض كل الصفوف",
     fastEntryValidationFailed: "تعذر التحقق من هذا الصف. حاول مرة أخرى.",
     fastEntryAddArea: "+ إضافة منطقة",
     fastEntryAddTrader: "+ إضافة تاجر",

@@ -3405,6 +3405,55 @@ function rowHasFastEntryContent(row: FastEntryRow): boolean {
   });
 }
 
+/**
+ * Fast Entry row checks (Aiman, 17 Nov 2026). Each row needs 3-4 requests
+ * (customer, reference, quote). Checking every row at once tripped the
+ * server's 100-requests-per-minute limit on large sheets, so rows are checked
+ * a few at a time and a "too many requests" answer is waited out and retried.
+ */
+const FAST_ENTRY_VALIDATION_CONCURRENCY = 3;
+const FAST_ENTRY_RATE_LIMIT_WAITS_MS = [5_000, 10_000, 20_000, 30_000] as const;
+
+async function withRateLimitRetry<T>(request: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await request();
+    } catch (error) {
+      const wait = FAST_ENTRY_RATE_LIMIT_WAITS_MS[attempt];
+      if (!(error instanceof ApiError) || error.status !== 429 || wait === undefined) throw error;
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+  }
+}
+
+/** The API calls Fast Entry validation makes, each retried on HTTP 429. */
+function rateLimitedApi(api: ApiClient) {
+  return {
+    get: <TResponse,>(path: string) => withRateLimitRetry(() => api.get<TResponse>(path)),
+    post: <TResponse,>(path: string, body?: unknown) =>
+      withRateLimitRetry(() => api.post<TResponse>(path, body)),
+  };
+}
+
+/** Like Promise.all over `items.map(mapper)`, but at most `limit` at a time; order kept. */
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  mapper: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await mapper(items[index] as T, index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 function resolveApiMessage(requestError: unknown, fallback: string): string {
   const sanitize = (message: string) =>
     message.includes("Cannot read properties of undefined") ? fallback : message;
@@ -3634,6 +3683,7 @@ export function FastOrderEntryDialog({
 
   const validateRows = useCallback(
     async (targetRows: readonly FastEntryRow[]) => {
+      const checks = rateLimitedApi(api);
       const serialCounts = new Map<string, number>();
       const referenceCounts = new Map<string, number>();
       for (const row of targetRows) {
@@ -3646,8 +3696,10 @@ export function FastOrderEntryDialog({
           referenceCounts.set(reference, (referenceCounts.get(reference) ?? 0) + 1);
       }
 
-      return Promise.all(
-        targetRows.map(async (row): Promise<FastEntryRow> => {
+      return mapWithConcurrency(
+        targetRows,
+        FAST_ENTRY_VALIDATION_CONCURRENCY,
+        async (row): Promise<FastEntryRow> => {
           if (!rowHasFastEntryContent(row) || row.status === "created" || row.status === "excluded")
             return row;
           const errors: string[] = [];
@@ -3692,7 +3744,7 @@ export function FastOrderEntryDialog({
           // prices when each order is created.
           if (errors.length === 0 && !isTrader) {
             try {
-              const page = await api.get<SearchPage<CustomerOption>>(
+              const page = await checks.get<SearchPage<CustomerOption>>(
                 `configuration/customers/search?search=${encodeURIComponent(row.mobile.trim())}&limit=10&offset=0`,
               );
               const requestedMobileKey = mobileComparisonKey(row.mobile);
@@ -3711,7 +3763,7 @@ export function FastOrderEntryDialog({
                   // Sent as typed; the server links the same Customer and picks
                   // or adds the address. This only tells the user which.
                   customerOption = undefined;
-                  const detail = await api
+                  const detail = await checks
                     .get<{ addresses?: readonly SavedCustomerAddress[] }>(
                       `configuration/customers/${encodeURIComponent(matched.code)}`,
                     )
@@ -3737,8 +3789,8 @@ export function FastOrderEntryDialog({
                   customerOption = undefined;
                 }
               }
-            } catch {
-              errors.push(both("operations.fastEntryValidationFailed"));
+            } catch (requestError) {
+              errors.push(resolveApiMessage(requestError, both("operations.fastEntryValidationFailed")));
             }
           }
 
@@ -3747,7 +3799,7 @@ export function FastOrderEntryDialog({
               const query = new URLSearchParams();
               if (serial !== "") query.set("serialNumber", serial);
               if (reference !== "") query.set("referenceNumber", reference);
-              const availability = await api.get<{
+              const availability = await checks.get<{
                 referenceNumberAvailable: boolean;
                 serialNumberAvailable: boolean;
               }>(`operations/orders/identifier-availability?${query.toString()}`);
@@ -3755,8 +3807,8 @@ export function FastOrderEntryDialog({
                 errors.push(both("operations.serialNumberExists"));
               if (!availability.referenceNumberAvailable)
                 errors.push(both("operations.referenceNumberExists"));
-            } catch {
-              errors.push(both("operations.fastEntryValidationFailed"));
+            } catch (requestError) {
+              errors.push(resolveApiMessage(requestError, both("operations.fastEntryValidationFailed")));
             }
           }
 
@@ -3775,7 +3827,7 @@ export function FastOrderEntryDialog({
               const sheetFee =
                 row.sheetServiceFee === "" ? undefined : parseFastEntryMoney(row.sheetServiceFee);
               if (sheetFee !== undefined) {
-                const configured = await api.post<OperationsOrderQuote>("operations/orders/quote", {
+                const configured = await checks.post<OperationsOrderQuote>("operations/orders/quote", {
                   additionalFees: 0,
                   areaId: row.areaId,
                   codAmount: cod,
@@ -3818,7 +3870,7 @@ export function FastOrderEntryDialog({
                   };
                 }
               }
-              const quote = await api.post<OperationsOrderQuote>("operations/orders/quote", {
+              const quote = await checks.post<OperationsOrderQuote>("operations/orders/quote", {
                 additionalFees: additionalFees ?? 0,
                 areaId: row.areaId,
                 codAmount: cod,
@@ -3848,13 +3900,14 @@ export function FastOrderEntryDialog({
                 : errors.join("\n"),
             status: errors.length === 0 ? "ready" : "error",
           };
-        }),
+        },
       );
     },
     [api, both, isTrader, linkCustomerByMobile, locale, t],
   );
 
   const [sheetBusy, setSheetBusy] = useState(false);
+  const [errorsOnly, setErrorsOnly] = useState(false);
   const [addTraderFor, setAddTraderFor] = useState<string>();
   const [addedTrader, setAddedTrader] = useState<{ code: string; id: string; name: string }>();
   const sheetInputRef = useRef<HTMLInputElement>(null);
@@ -4157,6 +4210,10 @@ export function FastOrderEntryDialog({
     (row) => rowHasFastEntryContent(row) && row.status !== "created" && row.status !== "excluded",
   );
   const excludedRows = rows.filter((row) => row.status === "excluded").length;
+  // "Errors only" view: after a check, show just the rows that need fixing.
+  // Row numbers stay those of the full list; turns itself off when none are left.
+  const errorRows = rows.filter((row) => row.status === "error").length;
+  const showErrorsOnly = errorsOnly && errorRows > 0;
 
   return (
     <Modal
@@ -4203,6 +4260,17 @@ export function FastOrderEntryDialog({
               total: rows.length - excludedRows,
             })}
           </span>
+          <button
+            aria-pressed={showErrorsOnly}
+            className={showErrorsOnly ? "button button-primary" : "button"}
+            disabled={errorRows === 0 && !showErrorsOnly}
+            onClick={() => setErrorsOnly((current) => !current)}
+            type="button"
+          >
+            {showErrorsOnly
+              ? t("operations.fastEntryShowAllRows")
+              : t("operations.fastEntryShowErrorsOnly", { count: errorRows })}
+          </button>
         </div>
         <div className="fast-entry-toolbar fast-entry-sheet-toolbar">
           <input
@@ -4275,7 +4343,7 @@ export function FastOrderEntryDialog({
               </tr>
             </thead>
             <tbody ref={fastEntryBodyRef}>
-              {rows.map((row, index) => row.status === "excluded" ? (
+              {rows.map((row, index) => showErrorsOnly && row.status !== "error" ? null : row.status === "excluded" ? (
                 <tr className="fast-entry-row-excluded" data-row-id={row.id} key={row.id}>
                   <td>
                     {index + 1}

@@ -2436,6 +2436,8 @@ export const englishTranslations = {
     fastEntryTotalCod: "Total COD in sheet: {{amount}}",
     fastEntryUsePastedRows: "Use pasted rows",
     fastEntryValidate: "Validate rows",
+    fastEntryShowErrorsOnly: "Show only rows with errors ({{count}})",
+    fastEntryShowAllRows: "Show all rows",
     fastEntryValidationFailed: "This row could not be validated. Try again.",
     fastEntryAddArea: "+ Add Area",
     fastEntryAddTrader: "+ Add Trader",
