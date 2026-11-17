@@ -4651,6 +4651,8 @@ export const arabicTranslations = {
     oneScreen: {
       all: "الكل",
       allTraders: "← كل التجار",
+      dateFrom: "تاريخ التوصيل من",
+      dateTo: "إلى",
       countOrders: "{{count}} طلب",
       noOpenTraders: "لا يوجد تاجر لديه طلبات بانتظار الفوترة.",
       searchTrader: "بحث باسم التاجر أو الكود",

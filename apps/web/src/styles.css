@@ -1304,6 +1304,13 @@
   flex: 1;
   min-width: 220px;
 }
+.one-screen-settlement__date {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  white-space: nowrap;
+}
 .one-screen-settlement__edit-amounts {
   display: inline-flex;
   align-items: center;

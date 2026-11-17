@@ -4699,6 +4699,8 @@ export const englishTranslations = {
     oneScreen: {
       all: "All",
       allTraders: "← All Traders",
+      dateFrom: "Delivered from",
+      dateTo: "to",
       countOrders: "{{count}} orders",
       noOpenTraders: "No Trader has anything left to invoice.",
       searchTrader: "Search Trader name or code",

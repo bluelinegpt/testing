@@ -196,6 +196,11 @@ export function OneScreenSettlementDialog({
   const [editAmounts, setEditAmounts] = useState(false);
   const [kindFilter, setKindFilter] = useState<LineKind | "all">("all");
   const [search, setSearch] = useState("");
+  // Delivered from / to (Aiman, 18 Nov 2026): narrow a big Trader to a date
+  // range so "select all" ticks only that range. Compares the same yyyy-mm-dd
+  // the Date column shows; lines without a date only show with no range set.
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [paymentDate, setPaymentDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [paymentMethod, setPaymentMethod] = useState<"bank_transfer" | "cash">("cash");
   const [cashAccounts, setCashAccounts] = useState<readonly { id: string; name: string }[]>([]);
@@ -456,6 +461,12 @@ export function OneScreenSettlementDialog({
 
   const visible = lines.filter((line) => {
     if (kindFilter !== "all" && line.kind !== kindFilter) return false;
+    if (dateFrom !== "" || dateTo !== "") {
+      const day = line.date === null ? "" : line.date.slice(0, 10);
+      if (day === "") return false;
+      if (dateFrom !== "" && day < dateFrom) return false;
+      if (dateTo !== "" && day > dateTo) return false;
+    }
     const term = search.trim().toLowerCase();
     if (term === "") return true;
     return [line.orderNumber, line.reference, line.customer, line.mobile, line.note]
@@ -815,6 +826,24 @@ export function OneScreenSettlementDialog({
           placeholder={t("traderSettlements.oneScreen.search")}
           value={search}
         />
+        <label className="one-screen-settlement__date">
+          {t("traderSettlements.oneScreen.dateFrom")}
+          <input
+            max={dateTo === "" ? undefined : dateTo}
+            onChange={(event) => setDateFrom(event.target.value)}
+            type="date"
+            value={dateFrom}
+          />
+        </label>
+        <label className="one-screen-settlement__date">
+          {t("traderSettlements.oneScreen.dateTo")}
+          <input
+            min={dateFrom === "" ? undefined : dateFrom}
+            onChange={(event) => setDateTo(event.target.value)}
+            type="date"
+            value={dateTo}
+          />
+        </label>
         <label className="one-screen-settlement__edit-amounts">
           <input
             checked={editAmounts}

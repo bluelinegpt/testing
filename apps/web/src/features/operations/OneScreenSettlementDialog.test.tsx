@@ -148,6 +148,19 @@ describe("One-screen Trader Settlement", () => {
     await waitFor(() => expect(dialog.getByRole("status").textContent).toContain("363.00"));
   });
 
+  it("narrows the lines to a delivered-date range", async () => {
+    setup();
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.click(await dialog.findByRole("button", { name: "ARMAN ABYA (TRD-1)" }));
+    await dialog.findByText("5183");
+    fireEvent.change(dialog.getByLabelText("Delivered from"), { target: { value: "2026-10-22" } });
+    await waitFor(() => expect(dialog.queryByText("5183")).not.toBeInTheDocument());
+    fireEvent.change(dialog.getByLabelText("Delivered from"), { target: { value: "2026-10-21" } });
+    fireEvent.change(dialog.getByLabelText("to"), { target: { value: "2026-10-21" } });
+    expect(await dialog.findByText("5183")).toBeInTheDocument();
+    expect(dialog.getByText("5184")).toBeInTheDocument();
+  });
+
   it("posts the ticked lines in full, with the 0-due order printed at 0.00", async () => {
     const { onPosted, posts } = setup();
     const dialog = within(await screen.findByRole("dialog"));
