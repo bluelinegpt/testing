@@ -148,6 +148,27 @@ describe("One-screen Trader Settlement", () => {
     await waitFor(() => expect(dialog.getByRole("status").textContent).toContain("363.00"));
   });
 
+  it("shows an order once even when the server's pages repeat it", async () => {
+    const { api } = setup();
+    const original = api.get.getMockImplementation()!;
+    api.get.mockImplementation((path: string) => {
+      if (path.startsWith("operations/settlements/payments/eligible-orders")) {
+        return (original(path) as Promise<{ items: unknown[] }>).then((result) => ({
+          ...result,
+          items: [...result.items, result.items[0]],
+        }));
+      }
+      return original(path);
+    });
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.click(await dialog.findByRole("button", { name: "ARMAN ABYA (TRD-1)" }));
+    await dialog.findByText("5183");
+    expect(dialog.getAllByText("5183")).toHaveLength(1);
+    expect(dialog.getAllByRole("checkbox", { name: "Include 5183" })).toHaveLength(1);
+    // 2 orders + 1 fee, not 3 orders + 1 fee.
+    await waitFor(() => expect(dialog.getByRole("status").textContent).toContain("3 lines ticked"));
+  });
+
   it("narrows the lines to a delivered-date range", async () => {
     setup();
     const dialog = within(await screen.findByRole("dialog"));

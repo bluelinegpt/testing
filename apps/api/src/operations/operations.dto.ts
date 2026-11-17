@@ -1462,6 +1462,13 @@ export class TraderSettlementCreditApplicationDto {
   public readonly amount!: number;
 }
 
+/**
+ * Most lines one Trader Settlement may carry, per list (Aiman, 18 Nov 2026:
+ * a 992-order Trader hit the old 500). Posting is one transaction, so this
+ * stays bounded rather than unlimited.
+ */
+export const TRADER_SETTLEMENT_MAX_LINES = 1000;
+
 export class CreateTraderSettlementDto {
   /**
    * Company CASH account funding a cash settlement.
@@ -1490,14 +1497,14 @@ export class CreateTraderSettlementDto {
   public readonly amount!: number;
 
   @IsArray()
-  @ArrayMaxSize(500)
+  @ArrayMaxSize(TRADER_SETTLEMENT_MAX_LINES)
   @ValidateNested({ each: true })
   @Type(() => TraderSettlementAllocationLineDto)
   public readonly allocations!: readonly TraderSettlementAllocationLineDto[];
 
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(500)
+  @ArrayMaxSize(TRADER_SETTLEMENT_MAX_LINES)
   @ValidateNested({ each: true })
   @Type(() => TraderSettlementReceivableOffsetDto)
   public readonly receivableOffsets?: readonly TraderSettlementReceivableOffsetDto[];
@@ -1508,7 +1515,7 @@ export class CreateTraderSettlementDto {
    */
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(500)
+  @ArrayMaxSize(TRADER_SETTLEMENT_MAX_LINES)
   @ValidateNested({ each: true })
   @Type(() => TraderSettlementCreditApplicationDto)
   public readonly creditApplications?: readonly TraderSettlementCreditApplicationDto[];
@@ -1519,7 +1526,7 @@ export class CreateTraderSettlementDto {
    */
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(500)
+  @ArrayMaxSize(TRADER_SETTLEMENT_MAX_LINES)
   @IsUUID("all", { each: true })
   public readonly zeroDueOrderIds?: readonly string[];
 

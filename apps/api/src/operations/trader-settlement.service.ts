@@ -32,7 +32,7 @@ import {
 import { restoredDeliveryStatus, reversalInvalidatesClose } from "./order-close-eligibility.js";
 import { expectedReceivableStatus } from "./trader-receivable-reconciliation.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
-import { traderSettlementPageSizes } from "./operations.dto.js";
+import { TRADER_SETTLEMENT_MAX_LINES, traderSettlementPageSizes } from "./operations.dto.js";
 import { normalizeReferenceTerm } from "./order-search.js";
 import { isSearchList, orderNumberCandidates, splitSearchList } from "./search-list.js";
 import type {
@@ -1076,7 +1076,11 @@ export class TraderSettlementService {
         left join emirates e on e.id = a.emirate_id
        where ${filters}
        order by ${sql.raw(sortColumn)} ${sql.raw(direction)},
-                coalesce(o.serial_number, o.order_number) ${sql.raw(direction)}
+                coalesce(o.serial_number, o.order_number) ${sql.raw(direction)},
+                -- Unique last key: without it, orders sharing a delivery time and
+                -- serial (a bulk import) moved between pages, so one Order came
+                -- back twice and another never (Aiman, 18 Nov 2026).
+                o.id ${sql.raw(direction)}
        limit ${limit} offset ${offset}
     `.execute(this.database);
     return this.page(result.rows, page, pageSize);
@@ -1133,8 +1137,8 @@ export class TraderSettlementService {
          and o.trader_id = ${traderId}::uuid
          and ${idFilter}
          and ${eligibility}
-       order by o.delivered_at desc, coalesce(o.serial_number, o.order_number) desc
-       limit 500
+       order by o.delivered_at desc, coalesce(o.serial_number, o.order_number) desc, o.id desc
+       limit ${TRADER_SETTLEMENT_MAX_LINES}
     `.execute(executor);
     return result.rows;
   }

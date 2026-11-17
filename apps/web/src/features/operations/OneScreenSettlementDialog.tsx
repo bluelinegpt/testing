@@ -157,7 +157,50 @@ async function allPages<T>(api: ApiClient, base: string, pageSize: number): Prom
       api.get<Paged<T>>(`${base}${join}page=${index + 2}&pageSize=${pageSize}`),
     ),
   );
-  return [first, ...rest].flatMap((page) => [...(page.items ?? [])]);
+  // Each row once, even if the server's paging ever repeats one (a repeated
+  // Order became two allocation rows and the post failed -- 18 Nov 2026).
+  const seen = new Set<unknown>();
+  return [first, ...rest]
+    .flatMap((page) => [...(page.items ?? [])])
+    .filter((item) => {
+      const id = (item as { id?: unknown }).id;
+      if (id === undefined) return true;
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+}
+
+/**
+ * Most lines of one kind a Settlement may carry; the API enforces the same
+ * number (TRADER_SETTLEMENT_MAX_LINES). Ticking stops here instead of the
+ * post failing with a validation error.
+ */
+const MAX_LINES_PER_KIND = 1000;
+
+/** Adds `candidates` to `current`, never past MAX_LINES_PER_KIND of a kind. */
+function tickUpToLimit(current: ReadonlySet<string>, candidates: readonly Line[]): {
+  readonly capped: boolean;
+  readonly next: Set<string>;
+} {
+  const next = new Set(current);
+  const perKind = new Map<string, number>();
+  for (const key of next) {
+    const kind = key.slice(0, key.indexOf(":"));
+    perKind.set(kind, (perKind.get(kind) ?? 0) + 1);
+  }
+  let capped = false;
+  for (const line of candidates) {
+    if (next.has(line.key)) continue;
+    const used = perKind.get(line.kind) ?? 0;
+    if (used >= MAX_LINES_PER_KIND) {
+      capped = true;
+      continue;
+    }
+    next.add(line.key);
+    perKind.set(line.kind, used + 1);
+  }
+  return { capped, next };
 }
 
 const money = (value: number | string) => formatMoneyValue(value);
@@ -196,6 +239,8 @@ export function OneScreenSettlementDialog({
   const [editAmounts, setEditAmounts] = useState(false);
   const [kindFilter, setKindFilter] = useState<LineKind | "all">("all");
   const [search, setSearch] = useState("");
+  // Set when "tick all" stopped at MAX_LINES_PER_KIND.
+  const [ticksCapped, setTicksCapped] = useState(false);
   // Delivered from / to (Aiman, 18 Nov 2026): narrow a big Trader to a date
   // range so "select all" ticks only that range. Compares the same yyyy-mm-dd
   // the Date column shows; lines without a date only show with no range set.
@@ -430,7 +475,12 @@ export function OneScreenSettlementDialog({
       setEditAmounts(Object.keys(custom).length > 0);
       return;
     }
-    setSelected(new Set(lines.filter((line) => line.kind === "pay" || line.kind === "fee").map((line) => line.key)));
+    const defaults = tickUpToLimit(
+      new Set(),
+      lines.filter((line) => line.kind === "pay" || line.kind === "fee"),
+    );
+    setSelected(defaults.next);
+    setTicksCapped(defaults.capped);
     setAmounts({});
   }, [lines, draft, initialDraftId]);
 
@@ -557,6 +607,12 @@ export function OneScreenSettlementDialog({
   });
 
   const persist = async (): Promise<DraftRow> => {
+    const overLimit = (["pay", "fee", "credit", "zero"] as const).find(
+      (kind) => ticked.filter((line) => line.kind === kind).length > MAX_LINES_PER_KIND,
+    );
+    if (overLimit !== undefined) {
+      throw new Error(t("traderSettlements.oneScreen.tooManyLines", { max: MAX_LINES_PER_KIND }));
+    }
     const body = payload();
     try {
       const saved =
@@ -872,16 +928,20 @@ export function OneScreenSettlementDialog({
                   aria-label={t("traderSettlements.oneScreen.selectAll")}
                   checked={allVisibleTicked}
                   disabled={visible.length === 0}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    if (event.target.checked) {
+                      const result = tickUpToLimit(selected, visible);
+                      setSelected(result.next);
+                      setTicksCapped(result.capped);
+                      return;
+                    }
+                    setTicksCapped(false);
                     setSelected((current) => {
                       const next = new Set(current);
-                      for (const line of visible) {
-                        if (event.target.checked) next.add(line.key);
-                        else next.delete(line.key);
-                      }
+                      for (const line of visible) next.delete(line.key);
                       return next;
-                    })
-                  }
+                    });
+                  }}
                   type="checkbox"
                 />
               </th>
@@ -995,6 +1055,11 @@ export function OneScreenSettlementDialog({
           </span>
           <strong>{money(Math.abs(totals.net))}</strong>
           <small>{t("traderSettlements.oneScreen.linesTicked", { count: ticked.length })}</small>
+          {ticksCapped ? (
+            <small className="form-hint">
+              {t("traderSettlements.oneScreen.ticksCapped", { max: MAX_LINES_PER_KIND })}
+            </small>
+          ) : null}
         </div>
       </div>
       {totals.net < 0 ? (

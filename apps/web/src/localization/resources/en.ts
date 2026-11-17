@@ -4700,6 +4700,8 @@ export const englishTranslations = {
       all: "All",
       allTraders: "← All Traders",
       dateFrom: "Delivered from",
+      ticksCapped: "Only the first {{max}} orders were ticked. Post them, then open this Trader again for the rest.",
+      tooManyLines: "One settlement can hold up to {{max}} orders. Untick some, or narrow the delivered dates.",
       dateTo: "to",
       countOrders: "{{count}} orders",
       noOpenTraders: "No Trader has anything left to invoice.",

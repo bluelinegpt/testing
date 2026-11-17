@@ -4652,6 +4652,8 @@ export const arabicTranslations = {
       all: "الكل",
       allTraders: "← كل التجار",
       dateFrom: "تاريخ التوصيل من",
+      ticksCapped: "تم تحديد أول {{max}} طلب فقط. قم بترحيلها ثم افتح التاجر مرة أخرى لباقي الطلبات.",
+      tooManyLines: "التسوية الواحدة تتسع حتى {{max}} طلب. ألغِ تحديد بعضها أو ضيّق تاريخ التوصيل.",
       dateTo: "إلى",
       countOrders: "{{count}} طلب",
       noOpenTraders: "لا يوجد تاجر لديه طلبات بانتظار الفوترة.",
