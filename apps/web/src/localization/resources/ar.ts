@@ -2190,6 +2190,7 @@ export const arabicTranslations = {
     fastEntryTotalCod: "إجمالي COD في الجدول: {{amount}}",
     fastEntryUsePastedRows: "استخدام الصفوف الملصقة",
     fastEntryValidate: "التحقق من الصفوف",
+    fastEntryCheckingProgress: "جارٍ التحقق من الصفوف… {{done}} من {{total}}",
     fastEntryShowErrorsOnly: "عرض الصفوف التي بها أخطاء فقط ({{count}})",
     fastEntryShowAllRows: "عرض كل الصفوف",
     fastEntryValidationFailed: "تعذر التحقق من هذا الصف. حاول مرة أخرى.",

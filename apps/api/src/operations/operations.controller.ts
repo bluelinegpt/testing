@@ -21,6 +21,7 @@ import {
 import { FileInterceptor } from "@nestjs/platform-express";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { Throttle } from "@nestjs/throttler";
+import { FAST_ENTRY_CHECK_RATE_LIMIT } from "../security/fast-entry-rate-limit.js";
 import type { Request, Response } from "express";
 import { CompanyProfileService } from "../company-profile/company-profile.service.js";
 import { accountingReportHtml, LABEL_SPAN } from "../accounting/accounting-report-html.js";
@@ -728,6 +729,10 @@ export class OperationsController {
   }
 
   @ApiOperation({ summary: "Calculate an order financial preview using Company VAT settings" })
+  // Fast Entry checks every sheet row with this read-only call; at the
+  // global 100/min a 150-row sheet was refused ("Too Many Requests"). Read-only
+  // and permission-gated, so it gets a wider limit (Aiman, 17 Nov 2026).
+  @Throttle({ default: { limit: FAST_ENTRY_CHECK_RATE_LIMIT, ttl: 60_000 } })
   @RequireAnyPermission("orders.create", "users_roles.manage")
   @Post("orders/quote")
   public quoteOrder(@Body() input: OrderQuoteDto): Promise<OperationsOrderQuote> {
@@ -735,6 +740,10 @@ export class OperationsController {
   }
 
   @ApiOperation({ summary: "Check Company-scoped Order identifier availability" })
+  // Fast Entry checks every sheet row with this read-only call; at the
+  // global 100/min a 150-row sheet was refused ("Too Many Requests"). Read-only
+  // and permission-gated, so it gets a wider limit (Aiman, 17 Nov 2026).
+  @Throttle({ default: { limit: FAST_ENTRY_CHECK_RATE_LIMIT, ttl: 60_000 } })
   @RequireAnyPermission("orders.create", "users_roles.manage")
   @Get("orders/identifier-availability")
   public identifierAvailability(

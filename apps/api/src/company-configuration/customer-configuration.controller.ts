@@ -11,12 +11,14 @@ import {
   Req,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
+import { Throttle } from "@nestjs/throttler";
 import type { Request } from "express";
 
 import {
   RequireAnyPermission,
   RequireIdentityKinds,
 } from "../authentication/authentication.decorators.js";
+import { FAST_ENTRY_CHECK_RATE_LIMIT } from "../security/fast-entry-rate-limit.js";
 import {
   CustomerConfigurationService,
   type CustomerPage,
@@ -50,6 +52,10 @@ export class CustomerConfigurationController {
   }
 
   @Get("search")
+  // Fast Entry checks every sheet row with this read-only call; at the
+  // global 100/min a 150-row sheet was refused ("Too Many Requests"). Read-only
+  // and permission-gated, so it gets a wider limit (Aiman, 17 Nov 2026).
+  @Throttle({ default: { limit: FAST_ENTRY_CHECK_RATE_LIMIT, ttl: 60_000 } })
   @RequireAnyPermission("orders.create", "users_roles.manage")
   public search(@Query() query: Record<string, string>): Promise<Record<string, unknown>> {
     return this.customers.search(query);

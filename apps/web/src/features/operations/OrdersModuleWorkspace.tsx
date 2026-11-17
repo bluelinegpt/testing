@@ -3440,14 +3440,18 @@ async function mapWithConcurrency<T, R>(
   items: readonly T[],
   limit: number,
   mapper: (item: T, index: number) => Promise<R>,
+  onProgress?: (done: number, total: number) => void,
 ): Promise<R[]> {
   const results = new Array<R>(items.length);
   let next = 0;
+  let done = 0;
   const worker = async () => {
     while (next < items.length) {
       const index = next;
       next += 1;
       results[index] = await mapper(items[index] as T, index);
+      done += 1;
+      onProgress?.(done, items.length);
     }
   };
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
@@ -3681,6 +3685,9 @@ export function FastOrderEntryDialog({
     setPasteText("");
   };
 
+  // "Checking rows… 45 of 160" while a large sheet is validated.
+  const [checkProgress, setCheckProgress] = useState<{ done: number; total: number }>();
+
   const validateRows = useCallback(
     async (targetRows: readonly FastEntryRow[]) => {
       const checks = rateLimitedApi(api);
@@ -3901,7 +3908,8 @@ export function FastOrderEntryDialog({
             status: errors.length === 0 ? "ready" : "error",
           };
         },
-      );
+        (done, total) => setCheckProgress({ done, total }),
+      ).finally(() => setCheckProgress(undefined));
     },
     [api, both, isTrader, linkCustomerByMobile, locale, t],
   );
@@ -4260,6 +4268,11 @@ export function FastOrderEntryDialog({
               total: rows.length - excludedRows,
             })}
           </span>
+          {checkProgress === undefined ? null : (
+            <span aria-live="polite" className="form-hint">
+              {t("operations.fastEntryCheckingProgress", checkProgress)}
+            </span>
+          )}
           <button
             aria-pressed={showErrorsOnly}
             className={showErrorsOnly ? "button button-primary" : "button"}
