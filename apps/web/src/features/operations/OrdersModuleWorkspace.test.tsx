@@ -2282,6 +2282,56 @@ describe("Fast Entry loads the daily Excel sheet", () => {
     });
   });
 
+  it("asks one price quote for rows with the same Trader, Area, COD and payer, and does not re-check ready rows", async () => {
+    const api = sheetApi();
+    api.postMultipart.mockResolvedValue({
+      excludedLines: 0,
+      rows: [
+        line({ codAmount: "100.00", mobile: "0502222221", referenceNumber: "", sheetRow: 3 }),
+        line({ codAmount: "100.00", mobile: "0502222222", referenceNumber: "", sheetRow: 4 }),
+        line({ codAmount: "100.00", mobile: "0502222223", referenceNumber: "", sheetRow: 5 }),
+      ],
+      totalLines: 3,
+    });
+    // Creating fails, so the rows stay ready and Create orders can be pressed again.
+    api.post.mockImplementation((...args: [path: string, body?: unknown, headers?: unknown]) =>
+      args[0] === "operations/orders/quote"
+        ? Promise.resolve({ serviceFee: "25.00" })
+        : Promise.reject(new Error("offline")),
+    );
+    renderWithRouter(
+      <OrdersModuleWorkspace
+        api={api as unknown as ApiClient}
+        onNavigate={vi.fn()}
+        permissions={["users_roles.manage"]}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Fast entry" }));
+    const dialog = await screen.findByRole("dialog", { name: /Fast order entry/ });
+    const input = dialog.querySelector<HTMLInputElement>('input[type="file"]')!;
+    fireEvent.change(input, { target: { files: [new File(["x"], "18-10-2026.xlsx")] } });
+    await within(dialog).findByText(/3 rows/);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create orders" }));
+    await waitFor(() =>
+      expect(api.post.mock.calls.some(([path]) => path === "operations/orders")).toBe(true),
+    );
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Create orders" })).toBeEnabled());
+    // Same Trader, Area, COD and payer: one quote, not one or two per row.
+    expect(api.post.mock.calls.filter(([path]) => path === "operations/orders/quote")).toHaveLength(1);
+    const searches = () =>
+      api.get.mock.calls.filter(([path]) => String(path).startsWith("configuration/customers/search")).length;
+    expect(searches()).toBe(3);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create orders" }));
+    await waitFor(() =>
+      expect(api.post.mock.calls.filter(([path]) => path === "operations/orders").length).toBeGreaterThan(1),
+    );
+    // The second press re-checks only the row whose create failed; the two
+    // rows still ready are not checked again.
+    expect(searches()).toBe(4);
+  });
+
   it("Lahthza: a saved Customer's mobile with another address is created for him, with a note", async () => {
     const api = sheetApi();
     api.postMultipart.mockResolvedValue({ excludedLines: 0, rows: [line({})], totalLines: 1 });

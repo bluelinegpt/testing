@@ -3412,9 +3412,15 @@ function rowHasFastEntryContent(row: FastEntryRow): boolean {
  * "Too Many Requests" every request pauses together for 20 seconds and then
  * carries on, so even a 1,000-row sheet finishes instead of failing.
  */
-const FAST_ENTRY_VALIDATION_CONCURRENCY = 3;
-const FAST_ENTRY_CHECKS_PER_MINUTE = 500;
-const FAST_ENTRY_CREATES_PER_MINUTE = 120;
+const FAST_ENTRY_VALIDATION_CONCURRENCY = 6;
+/**
+ * Per check route (customer search, customer detail, number availability,
+ * price quote). The server counts each route separately, 1,000 a minute, so
+ * pacing them separately keeps every route under its own limit with room for
+ * other users (Aiman, 18 Nov 2026: 659 rows took 5+ minutes at 500 shared).
+ */
+const FAST_ENTRY_CHECKS_PER_MINUTE = 700;
+const FAST_ENTRY_CREATES_PER_MINUTE = 240;
 const FAST_ENTRY_RATE_LIMIT_PAUSE_MS = 20_000;
 const FAST_ENTRY_MAX_RATE_LIMIT_RETRIES = 30;
 
@@ -3726,7 +3732,38 @@ export function FastOrderEntryDialog({
 
   const validateRows = useCallback(
     async (targetRows: readonly FastEntryRow[]) => {
-      const checks = pacedApi(api, FAST_ENTRY_CHECKS_PER_MINUTE, setServerBusy);
+      // One pacer per route (each has its own server limit), and one answer
+      // per distinct question: rows that share a Trader, Area, COD and payer
+      // share one price quote; the same mobile or Customer is looked up once.
+      const searchApi = pacedApi(api, FAST_ENTRY_CHECKS_PER_MINUTE, setServerBusy);
+      const detailApi = pacedApi(api, FAST_ENTRY_CHECKS_PER_MINUTE, setServerBusy);
+      const availabilityApi = pacedApi(api, FAST_ENTRY_CHECKS_PER_MINUTE, setServerBusy);
+      const quoteApi = pacedApi(api, FAST_ENTRY_CHECKS_PER_MINUTE, setServerBusy);
+      const answers = new Map<string, Promise<unknown>>();
+      const once = <TResponse,>(key: string, request: () => Promise<TResponse>): Promise<TResponse> => {
+        const known = answers.get(key);
+        if (known !== undefined) return known as Promise<TResponse>;
+        const pending = request();
+        answers.set(key, pending);
+        // A failed answer is not reused: the next row asks again.
+        pending.catch(() => answers.delete(key));
+        return pending;
+      };
+      const checks = {
+        get: <TResponse,>(path: string): Promise<TResponse> => {
+          const route = path.startsWith("configuration/customers/search")
+            ? searchApi
+            : path.startsWith("operations/orders/identifier-availability")
+              ? availabilityApi
+              : detailApi;
+          // Identifier checks are per row (a number may be taken meanwhile).
+          return route === availabilityApi
+            ? route.get<TResponse>(path)
+            : once(`GET ${path}`, () => route.get<TResponse>(path));
+        },
+        post: <TResponse,>(path: string, body?: unknown): Promise<TResponse> =>
+          once(`POST ${path} ${JSON.stringify(body)}`, () => quoteApi.post<TResponse>(path, body)),
+      };
       const serialCounts = new Map<string, number>();
       const referenceCounts = new Map<string, number>();
       for (const row of targetRows) {
@@ -3745,6 +3782,11 @@ export function FastOrderEntryDialog({
         async (row): Promise<FastEntryRow> => {
           if (!rowHasFastEntryContent(row) || row.status === "created" || row.status === "excluded")
             return row;
+          // Already checked and not edited since (any edit sets it back to
+          // draft): pressing Create orders again does not re-check it, so a
+          // second press continues instead of starting again from row 1. The
+          // server still checks every Order when it is created.
+          if (row.status === "ready") return row;
           const errors: string[] = [];
           const serial = row.serialNumber.trim();
           const reference = row.referenceNumber.trim();
