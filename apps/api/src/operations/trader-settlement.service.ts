@@ -313,6 +313,18 @@ interface PostedDraftRow {
   readonly traderId: string;
 }
 
+/** A Trader Collection being reversed and adjusted, or posted again. */
+interface RepostCollectionRow {
+  readonly bankAccountId: string | null;
+  readonly collectionNumber: string;
+  readonly id: string;
+  readonly notes: string | null;
+  readonly paymentMethod: string;
+  readonly paymentReference: string | null;
+  readonly status: string;
+  readonly traderId: string;
+}
+
 /** A one-screen draft with only "Nothing to pay" Orders, posted as a 0.00 invoice. */
 export interface ZeroInvoiceDraftResult {
   readonly draftId: string;
@@ -2224,6 +2236,17 @@ export class TraderSettlementService {
              confirmed_at = now(), updated_at = now()
        where id = ${draftId}::uuid and company_id = ${companyId}::uuid and status = 'draft'
     `.execute(transaction);
+    // A draft opened from a reversed collection (Reverse & adjust / Post
+    // again): the new collection records which one it replaces.
+    await sql`
+      update trader_collections c
+         set replaces_collection_id = d.replaces_collection_id
+        from trader_settlement_drafts d
+       where d.id = ${draftId}::uuid and d.company_id = ${companyId}::uuid
+         and d.replaces_collection_id is not null
+         and c.id = ${collection.collectionId}::uuid and c.company_id = ${companyId}::uuid
+         and c.replaces_collection_id is null
+    `.execute(transaction);
     return {
       amountCollected: this.money(feeTotal.minus(settlementAmount)).toFixed(2),
       collectionId: collection.collectionId,
@@ -3942,6 +3965,354 @@ export class TraderSettlementService {
   }
 
   /**
+   * Reverse & adjust ONE Trader Collection (Aiman, 20 Nov 2026).
+   *
+   * A collection posted from a one-screen draft is un-posted exactly as
+   * `unpostDraft` does it. A collection posted from the Trader Collections
+   * screen has no draft: it is reversed (the same `reverseCollection`, so the
+   * same checks, journal reversal and cash/bank reversal) and a draft is opened
+   * with the same fees, so a fee can be changed, lines ticked or unticked and
+   * the collection posted again under a new number. One transaction.
+   */
+  public async unpostCollection(
+    collectionId: string,
+    reason: string,
+    correlationId: string,
+  ): Promise<{
+    readonly draftId: string;
+    readonly reversalSettlementNumber: string;
+    readonly settlementNumber: string;
+    readonly skippedReceivables: readonly string[];
+  }> {
+    this.assertAnyPermission("settlements.reverse");
+    this.assertAnyPermission("settlements.create");
+    const { companyId } = this.tenants.current();
+    const trimmedReason = reason.trim();
+    if (trimmedReason === "") {
+      throw new ApplicationException(
+        "trader_collection_reversal_reason_required",
+        "A reason is required to reverse a Trader collection",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    if (this.traderReceivables === undefined) {
+      throw new Error("Trader collections are not available to the settlement service");
+    }
+    const traderReceivables = this.traderReceivables;
+    return this.transactions.execute(async (transaction) => {
+      await this.assertOneScreenForCollections(transaction, companyId);
+      const collection = await this.lockCollectionForRepost(transaction, companyId, collectionId);
+      if (collection.status === "reversed") {
+        throw new ApplicationException(
+          "trader_collection_already_reversed",
+          "This collection has already been reversed. Use Post again to open it as a draft.",
+          HttpStatus.CONFLICT,
+        );
+      }
+      // Posted from a one-screen draft: that draft's own Un-post (which also
+      // reverses a Settlement posted with it) is the one correct path.
+      const posted = (
+        await sql<PostedDraftRow>`
+          select d.id, d.trader_id as "traderId", d.payload, d.status,
+                 d.confirmed_settlement_id as "confirmedSettlementId",
+                 d.confirmed_collection_id::text as "collectionId",
+                 (to_jsonb(d) ->> 'confirmed_zero_invoice_id') as "zeroInvoiceId"
+            from trader_settlement_drafts d
+           where d.company_id = ${companyId}::uuid and d.confirmed_collection_id = ${collectionId}::uuid
+             and d.status = 'confirmed'
+           for update
+        `.execute(transaction)
+      ).rows[0];
+      if (posted !== undefined) {
+        const result = await this.unpostTraderOwesInTransaction(
+          transaction,
+          companyId,
+          posted,
+          trimmedReason,
+          correlationId,
+        );
+        return { ...result, skippedReceivables: [] };
+      }
+      await this.assertNoOpenDraft(transaction, companyId, collection.traderId);
+      await traderReceivables.reverseCollectionInTransaction(
+        transaction,
+        collectionId,
+        trimmedReason,
+        correlationId,
+      );
+      const draft = await this.openDraftFromCollection(transaction, companyId, collection);
+      await this.history.audit(transaction, {
+        action: "trader_collection.unposted",
+        actorId: this.identities.current().identityId,
+        after: {
+          collectionNumber: collection.collectionNumber,
+          draftId: draft.draftId,
+          reason: trimmedReason,
+          skippedReceivables: draft.skipped,
+        },
+        companyId,
+        correlationId,
+        subjectId: collectionId,
+        subjectType: "trader_collection",
+      });
+      return {
+        draftId: draft.draftId,
+        reversalSettlementNumber: "—",
+        settlementNumber: collection.collectionNumber,
+        skippedReceivables: draft.skipped,
+      };
+    });
+  }
+
+  /**
+   * Post again: open a REVERSED Trader Collection's fees as a draft, so it can
+   * be adjusted and posted under a new number (Aiman, 20 Nov 2026). Nothing
+   * financial happens here: the draft is only intent until it is posted.
+   *
+   * Each fee is taken as it is NOW: a fee whose amount was changed after the
+   * reversal (Change fee cancels the old charge and opens a new one) comes in
+   * at its new amount; a fee that was collected again, cancelled or waived
+   * since is left out and named in `skippedReceivables`.
+   */
+  public async repostCollection(
+    collectionId: string,
+    correlationId: string,
+  ): Promise<{
+    readonly collectionNumber: string;
+    readonly draftId: string;
+    readonly skippedReceivables: readonly string[];
+  }> {
+    this.assertAnyPermission("settlements.create");
+    const { companyId } = this.tenants.current();
+    return this.transactions.execute(async (transaction) => {
+      await this.assertOneScreenForCollections(transaction, companyId);
+      const collection = await this.lockCollectionForRepost(transaction, companyId, collectionId);
+      if (collection.status !== "reversed") {
+        throw new ApplicationException(
+          "trader_collection_not_reversed",
+          "Only a reversed collection can be posted again. Use Reverse & adjust instead.",
+          HttpStatus.CONFLICT,
+        );
+      }
+      const replacement = (
+        await sql<{ collectionNumber: string }>`
+          select collection_number as "collectionNumber" from trader_collections
+           where company_id = ${companyId}::uuid and replaces_collection_id = ${collectionId}::uuid
+             and status = 'confirmed'
+           limit 1
+        `.execute(transaction)
+      ).rows[0];
+      if (replacement !== undefined) {
+        throw new ApplicationException(
+          "trader_collection_already_replaced",
+          `This collection was already posted again as ${replacement.collectionNumber}.`,
+          HttpStatus.CONFLICT,
+          [replacement.collectionNumber],
+        );
+      }
+      // Pressed twice, or after Reverse & adjust: the draft is already open.
+      const existing = (
+        await sql<{ id: string; replacesCollectionId: string | null }>`
+          select id, replaces_collection_id::text as "replacesCollectionId"
+            from trader_settlement_drafts
+           where company_id = ${companyId}::uuid and trader_id = ${collection.traderId}::uuid
+             and status = 'draft'
+        `.execute(transaction)
+      ).rows[0];
+      if (existing !== undefined && existing.replacesCollectionId === collectionId) {
+        return { collectionNumber: collection.collectionNumber, draftId: existing.id, skippedReceivables: [] };
+      }
+      await this.assertNoOpenDraft(transaction, companyId, collection.traderId);
+      const draft = await this.openDraftFromCollection(transaction, companyId, collection);
+      await this.history.audit(transaction, {
+        action: "trader_collection.reopened_as_draft",
+        actorId: this.identities.current().identityId,
+        after: {
+          collectionNumber: collection.collectionNumber,
+          draftId: draft.draftId,
+          skippedReceivables: draft.skipped,
+        },
+        companyId,
+        correlationId,
+        subjectId: collectionId,
+        subjectType: "trader_collection",
+      });
+      return {
+        collectionNumber: collection.collectionNumber,
+        draftId: draft.draftId,
+        skippedReceivables: draft.skipped,
+      };
+    });
+  }
+
+  /** Reverse & adjust and Post again open one-screen drafts: the switch must be on. */
+  private async assertOneScreenForCollections(
+    transaction: Transaction<DatabaseSchema>,
+    companyId: string,
+  ): Promise<void> {
+    if (!(await this.oneScreenEnabled(transaction, companyId))) {
+      throw new ApplicationException(
+        "settlement_unpost_not_enabled",
+        "Un-post is not enabled for this Company",
+        HttpStatus.FORBIDDEN,
+      );
+    }
+  }
+
+  private async lockCollectionForRepost(
+    transaction: Transaction<DatabaseSchema>,
+    companyId: string,
+    collectionId: string,
+  ): Promise<RepostCollectionRow> {
+    const row = (
+      await sql<RepostCollectionRow>`
+        select c.id, c.collection_number as "collectionNumber", c.status, c.trader_id as "traderId",
+               c.payment_method as "paymentMethod",
+               c.company_bank_account_id::text as "bankAccountId",
+               c.payment_reference as "paymentReference", c.notes
+          from trader_collections c
+         where c.id = ${collectionId}::uuid and c.company_id = ${companyId}::uuid
+         for update
+      `.execute(transaction)
+    ).rows[0];
+    if (row === undefined) {
+      throw new ApplicationException(
+        "trader_collection_not_found",
+        "Trader collection not found",
+        HttpStatus.NOT_FOUND,
+      );
+    }
+    return row;
+  }
+
+  private async assertNoOpenDraft(
+    transaction: Transaction<DatabaseSchema>,
+    companyId: string,
+    traderId: string,
+  ): Promise<void> {
+    const openDraft = (
+      await sql<{ id: string }>`
+        select id from trader_settlement_drafts
+         where company_id = ${companyId}::uuid and trader_id = ${traderId}::uuid and status = 'draft'
+      `.execute(transaction)
+    ).rows[0];
+    if (openDraft !== undefined) {
+      throw new ApplicationException(
+        "trader_settlement_draft_already_open",
+        "This Trader already has a draft. Post or delete it first.",
+        HttpStatus.CONFLICT,
+        [openDraft.id],
+      );
+    }
+  }
+
+  /**
+   * A draft holding a (reversed) collection's fees as they are now. See
+   * `repostCollection` for how each fee is taken. Refuses when no fee is left
+   * to collect: an empty draft would only be confusing.
+   */
+  private async openDraftFromCollection(
+    transaction: Transaction<DatabaseSchema>,
+    companyId: string,
+    collection: RepostCollectionRow,
+  ): Promise<{ readonly draftId: string; readonly skipped: readonly string[] }> {
+    const fees = (
+      await sql<{
+        allocated: string;
+        receivableId: string;
+        receivableNumber: string;
+        outstanding: string;
+        status: string;
+        replacementId: string | null;
+        replacementOutstanding: string | null;
+      }>`
+        select alloc.amount_allocated::text as allocated, r.id::text as "receivableId",
+               r.receivable_number as "receivableNumber", r.status,
+               (r.original_amount_due - r.amount_collected)::text as outstanding,
+               n.id::text as "replacementId",
+               (n.original_amount_due - n.amount_collected)::text as "replacementOutstanding"
+          from trader_collection_allocations alloc
+          join trader_receivables r on r.id = alloc.receivable_id and r.company_id = alloc.company_id
+          left join lateral (
+            -- The fee that replaced a cancelled one (Change fee): same Order,
+            -- same Trader, still open.
+            select n.id, n.original_amount_due, n.amount_collected
+              from trader_receivables n
+             where r.status in ('cancelled', 'reversed')
+               and r.source_type = 'service_charge'
+               and n.company_id = r.company_id and n.trader_id = r.trader_id
+               and n.source_type = r.source_type and n.source_reference = r.source_reference
+               and n.id <> r.id
+               and n.status in ('outstanding', 'partially_collected')
+               and n.original_amount_due > n.amount_collected
+             order by n.created_at desc, n.id
+             limit 1
+          ) n on true
+         where alloc.company_id = ${companyId}::uuid and alloc.collection_id = ${collection.id}::uuid
+           and alloc.amount_allocated > 0
+         order by alloc.created_at, alloc.id
+      `.execute(transaction)
+    ).rows;
+    const amounts = new Map<string, Decimal>();
+    const skipped: string[] = [];
+    for (const fee of fees) {
+      const open = ["outstanding", "partially_collected"].includes(fee.status) && new Decimal(fee.outstanding).greaterThan(0);
+      if (open) {
+        const amount = Decimal.min(new Decimal(fee.allocated), new Decimal(fee.outstanding));
+        amounts.set(fee.receivableId, (amounts.get(fee.receivableId) ?? new Decimal(0)).plus(amount));
+      } else if (fee.replacementId !== null && fee.replacementOutstanding !== null) {
+        // A changed fee is collected at its new amount, in full.
+        amounts.set(fee.replacementId, new Decimal(fee.replacementOutstanding));
+      } else {
+        skipped.push(fee.receivableNumber);
+      }
+    }
+    const receivableOffsets = [...amounts.entries()]
+      .map(([receivableId, amount]) => ({ amount: this.money(amount).toNumber(), receivableId }))
+      .filter((line) => line.amount > 0);
+    if (receivableOffsets.length === 0) {
+      throw new ApplicationException(
+        "trader_collection_nothing_to_repost",
+        `None of the fees on ${collection.collectionNumber} is still owed by the Trader.`,
+        HttpStatus.CONFLICT,
+        skipped,
+      );
+    }
+    const feeTotal = receivableOffsets.reduce((sum, line) => sum.plus(line.amount), new Decimal(0));
+    const replaces = `Replaces ${collection.collectionNumber} / بدلاً من ${collection.collectionNumber}`;
+    const notes = [replaces, collection.notes?.trim() ?? ""].filter((part) => part !== "").join(" — ").slice(0, 1000);
+    const payload: CreateTraderSettlementDto = {
+      allocations: [],
+      amount: this.money(feeTotal.negated()).toNumber(),
+      notes,
+      paymentMethod: collection.paymentMethod === "bank_transfer" ? "bank_transfer" : "cash",
+      receivableOffsets,
+      traderId: collection.traderId,
+      ...(collection.paymentMethod === "bank_transfer" && collection.bankAccountId !== null
+        ? {
+            bankAccountId: collection.bankAccountId,
+            ...(collection.paymentReference === null ? {} : { bankReference: collection.paymentReference.slice(0, 80) }),
+          }
+        : {}),
+    };
+    const identity = this.identities.current();
+    const saved = (
+      await sql<{ id: string }>`
+        insert into trader_settlement_drafts(
+          company_id, trader_id, payload, created_by_account_id, updated_by_account_id,
+          replaces_collection_id
+        ) values (
+          ${companyId}::uuid, ${collection.traderId}::uuid, ${JSON.stringify(payload)}::jsonb,
+          ${identity.identityId}::uuid, ${identity.identityId}::uuid, ${collection.id}::uuid
+        )
+        returning id
+      `.execute(transaction)
+    ).rows[0];
+    if (saved === undefined) throw new Error("Trader collection draft was not saved");
+    return { draftId: saved.id, skipped };
+  }
+
+  /**
    * Un-post a 0.00 invoice: mark it reversed (its Orders can be invoiced
    * again) and reopen the same lines as a new draft. No money was involved.
    */
@@ -4140,11 +4511,13 @@ export class TraderSettlementService {
     const reopened = (
       await sql<{ id: string }>`
         insert into trader_settlement_drafts(
-          company_id, trader_id, payload, created_by_account_id, updated_by_account_id
+          company_id, trader_id, payload, created_by_account_id, updated_by_account_id,
+          replaces_collection_id
         ) values (
           ${companyId}::uuid, ${draft.traderId}::uuid,
           ${JSON.stringify(await this.payloadWithoutCorrectedOrders(transaction, companyId, draft))}::jsonb,
-          ${identity.identityId}::uuid, ${identity.identityId}::uuid
+          ${identity.identityId}::uuid, ${identity.identityId}::uuid,
+          ${draft.collectionId}::uuid
         )
         returning id
       `.execute(transaction)

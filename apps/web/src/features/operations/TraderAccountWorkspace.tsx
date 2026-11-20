@@ -547,10 +547,17 @@ function documentDetailPath(document: TraderAccountDocument): string | null {
   }
 }
 
-/** Un-post & adjust: a Settlement reverses itself; a posted collection or 0.00 invoice through its draft. */
+/**
+ * Un-post & adjust: a Settlement reverses itself; a posted collection or 0.00
+ * invoice through its draft. A collection posted from the Trader Collections
+ * screen has no draft: its own Reverse & adjust opens one.
+ */
 function documentUnpostPath(document: TraderAccountDocument): string | null {
   if (document.reversed) return null;
   if (document.kind === "settlement") return `operations/settlements/payments/${document.id}/unpost`;
+  if (document.kind === "collection" && document.draftId === null) {
+    return `operations/settlements/collections/${document.id}/unpost`;
+  }
   return document.draftId === null ? null : `operations/settlements/drafts/${document.draftId}/unpost`;
 }
 

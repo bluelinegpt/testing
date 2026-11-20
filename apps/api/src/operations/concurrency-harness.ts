@@ -36,6 +36,7 @@ import { GeneralExpenseQueryService } from "../accounting/general-expense-query.
 import { permissiveBalanceEnforcement } from "../test/balance-enforcement-stub.js";
 import { EmployeeCollectionEarningService } from "../payroll/employee-collection-earning.service.js";
 import { OperationsHistoryWriter } from "./operations-history.writer.js";
+import { TraderReceivableService } from "./trader-receivable.service.js";
 import { TraderSettlementService } from "./trader-settlement.service.js";
 
 /**
@@ -240,13 +241,20 @@ export interface Caller {
   destroy: () => Promise<void>;
   readonly service: DriverCashReconciliationService;
   readonly traderSettlementService: TraderSettlementService;
+  /** Only with `withTraderReceivables`: Trader Collections, wired into the settlement service. */
+  readonly traderReceivableService?: TraderReceivableService;
 }
 
 export function createCaller(
   connectionString: string,
   companyId: string,
   accountId: string,
-  options: { readonly lockTimeoutMs?: number; readonly useProductionBalanceEnforcement?: boolean } = {},
+  options: {
+    readonly lockTimeoutMs?: number;
+    readonly useProductionBalanceEnforcement?: boolean;
+    /** Wire a real TraderReceivableService (and its permissions) into the settlement service. */
+    readonly withTraderReceivables?: boolean;
+  } = {},
 ): Caller {
   // The search_path already rides on the connection string; a lock timeout is
   // applied per statement so a hung wait surfaces as a failure, never a hang.
@@ -270,6 +278,9 @@ export function createCaller(
       "settlements.create",
       "settlements.reverse",
       "accounting.view",
+      ...(options.withTraderReceivables === true
+        ? ["trader_receivables.create", "trader_receivables.reverse"]
+        : []),
     ]),
     sessionId: randomUUID(),
   });
@@ -327,6 +338,20 @@ export function createCaller(
         tenants,
       )
     : undefined;
+  const traderReceivableService =
+    options.withTraderReceivables === true
+      ? new TraderReceivableService(
+          database,
+          transactions,
+          tenants as unknown as TenantContextAccessor,
+          createCalendarDateReportModeServiceStub(),
+          createBusinessDayServiceStub(),
+          identities as unknown as IdentityContextAccessor,
+          new OperationsHistoryWriter(),
+          companyProfile,
+          {} as unknown as DriverCollectionPdfService,
+        )
+      : undefined;
   const traderSettlementService = new TraderSettlementService(
     database,
     transactions,
@@ -346,11 +371,13 @@ export function createCaller(
     // balance policy; a stub that enforced would change what these scenarios
     // test, and a stub that blocked would fail them for the wrong reason.
     productionBalanceEnforcement ?? permissiveBalanceEnforcement(),
+    traderReceivableService,
   );
   return {
     database,
     destroy: () => database.destroy(),
     service,
     traderSettlementService,
+    ...(traderReceivableService === undefined ? {} : { traderReceivableService }),
   };
 }

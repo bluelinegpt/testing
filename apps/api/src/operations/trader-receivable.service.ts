@@ -387,9 +387,18 @@ export interface TraderCollectionDetail {
   readonly reversalDate: string | null;
   readonly reversalReason: string | null;
   readonly reversedBy: string | null;
+  /** The reversed collection this one was posted in place of (Reverse & adjust / Post again). */
+  readonly replaces: TraderCollectionLink | null;
+  /** Collections posted in place of this one, newest first. */
+  readonly replacedBy: readonly (TraderCollectionLink & { readonly status: "confirmed" | "reversed" })[];
   readonly status: "confirmed" | "reversed";
   readonly summary: TraderCollectionSummaryTotals;
   readonly traderName: string;
+}
+
+export interface TraderCollectionLink {
+  readonly collectionId: string;
+  readonly collectionNumber: string;
 }
 
 export interface TraderCollectionReportData {
@@ -1848,6 +1857,28 @@ export class TraderReceivableService {
     const { companyId } = this.tenants.current();
     const header = await this.collectionHeader(companyId, collectionId);
     const allocations = await this.collectionAllocations(companyId, collectionId);
+    // Reverse & adjust / Post again: the collections this one replaces and is
+    // replaced by. Scoped by Company on both sides of each join.
+    const links = (
+      await sql<{
+        collectionId: string;
+        collectionNumber: string;
+        kind: "replacedBy" | "replaces";
+        status: "confirmed" | "reversed";
+      }>`
+        select 'replaces' as kind, o.id::text as "collectionId", o.collection_number as "collectionNumber",
+               o.status, o.created_at
+          from trader_collections c
+          join trader_collections o on o.id = c.replaces_collection_id and o.company_id = c.company_id
+         where c.id = ${collectionId}::uuid and c.company_id = ${companyId}::uuid
+        union all
+        select 'replacedBy', n.id::text, n.collection_number, n.status, n.created_at
+          from trader_collections n
+         where n.company_id = ${companyId}::uuid and n.replaces_collection_id = ${collectionId}::uuid
+         order by created_at desc
+      `.execute(this.database)
+    ).rows;
+    const replaces = links.find((link) => link.kind === "replaces");
     return {
       allocations: allocations.lines,
       collectionId,
@@ -1862,6 +1893,17 @@ export class TraderReceivableService {
       reversalDate: header.reversalDate,
       reversalReason: header.reversalReason,
       reversedBy: header.reversedBy,
+      replaces:
+        replaces === undefined
+          ? null
+          : { collectionId: replaces.collectionId, collectionNumber: replaces.collectionNumber },
+      replacedBy: links
+        .filter((link) => link.kind === "replacedBy")
+        .map((link) => ({
+          collectionId: link.collectionId,
+          collectionNumber: link.collectionNumber,
+          status: link.status,
+        })),
       status: header.status,
       summary: allocations.summary,
       traderName: header.traderName,

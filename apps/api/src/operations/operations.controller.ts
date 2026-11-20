@@ -1711,6 +1711,36 @@ export class OperationsController {
     return this.traderSettlementService.unpostDraft(draftId, input.reason, this.correlationId(request));
   }
 
+  @RequireAnyPermission("settlements.reverse", "users_roles.manage")
+  @ApiOperation({ summary: "Reverse & adjust a Trader collection: reverse it and open its fees as a draft" })
+  @Post("settlements/collections/:collectionId/unpost")
+  public unpostTraderCollection(
+    @Param("collectionId", new ParseUUIDPipe()) collectionId: string,
+    @Body() input: ReverseTraderSettlementDto,
+    @Req() request: Request,
+  ): Promise<{
+    readonly draftId: string;
+    readonly reversalSettlementNumber: string;
+    readonly settlementNumber: string;
+    readonly skippedReceivables: readonly string[];
+  }> {
+    return this.traderSettlementService.unpostCollection(collectionId, input.reason, this.correlationId(request));
+  }
+
+  @RequireAnyPermission("settlements.create", "users_roles.manage")
+  @ApiOperation({ summary: "Post again: open a reversed Trader collection's fees as a draft" })
+  @Post("settlements/collections/:collectionId/repost")
+  public repostTraderCollection(
+    @Param("collectionId", new ParseUUIDPipe()) collectionId: string,
+    @Req() request: Request,
+  ): Promise<{
+    readonly collectionNumber: string;
+    readonly draftId: string;
+    readonly skippedReceivables: readonly string[];
+  }> {
+    return this.traderSettlementService.repostCollection(collectionId, this.correlationId(request));
+  }
+
   @RequireAnyPermission("settlements.create", "reports.export", "users_roles.manage")
   @ApiOperation({ summary: "Show one trader settlement with orders and payments" })
   @Get("settlements/:settlementId")

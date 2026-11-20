@@ -605,6 +605,26 @@ export function TraderSettlementsWorkspace({
   const oneScreenSetting = useOneScreenSettlementSetting(api);
   const oneScreen = oneScreenSetting === true;
 
+  // `?openDraftId=` (Trader Collection "Reverse & adjust" / "Post again"):
+  // open that saved draft once the one-screen switch has loaded. Like
+  // `openDialog`, it is an instruction, not state: removed after reading so a
+  // refresh does not reopen it. Nothing is written by opening a draft.
+  useEffect(() => {
+    if (oneScreenSetting !== true || !canManage) return;
+    const params = new URLSearchParams(window.location.search);
+    const draftId = params.get("openDraftId")?.trim() ?? "";
+    if (draftId === "") return;
+    params.delete("openDraftId");
+    const query = params.toString();
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${window.location.pathname}${query === "" ? "" : `?${query}`}${window.location.hash}`,
+    );
+    setDraftToEdit(draftId);
+    setNewSettlementOpen(true);
+  }, [canManage, oneScreenSetting]);
+
   useEffect(() => {
     const link = deepLink.link;
     if (link === null || link.dialog !== "confirm_receipt") return;

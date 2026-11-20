@@ -22,7 +22,7 @@ import { formatMoneyValue, parseMoneyInput, safeMoneyValue } from "../../utils/n
 
 import { type PdfAction, useReconciliationPdfActions } from "./reconciliation-pdf.js";
 import { useIdempotencyKey } from "./useIdempotencyKey.js";
-import { useOneScreenSettlementSetting } from "./OneScreenSettlementDialog.js";
+import { UnpostSettlementDialog, useOneScreenSettlementSetting } from "./OneScreenSettlementDialog.js";
 
 /**
  * Single-Receivable offset reversal is DISABLED (8 Oct 2026): it caused the fee
@@ -243,6 +243,11 @@ interface TraderCollectionSummaryTotals {
   readonly unappliedAmount?: string;
 }
 
+interface TraderCollectionLink {
+  readonly collectionId: string;
+  readonly collectionNumber: string;
+}
+
 interface TraderCollectionDetail {
   readonly allocations: readonly TraderCollectionAllocationDetail[];
   readonly collectionId: string;
@@ -257,6 +262,10 @@ interface TraderCollectionDetail {
   readonly reversalDate: string | null;
   readonly reversalReason: string | null;
   readonly reversedBy: string | null;
+  /** The reversed collection this one was posted in place of. Absent on an older API. */
+  readonly replaces?: TraderCollectionLink | null;
+  /** Collections posted in place of this one, newest first. */
+  readonly replacedBy?: readonly (TraderCollectionLink & { readonly status: "confirmed" | "reversed" })[];
   readonly status: "confirmed" | "reversed";
   readonly summary: TraderCollectionSummaryTotals;
   readonly traderCode?: string | null;
@@ -477,6 +486,13 @@ export function TraderReceivablesWorkspace({
   // into this form (from an older screen or bookmark) goes to the Trader
   // Settlement instead once the switch says so.
   const oneScreenSetting = useOneScreenSettlementSetting(api);
+  // Reverse & adjust / Post again open a one-screen draft: the switch must be
+  // on, and the User must be able to reverse and to make settlements.
+  const canAdjustCollections =
+    oneScreenSetting === true &&
+    canReverse &&
+    (isAdministrator ||
+      (permissions.includes("settlements.create") && permissions.includes("settlements.reverse")));
   const settlementCollectPath = (traderId?: string) =>
     `/trader-settlements?openDialog=new_settlement${
       traderId === undefined || traderId === "" ? "" : `&traderId=${encodeURIComponent(traderId)}`
@@ -1044,10 +1060,18 @@ export function TraderReceivablesWorkspace({
       {collectionDetailId === undefined ? null : (
         <CollectionDetailDialog
           api={api}
+          canAdjust={canAdjustCollections}
           canReverse={canReverse}
           canViewReport={canViewReport}
           collectionId={collectionDetailId}
           onClose={() => closeCollection()}
+          onOpenCollection={(id) => openCollection(id)}
+          onOpenDraft={(draftId) => {
+            closeCollection();
+            const target = `/trader-settlements?openDraftId=${encodeURIComponent(draftId)}`;
+            if (onNavigate === undefined) window.location.assign(target);
+            else onNavigate(target);
+          }}
           onReversed={() => {
             closeCollection();
             refreshAll();
@@ -3377,18 +3401,26 @@ function CollectMoneyDialog({
 
 function CollectionDetailDialog({
   api,
+  canAdjust,
   canReverse,
   canViewReport,
   collectionId,
   onClose,
+  onOpenCollection,
+  onOpenDraft,
   onReversed,
   reportLanguage,
 }: {
   api: ApiClient;
+  /** Reverse & adjust / Post again (one-screen Companies). */
+  canAdjust: boolean;
   canReverse: boolean;
   canViewReport: boolean;
   collectionId: string;
   onClose: () => void;
+  onOpenCollection: (collectionId: string) => void;
+  /** A draft was opened from this collection: show it on Trader Settlements. */
+  onOpenDraft: (draftId: string) => void;
   onReversed: () => void;
   reportLanguage: "ar" | "en";
 }) {
@@ -3396,6 +3428,36 @@ function CollectionDetailDialog({
   const [detail, setDetail] = useState<TraderCollectionDetail>();
   const [error, setError] = useState<string>();
   const [reverseOpen, setReverseOpen] = useState(false);
+  const [adjustOpen, setAdjustOpen] = useState(false);
+  const [reposting, setReposting] = useState(false);
+  // A draft opened with some fees left out (no longer owed): say which before going on.
+  const [openedDraft, setOpenedDraft] = useState<{ draftId: string; skipped: readonly string[] }>();
+  const draftOpened = (result: { draftId: string; skippedReceivables?: readonly string[] }) => {
+    const skipped = result.skippedReceivables ?? [];
+    if (skipped.length === 0) onOpenDraft(result.draftId);
+    else setOpenedDraft({ draftId: result.draftId, skipped });
+  };
+  const liveReplacement = detail?.replacedBy?.find((link) => link.status === "confirmed");
+  const postAgain = async () => {
+    setReposting(true);
+    setError(undefined);
+    try {
+      draftOpened(
+        await api.post<{ draftId: string; skippedReceivables: readonly string[] }>(
+          `operations/settlements/collections/${collectionId}/repost`,
+          {},
+        ),
+      );
+    } catch (reason) {
+      setError(
+        reason instanceof ApiError && reason.code === "trader_settlement_draft_already_open"
+          ? t("traderReceivables.postAgainDraftOpen")
+          : message(reason, t("traderReceivables.postAgainFailed")),
+      );
+    } finally {
+      setReposting(false);
+    }
+  };
   const pdf = useReconciliationPdfActions(api);
   const [pdfError, setPdfError] = useState<string>();
 
@@ -3535,6 +3597,40 @@ function CollectionDetailDialog({
                 <dd>{detail.reversalReason}</dd>
               </div>
             )}
+            {detail.replaces === undefined || detail.replaces === null ? null : (
+              <div className="detail-line">
+                <dt>{t("traderReceivables.replaces")}</dt>
+                <dd>
+                  <button
+                    className="link-button mono"
+                    onClick={() => onOpenCollection(detail.replaces!.collectionId)}
+                    type="button"
+                  >
+                    {detail.replaces.collectionNumber}
+                  </button>
+                </dd>
+              </div>
+            )}
+            {(detail.replacedBy ?? []).length === 0 ? null : (
+              <div className="detail-line">
+                <dt>{t("traderReceivables.replacedBy")}</dt>
+                <dd>
+                  {(detail.replacedBy ?? []).map((link, index) => (
+                    <span key={link.collectionId}>
+                      {index === 0 ? null : ", "}
+                      <button
+                        className="link-button mono"
+                        onClick={() => onOpenCollection(link.collectionId)}
+                        type="button"
+                      >
+                        {link.collectionNumber}
+                      </button>
+                      {link.status === "reversed" ? ` (${t("traderReceivables.statusReversed")})` : null}
+                    </span>
+                  ))}
+                </dd>
+              </div>
+            )}
           </dl>
 
           <div className="table-scroll-x">
@@ -3669,6 +3765,16 @@ function CollectionDetailDialog({
                 {t("traderReceivables.actionReverse")}
               </button>
             )}
+            {!canAdjust || detail.status === "reversed" ? null : (
+              <button onClick={() => setAdjustOpen(true)} type="button">
+                {t("traderSettlements.oneScreen.unpost")}
+              </button>
+            )}
+            {!canAdjust || detail.status !== "reversed" || liveReplacement !== undefined ? null : (
+              <button disabled={reposting} onClick={() => void postAgain()} type="button">
+                {reposting ? t("common.loading") : t("traderReceivables.postAgain")}
+              </button>
+            )}
             <button className="button button-secondary" onClick={onClose} type="button">
               {t("common.close")}
             </button>
@@ -3699,6 +3805,42 @@ function CollectionDetailDialog({
             onReversed();
           }}
         />
+      )}
+
+      {!adjustOpen || detail === undefined ? null : (
+        <UnpostSettlementDialog
+          api={api}
+          onClose={() => setAdjustOpen(false)}
+          onUnposted={(result) => {
+            setAdjustOpen(false);
+            draftOpened(result);
+          }}
+          path={`operations/settlements/collections/${detail.collectionId}/unpost`}
+          settlementId={detail.collectionId}
+          settlementNumber={detail.collectionNumber}
+        />
+      )}
+
+      {openedDraft === undefined ? null : (
+        <Modal
+          closeLabel={t("common.close")}
+          onRequestClose={() => onOpenDraft(openedDraft.draftId)}
+          title={t("traderReceivables.postAgainSkippedTitle")}
+          titleId="collection-draft-skipped-title"
+        >
+          <p className="form-hint">
+            {t("traderReceivables.postAgainSkipped", { receivables: openedDraft.skipped.join(", ") })}
+          </p>
+          <div className="modal-actions">
+            <button
+              className="button button-primary"
+              onClick={() => onOpenDraft(openedDraft.draftId)}
+              type="button"
+            >
+              {t("traderReceivables.openDraft")}
+            </button>
+          </div>
+        </Modal>
       )}
     </Modal>
   );
